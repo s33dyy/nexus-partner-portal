@@ -46,6 +46,10 @@ const EMPTY_FORM: CustomerForm = {
   last_touch: "Today",
 };
 
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value))];
+}
+
 export const Route = createFileRoute("/_authenticated/customers")({
   component: CustomersPage,
 });
@@ -112,6 +116,17 @@ function CustomersPage() {
     () => customers.find((customer) => customer.id === selectedId) ?? null,
     [customers, selectedId],
   );
+
+  const editOptions = useMemo(() => {
+    return {
+      companyNames: uniqueStrings(customers.map((customer) => customer.company_name)),
+      owners: uniqueStrings(customers.map((customer) => customer.account_owner)),
+      regions: uniqueStrings(customers.map((customer) => customer.region)),
+      segments: uniqueStrings(customers.map((customer) => customer.segment)),
+      mrrs: uniqueStrings(customers.map((customer) => customer.mrr)),
+      statuses: uniqueStrings(customers.map((customer) => customer.status)),
+    };
+  }, [customers]);
 
   const stats = useMemo(() => {
     const total = customers.length;
@@ -330,36 +345,78 @@ function CustomersPage() {
                 <>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="Company">
-                      <Input
+                      <Select
                         value={draft.company_name}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, company_name: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, company_name: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select company" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.companyNames.map((company) => (
+                            <SelectItem key={company} value={company}>
+                              {company}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Owner">
-                      <Input
+                      <Select
                         value={draft.account_owner}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, account_owner: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, account_owner: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select owner" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.owners.map((owner) => (
+                            <SelectItem key={owner} value={owner}>
+                              {owner}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Region">
-                      <Input
+                      <Select
                         value={draft.region}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, region: e.target.value }))
-                        }
-                      />
+                        onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select region" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.regions.map((region) => (
+                            <SelectItem key={region} value={region}>
+                              {region}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Segment">
-                      <Input
+                      <Select
                         value={draft.segment}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, segment: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, segment: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select segment" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.segments.map((segment) => (
+                            <SelectItem key={segment} value={segment}>
+                              {segment}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Health score">
                       <Input
@@ -376,10 +433,21 @@ function CustomersPage() {
                       />
                     </Field>
                     <Field label="MRR">
-                      <Input
+                      <Select
                         value={draft.mrr}
-                        onChange={(e) => setDraft((value) => ({ ...value, mrr: e.target.value }))}
-                      />
+                        onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select MRR" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.mrrs.map((mrr) => (
+                            <SelectItem key={mrr} value={mrr}>
+                              {mrr}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Renewal date">
                       <Input
@@ -401,11 +469,11 @@ function CustomersPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="expansion">Expansion</SelectItem>
-                          <SelectItem value="watchlist">Watchlist</SelectItem>
-                          <SelectItem value="champion">Champion</SelectItem>
-                          <SelectItem value="growth">Growth</SelectItem>
+                          {editOptions.statuses.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </Field>

@@ -25,13 +25,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -65,19 +58,6 @@ const FOCUS_AREAS = [
   "Hardware & Networking",
   "Vertical Solutions",
 ];
-
-const BUSINESS_TYPES = [
-  "Private Limited",
-  "LLP",
-  "Partnership",
-  "Proprietorship",
-  "Public Limited",
-  "Other",
-];
-
-const TURNOVER_BANDS = ["< ₹1 Cr", "₹1 – 10 Cr", "₹10 – 50 Cr", "₹50 – 250 Cr", "₹250 Cr+"];
-
-const EMPLOYEE_BANDS = ["1 – 10", "11 – 50", "51 – 200", "201 – 500", "500+"];
 
 const REQUIRED_DOC_TYPES = ["GST Certificate", "PAN Card", "CIN / Incorporation"] as const;
 
@@ -534,22 +514,12 @@ function OnboardingPage() {
                     />
                   </Field>
                   <Field label="Business type*">
-                    <Select
+                    <Input
                       value={form.business_type}
-                      onValueChange={(v) => setField("business_type", v)}
+                      onChange={(e) => setField("business_type", e.target.value)}
+                      placeholder="Private Limited"
                       disabled={readOnly}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BUSINESS_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </Field>
                   <Field label="Years in business*">
                     <Input
@@ -561,40 +531,20 @@ function OnboardingPage() {
                     />
                   </Field>
                   <Field label="Annual turnover*">
-                    <Select
+                    <Input
                       value={form.annual_turnover}
-                      onValueChange={(v) => setField("annual_turnover", v)}
+                      onChange={(e) => setField("annual_turnover", e.target.value)}
+                      placeholder="₹10 – 50 Cr"
                       disabled={readOnly}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select band" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TURNOVER_BANDS.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </Field>
                   <Field label="Employee count*">
-                    <Select
+                    <Input
                       value={form.employee_count}
-                      onValueChange={(v) => setField("employee_count", v)}
+                      onChange={(e) => setField("employee_count", e.target.value)}
+                      placeholder="51 – 200"
                       disabled={readOnly}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select band" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EMPLOYEE_BANDS.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </Field>
                 </div>
               )}

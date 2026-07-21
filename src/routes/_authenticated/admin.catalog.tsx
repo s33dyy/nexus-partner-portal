@@ -46,6 +46,10 @@ const EMPTY_FORM: CatalogForm = {
   benefits: "",
 };
 
+function uniqueStrings(values: Array<string | number | null | undefined>) {
+  return [...new Set(values.map((value) => String(value ?? "").trim()).filter((value) => !!value))];
+}
+
 export const Route = createFileRoute("/_authenticated/admin/catalog")({
   component: AdminCatalogPage,
 });
@@ -107,6 +111,18 @@ function AdminCatalogPage() {
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
   );
+
+  const editOptions = useMemo(() => {
+    return {
+      skus: uniqueStrings(items.map((item) => item.sku)),
+      productNames: uniqueStrings(items.map((item) => item.product_name)),
+      categories: uniqueStrings(items.map((item) => item.category)),
+      tiers: uniqueStrings(items.map((item) => item.partner_tier)),
+      prices: uniqueStrings(items.map((item) => item.list_price)),
+      margins: uniqueStrings(items.map((item) => item.margin)),
+      availability: uniqueStrings(items.map((item) => item.availability)),
+    };
+  }, [items]);
 
   const categories = useMemo(
     () => ["all", ...new Set(items.map((item) => item.category))],
@@ -324,50 +340,116 @@ function AdminCatalogPage() {
                 <>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="SKU">
-                      <Input
+                      <Select
                         value={draft.sku}
-                        onChange={(e) => setDraft((value) => ({ ...value, sku: e.target.value }))}
-                      />
+                        onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select SKU" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.skus.map((sku) => (
+                            <SelectItem key={sku} value={sku}>
+                              {sku}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Product name">
-                      <Input
+                      <Select
                         value={draft.product_name}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, product_name: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, product_name: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.productNames.map((productName) => (
+                            <SelectItem key={productName} value={productName}>
+                              {productName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Category">
-                      <Input
+                      <Select
                         value={draft.category}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, category: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, category: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.categories.map((category) => (
+                            <SelectItem key={category} value={category}>
+                              {category}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Tier">
-                      <Input
+                      <Select
                         value={draft.partner_tier}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, partner_tier: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, partner_tier: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select tier" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.tiers.map((tier) => (
+                            <SelectItem key={tier} value={tier}>
+                              {tier}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="List price">
-                      <Input
+                      <Select
                         value={draft.list_price}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, list_price: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, list_price: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select price" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.prices.map((price) => (
+                            <SelectItem key={price} value={price}>
+                              {price}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Margin">
-                      <Input
+                      <Select
                         value={draft.margin}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, margin: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, margin: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select margin" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.margins.map((margin) => (
+                            <SelectItem key={margin} value={margin}>
+                              {margin}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="Stock">
                       <Input
@@ -379,12 +461,23 @@ function AdminCatalogPage() {
                       />
                     </Field>
                     <Field label="Availability">
-                      <Input
+                      <Select
                         value={draft.availability}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, availability: e.target.value }))
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, availability: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select availability" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {editOptions.availability.map((availability) => (
+                            <SelectItem key={availability} value={availability}>
+                              {availability}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                   </div>
                   <Field label="Benefits">

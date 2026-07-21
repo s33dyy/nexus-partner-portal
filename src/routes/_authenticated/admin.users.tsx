@@ -42,6 +42,14 @@ type UserRow = Profile & {
 };
 
 const ROLE_OPTIONS = ["super_admin", "partner_admin", "partner_user"] as const;
+const PARTNER_STATUS_OPTIONS = [
+  "pending_partner_registration",
+  "submitted",
+  "under_review",
+  "need_more_info",
+  "approved",
+  "rejected",
+] as const;
 
 export const Route = createFileRoute("/_authenticated/admin/users")({
   component: AdminUsersPage,
@@ -326,7 +334,18 @@ function AdminUsersPage() {
                       </Select>
                     </Field>
                     <Field label="Partner status">
-                      <Input value={draftStatus} onChange={(e) => setDraftStatus(e.target.value)} />
+                      <Select value={draftStatus} onValueChange={setDraftStatus}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PARTNER_STATUS_OPTIONS.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status.replace(/_/g, " ")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                   </div>
                   <Button onClick={() => void saveRoles()} disabled={saving}>
