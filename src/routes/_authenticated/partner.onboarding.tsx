@@ -35,7 +35,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/partner/onboarding")({
@@ -151,29 +151,48 @@ function OnboardingPage() {
         .select("*")
         .eq("owner_user_id", user.id)
         .maybeSingle();
-      if (data) {
-        setPartnerId(data.id);
+      const partner = data as
+        | {
+            id: string;
+            company_name: string | null;
+            legal_name: string | null;
+            gst_number: string | null;
+            pan: string | null;
+            cin: string | null;
+            website: string | null;
+            business_address: string | null;
+            country: string | null;
+            state: string | null;
+            business_type: string | null;
+            years_in_business: number | null;
+            annual_turnover: string | null;
+            employee_count: string | null;
+            business_focus: string[] | null;
+          }
+        | null;
+      if (partner) {
+        setPartnerId(partner.id);
         setForm((f) => ({
           ...f,
-          company_name: data.company_name ?? f.company_name,
-          legal_name: data.legal_name ?? "",
-          gst_number: data.gst_number ?? "",
-          pan: data.pan ?? "",
-          cin: data.cin ?? "",
-          website: data.website ?? "",
-          business_address: data.business_address ?? "",
-          country: data.country ?? "India",
-          state: data.state ?? "",
-          business_type: data.business_type ?? "",
-          years_in_business: data.years_in_business ?? 0,
-          annual_turnover: data.annual_turnover ?? "",
-          employee_count: data.employee_count ?? "",
-          business_focus: data.business_focus ?? [],
+          company_name: partner.company_name ?? f.company_name,
+          legal_name: partner.legal_name ?? "",
+          gst_number: partner.gst_number ?? "",
+          pan: partner.pan ?? "",
+          cin: partner.cin ?? "",
+          website: partner.website ?? "",
+          business_address: partner.business_address ?? "",
+          country: partner.country ?? "India",
+          state: partner.state ?? "",
+          business_type: partner.business_type ?? "",
+          years_in_business: partner.years_in_business ?? 0,
+          annual_turnover: partner.annual_turnover ?? "",
+          employee_count: partner.employee_count ?? "",
+          business_focus: partner.business_focus ?? [],
         }));
         const { data: d } = await supabase
           .from("partner_documents")
           .select("id, doc_type, file_name, file_path, size_bytes")
-          .eq("partner_id", data.id)
+          .eq("partner_id", partner.id)
           .order("created_at", { ascending: false });
         setDocs((d as DocRow[]) ?? []);
       }
@@ -214,7 +233,8 @@ function OnboardingPage() {
           .select("id")
           .single();
         if (error) throw error;
-        id = data.id;
+        id = (data as { id: string } | null)?.id ?? null;
+        if (!id) throw new Error("Failed to create partner record");
         setPartnerId(id);
         // link profile.partner_id
         await supabase.from("profiles").update({ partner_id: id }).eq("id", user.id);

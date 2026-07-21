@@ -4,7 +4,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { Loader2, Sparkles, ShieldCheck, TrendingUp } from "lucide-react";
 
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/local/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -347,7 +347,7 @@ function ForgotForm() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     setLoading(false);
@@ -355,7 +355,14 @@ function ForgotForm() {
       toast.error(error.message);
       return;
     }
-    toast.success("If that account exists, a reset link is on its way.");
+    if (data?.resetLink) {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(data.resetLink).catch(() => undefined);
+      }
+      toast.success("Reset link generated and copied to clipboard.");
+    } else {
+      toast.success("If that account exists, a reset link is on its way.");
+    }
   };
 
   return (
