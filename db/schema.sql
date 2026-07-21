@@ -123,6 +123,90 @@ CREATE TABLE IF NOT EXISTS partner_review_notes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS portal_deals (
+  id UUID PRIMARY KEY,
+  account_name TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  region TEXT NOT NULL,
+  product TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  probability INTEGER NOT NULL DEFAULT 0,
+  close_date DATE NOT NULL,
+  source TEXT NOT NULL,
+  last_touch TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_customers (
+  id UUID PRIMARY KEY,
+  company_name TEXT NOT NULL,
+  account_owner TEXT NOT NULL,
+  region TEXT NOT NULL,
+  segment TEXT NOT NULL,
+  health_score INTEGER NOT NULL DEFAULT 0,
+  mrr TEXT NOT NULL,
+  renewal_date DATE NOT NULL,
+  status TEXT NOT NULL,
+  next_step TEXT NOT NULL,
+  last_touch TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_catalog_items (
+  id UUID PRIMARY KEY,
+  sku TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  partner_tier TEXT NOT NULL,
+  list_price TEXT NOT NULL,
+  margin TEXT NOT NULL,
+  stock INTEGER NOT NULL DEFAULT 0,
+  availability TEXT NOT NULL,
+  benefits TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_team_members (
+  id UUID PRIMARY KEY,
+  company_name TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role_title TEXT NOT NULL,
+  portal_role TEXT NOT NULL,
+  responsibility TEXT NOT NULL,
+  status TEXT NOT NULL,
+  last_active TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  permissions TEXT[] NOT NULL DEFAULT '{}',
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_audit_events (
+  id UUID PRIMARY KEY,
+  actor_name TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_name TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  details TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS portal_demo_metrics (
   id UUID PRIMARY KEY,
   label TEXT NOT NULL,
@@ -188,6 +272,30 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS partners_updated_at ON partners;
 CREATE TRIGGER partners_updated_at
 BEFORE UPDATE ON partners
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS portal_deals_updated_at ON portal_deals;
+CREATE TRIGGER portal_deals_updated_at
+BEFORE UPDATE ON portal_deals
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS portal_customers_updated_at ON portal_customers;
+CREATE TRIGGER portal_customers_updated_at
+BEFORE UPDATE ON portal_customers
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS portal_catalog_items_updated_at ON portal_catalog_items;
+CREATE TRIGGER portal_catalog_items_updated_at
+BEFORE UPDATE ON portal_catalog_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS portal_team_members_updated_at ON portal_team_members;
+CREATE TRIGGER portal_team_members_updated_at
+BEFORE UPDATE ON portal_team_members
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

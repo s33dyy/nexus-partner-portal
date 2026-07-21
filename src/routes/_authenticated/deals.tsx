@@ -1,0 +1,596 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Filter,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  Target,
+  TrendingUp,
+  XCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { supabase } from "@/integrations/local/client";
+import {
+  DEAL_STAGE_ORDER,
+  DEMO_DEALS,
+  nextDealStage,
+  type DealRecord,
+  type DealStage,
+} from "@/lib/portal-demo-data";
+
+type DealForm = {
+  account_name: string;
+  contact_name: string;
+  owner_name: string;
+  region: string;
+  product: string;
+  stage: DealStage;
+  status: string;
+  amount: string;
+  probability: number;
+  close_date: string;
+  source: string;
+  last_touch: string;
+  notes: string;
+};
+
+const EMPTY_FORM: DealForm = {
+  account_name: "",
+  contact_name: "",
+  owner_name: "",
+  region: "India West",
+  product: "LIVEY WC350 QHD Webcam",
+  stage: "sourced",
+  status: "draft",
+  amount: "",
+  probability: 25,
+  close_date: "",
+  source: "Partner referral",
+  last_touch: "New",
+  notes: "",
+};
+
+export const Route = createFileRoute("/_authenticated/deals")({
+  component: DealsPage,
+});
+
+function DealsPage() {
+  const [deals, setDeals] = useState<DealRecord[]>([]);
+  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<DealStage | "all">("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
+  const [note, setNote] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("portal_deals")
+        .select("*")
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      const rows = (data as DealRecord[] | null) ?? [];
+      setDeals(rows);
+      setSource(rows.length > 0 ? "database" : "empty");
+      setSelectedId((current) => current ?? rows[0]?.id ?? null);
+    } catch {
+      setDeals(DEMO_DEALS);
+      setSource("fallback");
+      setSelectedId((current) => current ?? DEMO_DEALS[0]?.id ?? null);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const selectedDeal = useMemo(
+    () => deals.find((deal) => deal.id === selectedId) ?? null,
+    [deals, selectedId],
+  );
+
+  const filteredDeals = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return deals.filter((deal) => {
+      const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
+      const matchesQuery =
+        !term ||
+        [deal.account_name, deal.contact_name, deal.owner_name, deal.product, deal.region]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      return matchesStage && matchesQuery;
+    });
+  }, [deals, query, stageFilter]);
+
+  const kpis = useMemo(() => {
+    const pipeline = deals.reduce((sum, deal) => {
+      const value = Number.parseFloat(deal.amount.replace(/[^0-9.]/g, ""));
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
+    const won = deals.filter((deal) => deal.stage === "won").length;
+    const avgProbability = deals.length
+      ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
+      : 0;
+    return [
+      {
+        label: "Pipeline",
+        value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+        hint: "Seeded opportunities",
+      },
+      { label: "Open deals", value: String(open), hint: "Across all stages" },
+      { label: "Won deals", value: String(won), hint: "Closed this cycle" },
+      { label: "Avg. probability", value: `${avgProbability}%`, hint: "Current weighted mix" },
+    ];
+  }, [deals]);
+
+  const createDeal = async () => {
+    if (
+      !draft.account_name.trim() ||
+      !draft.contact_name.trim() ||
+      !draft.amount.trim() ||
+      !draft.close_date
+    ) {
+      toast.error("Fill in the account, contact, amount, and close date");
+      return;
+    }
+    setCreating(true);
+    try {
+      const payload = {
+        ...draft,
+        id: crypto.randomUUID(),
+        is_seed: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase.from("portal_deals").insert(payload);
+      if (error) throw error;
+      toast.success("Deal created");
+      setDraft(EMPTY_FORM);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create deal");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const updateDeal = async (patch: Partial<DealRecord>) => {
+    if (!selectedDeal) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("portal_deals").update(patch).eq("id", selectedDeal.id);
+      if (error) throw error;
+      toast.success("Deal updated");
+      setNote("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update deal");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const advance = async () => {
+    if (!selectedDeal) return;
+    const stage = nextDealStage(selectedDeal.stage);
+    await updateDeal({
+      stage,
+      status: stage === "won" ? "won" : stage === "lost" ? "lost" : "in_progress",
+      last_touch: "Advanced in pipeline",
+      notes: note.trim() || selectedDeal.notes,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const closeAs = async (status: "won" | "lost") => {
+    if (!selectedDeal) return;
+    await updateDeal({
+      stage: status,
+      status,
+      probability: status === "won" ? 100 : Math.min(selectedDeal.probability, 10),
+      last_touch: status === "won" ? "Closed won" : "Closed lost",
+      notes: note.trim() || selectedDeal.notes,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+            <Target className="h-3.5 w-3.5" />
+            Workspace
+          </div>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Deals</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Register opportunities, move them through the pipeline, and keep every deal tied to a
+            real next step.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">
+            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+          </Badge>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setRefreshing(true);
+              void load();
+            }}
+            disabled={loading || refreshing}
+          >
+            {loading || refreshing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {kpis.map((kpi) => (
+          <Card key={kpi.label}>
+            <CardContent className="space-y-1 p-5">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                {kpi.label}
+              </div>
+              <div className="text-2xl font-semibold tracking-tight">{kpi.value}</div>
+              <div className="text-sm text-muted-foreground">{kpi.hint}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.45fr_0.9fr]">
+        <Card className="h-fit">
+          <CardHeader className="space-y-4 border-b pb-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-base">Pipeline queue</CardTitle>
+                <CardDescription>
+                  Search seeded deals or create a fresh one for testing.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-full max-w-xs">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search deals"
+                    className="pl-8"
+                  />
+                </div>
+                <Select
+                  value={stageFilter}
+                  onValueChange={(value) => setStageFilter(value as DealStage | "all")}
+                >
+                  <SelectTrigger className="w-44">
+                    <Filter className="mr-2 h-4 w-4" />
+                    <SelectValue placeholder="All stages" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All stages</SelectItem>
+                    {DEAL_STAGE_ORDER.map((stage) => (
+                      <SelectItem key={stage} value={stage}>
+                        {stage}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading deals...
+              </div>
+            ) : filteredDeals.length === 0 ? (
+              <div className="space-y-3 p-8 text-sm text-muted-foreground">
+                <div className="font-medium text-foreground">No deals match this view.</div>
+                <div>Try a different filter, or create a new deal using the form below.</div>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {filteredDeals.map((deal) => (
+                  <button
+                    key={deal.id}
+                    onClick={() => {
+                      setSelectedId(deal.id);
+                      setNote(deal.notes);
+                    }}
+                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
+                      selectedDeal?.id === deal.id ? "bg-muted/40" : ""
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="truncate font-medium">{deal.account_name}</div>
+                        <Badge variant="outline">{deal.stage}</Badge>
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {deal.contact_name} · {deal.owner_name} · {deal.region}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium">{deal.amount}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {deal.probability}% · closes {deal.close_date}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="text-base">Create deal</CardTitle>
+              <CardDescription>Add a new seeded-style opportunity to the portal.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="account_name">Account</Label>
+                  <Input
+                    id="account_name"
+                    value={draft.account_name}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, account_name: e.target.value }))
+                    }
+                    placeholder="ACME Infra"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contact_name">Contact</Label>
+                  <Input
+                    id="contact_name"
+                    value={draft.contact_name}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, contact_name: e.target.value }))
+                    }
+                    placeholder="Raman Sethi"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="owner_name">Owner</Label>
+                  <Input
+                    id="owner_name"
+                    value={draft.owner_name}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, owner_name: e.target.value }))
+                    }
+                    placeholder="Amit Verma"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="region">Region</Label>
+                  <Input
+                    id="region"
+                    value={draft.region}
+                    onChange={(e) => setDraft((value) => ({ ...value, region: e.target.value }))}
+                    placeholder="India West"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="product">Product</Label>
+                  <Input
+                    id="product"
+                    value={draft.product}
+                    onChange={(e) => setDraft((value) => ({ ...value, product: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount</Label>
+                  <Input
+                    id="amount"
+                    value={draft.amount}
+                    onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
+                    placeholder="$9,200"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="stage">Stage</Label>
+                  <Select
+                    value={draft.stage}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, stage: value as DealStage }))
+                    }
+                  >
+                    <SelectTrigger id="stage">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEAL_STAGE_ORDER.map((stage) => (
+                        <SelectItem key={stage} value={stage}>
+                          {stage}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="status">Status</Label>
+                  <Input
+                    id="status"
+                    value={draft.status}
+                    onChange={(e) => setDraft((value) => ({ ...value, status: e.target.value }))}
+                    placeholder="submitted"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="probability">Probability</Label>
+                  <Input
+                    id="probability"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={draft.probability}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, probability: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="close_date">Close date</Label>
+                  <Input
+                    id="close_date"
+                    type="date"
+                    value={draft.close_date}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, close_date: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={draft.notes}
+                  onChange={(e) => setDraft((value) => ({ ...value, notes: e.target.value }))}
+                  placeholder="Why this deal matters..."
+                />
+              </div>
+              <Button onClick={() => void createDeal()} disabled={creating}>
+                {creating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 h-4 w-4" />
+                )}
+                Create deal
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="text-base">Selected deal</CardTitle>
+              <CardDescription>
+                {selectedDeal
+                  ? `Focused on ${selectedDeal.account_name}`
+                  : "Choose a deal to inspect and advance it."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {selectedDeal ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge>{selectedDeal.stage}</Badge>
+                    <Badge variant="outline">{selectedDeal.status}</Badge>
+                    <Badge variant="secondary">{selectedDeal.amount}</Badge>
+                  </div>
+                  <div className="grid gap-3 text-sm md:grid-cols-2">
+                    <Meta label="Contact" value={selectedDeal.contact_name} />
+                    <Meta label="Owner" value={selectedDeal.owner_name} />
+                    <Meta label="Region" value={selectedDeal.region} />
+                    <Meta label="Close date" value={selectedDeal.close_date} />
+                    <Meta label="Source" value={selectedDeal.source} />
+                    <Meta label="Probability" value={`${selectedDeal.probability}%`} />
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label htmlFor="deal_note">Quick note</Label>
+                    <Textarea
+                      id="deal_note"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Capture the latest status"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => void advance()} disabled={saving}>
+                      {saving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowRight className="mr-2 h-4 w-4" />
+                      )}
+                      Advance stage
+                    </Button>
+                    <Button variant="outline" onClick={() => void closeAs("won")} disabled={saving}>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Mark won
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => void closeAs("lost")}
+                      disabled={saving}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Mark lost
+                    </Button>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                    Viewing item {selectedIndex + 1} of {filteredDeals.length}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  No deal selected yet. Choose a row from the table to inspect the opportunity.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-medium">{value}</div>
+    </div>
+  );
+}

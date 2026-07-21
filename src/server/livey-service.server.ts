@@ -132,6 +132,85 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
   ],
+  portal_deals: [
+    "id",
+    "account_name",
+    "contact_name",
+    "owner_name",
+    "region",
+    "product",
+    "stage",
+    "status",
+    "amount",
+    "probability",
+    "close_date",
+    "source",
+    "last_touch",
+    "notes",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  portal_customers: [
+    "id",
+    "company_name",
+    "account_owner",
+    "region",
+    "segment",
+    "health_score",
+    "mrr",
+    "renewal_date",
+    "status",
+    "next_step",
+    "last_touch",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  portal_catalog_items: [
+    "id",
+    "sku",
+    "product_name",
+    "category",
+    "partner_tier",
+    "list_price",
+    "margin",
+    "stock",
+    "availability",
+    "benefits",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  portal_team_members: [
+    "id",
+    "company_name",
+    "full_name",
+    "email",
+    "role_title",
+    "portal_role",
+    "responsibility",
+    "status",
+    "last_active",
+    "phone",
+    "permissions",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  portal_audit_events: [
+    "id",
+    "actor_name",
+    "actor_role",
+    "action",
+    "target_type",
+    "target_name",
+    "outcome",
+    "details",
+    "severity",
+    "is_seed",
+    "created_at",
+  ],
   portal_demo_metrics: [
     "id",
     "label",
@@ -280,9 +359,9 @@ export async function queryTable(query: TableQuery) {
     return {
       data:
         query.single === "single"
-          ? data[0] ?? null
+          ? (data[0] ?? null)
           : query.single === "maybeSingle"
-            ? data[0] ?? null
+            ? (data[0] ?? null)
             : data,
       error: null,
     };
@@ -304,7 +383,9 @@ export async function queryTable(query: TableQuery) {
       const rowParams = rowColumns.map((column) => row[column]);
       const sql = `INSERT INTO ${quoteIdent(query.table)} (${rowColumns
         .map(quoteIdent)
-        .join(", ")}) VALUES (${rowColumns.map((_, index) => `$${index + 1}`).join(", ")}) RETURNING *`;
+        .join(
+          ", ",
+        )}) VALUES (${rowColumns.map((_, index) => `$${index + 1}`).join(", ")}) RETURNING *`;
       const result = await pool.query(sql, rowParams);
       inserted.push(result.rows[0]);
     }
@@ -312,9 +393,9 @@ export async function queryTable(query: TableQuery) {
     return {
       data:
         query.single === "single"
-          ? inserted[0] ?? null
+          ? (inserted[0] ?? null)
           : query.single === "maybeSingle"
-            ? inserted[0] ?? null
+            ? (inserted[0] ?? null)
             : inserted,
       error: null,
     };
@@ -341,9 +422,9 @@ export async function queryTable(query: TableQuery) {
     return {
       data:
         query.single === "single"
-          ? result.rows[0] ?? null
+          ? (result.rows[0] ?? null)
           : query.single === "maybeSingle"
-            ? result.rows[0] ?? null
+            ? (result.rows[0] ?? null)
             : result.rows,
       error: null,
     };
@@ -357,9 +438,9 @@ export async function queryTable(query: TableQuery) {
     return {
       data:
         query.single === "single"
-          ? result.rows[0] ?? null
+          ? (result.rows[0] ?? null)
           : query.single === "maybeSingle"
-            ? result.rows[0] ?? null
+            ? (result.rows[0] ?? null)
             : result.rows,
       error: null,
     };
@@ -478,10 +559,11 @@ export async function signInWithPassword(email: string, password: string) {
 
   const token = createToken();
   const expiresAt = sessionExpiresAt();
-  await pool.query(
-    `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-    [profile.id, hashSha256(token), expiresAt],
-  );
+  await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
+    profile.id,
+    hashSha256(token),
+    expiresAt,
+  ]);
   setCookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -547,9 +629,10 @@ export async function updatePasswordFromSession(password: string) {
 }
 
 export async function requestPasswordReset(email: string) {
-  const result = await pool.query(`SELECT id, email, full_name FROM profiles WHERE lower(email) = lower($1) LIMIT 1`, [
-    email,
-  ]);
+  const result = await pool.query(
+    `SELECT id, email, full_name FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
+    [email],
+  );
   const profile = result.rows[0] as { id: string; email: string; full_name: string } | undefined;
   if (!profile) {
     return { resetLink: null };
@@ -557,11 +640,10 @@ export async function requestPasswordReset(email: string) {
 
   const token = createToken();
   const expiresAt = resetExpiresAt();
-  await pool.query(`INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
-    profile.id,
-    hashSha256(token),
-    expiresAt,
-  ]);
+  await pool.query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+    [profile.id, hashSha256(token), expiresAt],
+  );
 
   const origin = getRequestUrl().origin;
   return {
@@ -601,15 +683,21 @@ export async function completePasswordReset(token: string, password: string) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE profiles SET password_hash = $1 WHERE id = $2`, [passwordHash, row.user_id]);
-  await pool.query(`UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = $1`, [tokenHash]);
+  await pool.query(`UPDATE profiles SET password_hash = $1 WHERE id = $2`, [
+    passwordHash,
+    row.user_id,
+  ]);
+  await pool.query(`UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = $1`, [
+    tokenHash,
+  ]);
 
   const sessionToken = createToken();
   const expiresAt = sessionExpiresAt();
-  await pool.query(
-    `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-    [row.user_id, hashSha256(sessionToken), expiresAt],
-  );
+  await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
+    row.user_id,
+    hashSha256(sessionToken),
+    expiresAt,
+  ]);
   setCookie(SESSION_COOKIE, sessionToken, {
     httpOnly: true,
     sameSite: "lax",
@@ -702,6 +790,11 @@ export async function clearSeedData() {
   await pool.query(`DELETE FROM partners WHERE is_seed = true`);
   await pool.query(`DELETE FROM user_roles WHERE is_seed = true`);
   await pool.query(`DELETE FROM profiles WHERE is_seed = true`);
+  await pool.query(`DELETE FROM portal_deals WHERE is_seed = true`);
+  await pool.query(`DELETE FROM portal_customers WHERE is_seed = true`);
+  await pool.query(`DELETE FROM portal_catalog_items WHERE is_seed = true`);
+  await pool.query(`DELETE FROM portal_team_members WHERE is_seed = true`);
+  await pool.query(`DELETE FROM portal_audit_events WHERE is_seed = true`);
   await pool.query(`DELETE FROM portal_demo_metrics WHERE is_seed = true`);
   await pool.query(`DELETE FROM portal_demo_feed_items WHERE is_seed = true`);
   await pool.query(`DELETE FROM portal_demo_partner_spotlights WHERE is_seed = true`);

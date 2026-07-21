@@ -11,10 +11,12 @@ node_modules
 dist
 dist-ssr
 .output
+.local-postgres/
 .vinxi
 .tanstack/**
 .nitro
 *.local
+docs/superpowers/plans/
 
 # Wrangler / Cloudflare
 .wrangler/

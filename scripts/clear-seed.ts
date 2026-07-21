@@ -10,6 +10,11 @@ export async function clearSeedData() {
     await pool.query("DELETE FROM partners WHERE is_seed = true");
     await pool.query("DELETE FROM user_roles WHERE is_seed = true");
     await pool.query("DELETE FROM profiles WHERE is_seed = true");
+    await pool.query("DELETE FROM portal_deals WHERE is_seed = true");
+    await pool.query("DELETE FROM portal_customers WHERE is_seed = true");
+    await pool.query("DELETE FROM portal_catalog_items WHERE is_seed = true");
+    await pool.query("DELETE FROM portal_team_members WHERE is_seed = true");
+    await pool.query("DELETE FROM portal_audit_events WHERE is_seed = true");
     await pool.query("DELETE FROM portal_demo_metrics WHERE is_seed = true");
     await pool.query("DELETE FROM portal_demo_feed_items WHERE is_seed = true");
     await pool.query("DELETE FROM portal_demo_partner_spotlights WHERE is_seed = true");
