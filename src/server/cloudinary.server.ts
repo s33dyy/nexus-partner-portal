@@ -28,6 +28,14 @@ function getConfig(): CloudinaryConfig {
   return { cloudName, apiKey, apiSecret };
 }
 
+export function hasCloudinaryConfig(): boolean {
+  return Boolean(
+    process.env.CLOUDINARY_CLOUD_NAME &&
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET,
+  );
+}
+
 function signParams(
   params: Record<string, string | number | boolean | undefined>,
   apiSecret: string,
@@ -145,6 +153,11 @@ export function buildCloudinaryMediaUrl(input: {
   resourceType: CloudinaryResourceType;
   format?: string | null;
 }) {
+  if (!hasCloudinaryConfig()) {
+    return input.format
+      ? `data:${input.resourceType}/${input.format}`
+      : "data:application/octet-stream";
+  }
   const { cloudName } = getConfig();
   const extension = input.format ? `.${input.format}` : "";
   return `https://res.cloudinary.com/${cloudName}/${input.resourceType}/upload/${input.publicId}${extension}`;

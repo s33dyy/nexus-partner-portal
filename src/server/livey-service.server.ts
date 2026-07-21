@@ -8,6 +8,7 @@ import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/rea
 import {
   buildCloudinaryMediaUrl,
   deleteFromCloudinary,
+  hasCloudinaryConfig,
   uploadToCloudinary,
 } from "@/server/cloudinary.server";
 
@@ -278,11 +279,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function buildWhereClause(
-  filters: QueryFilter[],
-  columns: string[],
-  parameterOffset = 0,
-) {
+function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOffset = 0) {
   const whereClauses: string[] = [];
   const whereParams: unknown[] = [];
 
@@ -692,7 +689,8 @@ export async function createWorkspaceUser(input: {
       input.full_name,
       input.phone || null,
       input.company_name,
-      input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+      input.partner_status ??
+        (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
     ],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [
@@ -707,7 +705,9 @@ export async function createWorkspaceUser(input: {
     phone: input.phone || null,
     company_name: input.company_name,
     role: input.role,
-    partner_status: input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+    partner_status:
+      input.partner_status ??
+      (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
   };
 }
 
@@ -836,6 +836,36 @@ export async function uploadDocumentBlob(input: {
   isSeed?: boolean;
 }) {
   const resourceType = input.mimeType.startsWith("image/") ? "image" : "raw";
+
+  if (!hasCloudinaryConfig()) {
+    const fileBuffer = Buffer.from(await input.file.arrayBuffer());
+    await pool.query(
+      `INSERT INTO document_blobs (file_path, bucket, file_name, mime_type, size_bytes, file_data, is_seed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (file_path) DO UPDATE SET
+         bucket = EXCLUDED.bucket,
+         file_name = EXCLUDED.file_name,
+         mime_type = EXCLUDED.mime_type,
+         size_bytes = EXCLUDED.size_bytes,
+         file_data = EXCLUDED.file_data,
+         is_seed = EXCLUDED.is_seed`,
+      [
+        input.filePath,
+        input.bucket,
+        input.fileName,
+        input.mimeType,
+        fileBuffer.byteLength,
+        fileBuffer,
+        input.isSeed ?? false,
+      ],
+    );
+    return {
+      path: input.filePath,
+      signedUrl: `data:${input.mimeType};base64,${fileBuffer.toString("base64")}`,
+      publicId: input.filePath,
+    };
+  }
+
   const upload = await uploadToCloudinary({
     file: input.file,
     publicId: input.filePath,
@@ -944,7 +974,9 @@ export async function removeDocumentBlobs(paths: string[]) {
   await Promise.all(
     blobRows.rows.map(async (row) => {
       try {
-        const parsed = JSON.parse(Buffer.from(row.file_data ?? Buffer.from([])).toString("utf8")) as
+        const parsed = JSON.parse(
+          Buffer.from(row.file_data ?? Buffer.from([])).toString("utf8"),
+        ) as
           | {
               publicId?: string;
               resourceType?: "image" | "raw";

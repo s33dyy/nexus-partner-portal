@@ -322,6 +322,7 @@ function OnboardingPage() {
         .from("partner-documents")
         .upload(path, file, { upsert: false, contentType: file.type });
       if (upErr) throw upErr;
+      const storedPath = upResult?.path ?? path;
       try {
         const { data: row, error: insErr } = await supabase
           .from("partner_documents")
@@ -329,7 +330,7 @@ function OnboardingPage() {
             partner_id: id,
             uploaded_by: user.id,
             doc_type: docType,
-            file_path: path,
+            file_path: storedPath,
             file_name: file.name,
             mime_type: file.type,
             size_bytes: file.size,
@@ -342,9 +343,7 @@ function OnboardingPage() {
         }
         setDocs((d) => [row, ...d.filter(isDocRow)]);
       } catch (insertError) {
-        if (upResult?.path) {
-          await supabase.storage.from("partner-documents").remove([upResult.path]);
-        }
+        await supabase.storage.from("partner-documents").remove([storedPath]);
         throw insertError;
       }
       toast.success(`${docType} uploaded`);
