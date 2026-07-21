@@ -19,7 +19,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_CATALOG_ITEMS, type CatalogItemRecord } from "@/lib/portal-demo-data";
+import { type CatalogItemRecord } from "@/lib/portal-demo-data";
 import { useAuth } from "@/hooks/use-auth";
 
 type CatalogForm = {
@@ -59,7 +59,7 @@ function AdminCatalogPage() {
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -80,9 +80,9 @@ function AdminCatalogPage() {
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
-      setItems(DEMO_CATALOG_ITEMS);
-      setSource("fallback");
-      setSelectedId((current) => current ?? DEMO_CATALOG_ITEMS[0]?.id ?? null);
+      setItems([]);
+      setSource("empty");
+      setSelectedId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -218,7 +218,7 @@ function AdminCatalogPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -258,7 +258,7 @@ function AdminCatalogPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <CardTitle className="text-base">Catalog items</CardTitle>
-                <CardDescription>Search, filter, and edit the seeded product set.</CardDescription>
+                <CardDescription>Search, filter, and edit the live product set.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative w-full max-w-xs">

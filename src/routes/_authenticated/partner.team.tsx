@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_TEAM_MEMBERS, type TeamMemberRecord } from "@/lib/portal-demo-data";
+import { type TeamMemberRecord } from "@/lib/portal-demo-data";
 import { useAuth } from "@/hooks/use-auth";
 
 type TeamForm = {
@@ -51,7 +51,7 @@ function PartnerTeamPage() {
   const [members, setMembers] = useState<TeamMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<TeamForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
@@ -71,8 +71,8 @@ function PartnerTeamPage() {
       setMembers(rows);
       setSource(rows.length > 0 ? "database" : "empty");
     } catch {
-      setMembers(DEMO_TEAM_MEMBERS.filter((member) => member.company_name === companyName));
-      setSource("fallback");
+      setMembers([]);
+      setSource("empty");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -191,7 +191,7 @@ function PartnerTeamPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -232,7 +232,7 @@ function PartnerTeamPage() {
               <div>
                 <CardTitle className="text-base">Team roster</CardTitle>
                 <CardDescription>
-                  Search the current seeded roster or remove old test accounts.
+                  Search the current roster or remove old test accounts.
                 </CardDescription>
               </div>
               <div className="relative w-full max-w-xs">

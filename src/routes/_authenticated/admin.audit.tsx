@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_AUDIT_EVENTS, type AuditEventRecord } from "@/lib/portal-demo-data";
+import { type AuditEventRecord } from "@/lib/portal-demo-data";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/audit")({
@@ -28,7 +28,7 @@ function AdminAuditPage() {
   const [events, setEvents] = useState<AuditEventRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
 
@@ -44,8 +44,8 @@ function AdminAuditPage() {
       setEvents(rows);
       setSource(rows.length > 0 ? "database" : "empty");
     } catch {
-      setEvents(DEMO_AUDIT_EVENTS);
-      setSource("fallback");
+      setEvents([]);
+      setSource("empty");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -132,7 +132,7 @@ function AdminAuditPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -168,7 +168,7 @@ function AdminAuditPage() {
             <div>
               <CardTitle className="text-base">Event stream</CardTitle>
               <CardDescription>
-                Filter the seeded history and inspect the latest actions.
+                Filter the live history and inspect the latest actions.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">

@@ -32,7 +32,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import {
   DEAL_STAGE_ORDER,
-  DEMO_DEALS,
   nextDealStage,
   nextDealStatus,
   type DealRecord,
@@ -77,7 +76,7 @@ export const Route = createFileRoute("/_authenticated/deals")({
 
 function DealsPage() {
   const [deals, setDeals] = useState<DealRecord[]>([]);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -101,9 +100,9 @@ function DealsPage() {
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
-      setDeals(DEMO_DEALS);
-      setSource("fallback");
-      setSelectedId((current) => current ?? DEMO_DEALS[0]?.id ?? null);
+      setDeals([]);
+      setSource("empty");
+      setSelectedId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -147,7 +146,7 @@ function DealsPage() {
       {
         label: "Pipeline",
         value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
-        hint: "Seeded opportunities",
+        hint: "Current opportunity rows",
       },
       { label: "Open deals", value: String(open), hint: "Across all stages" },
       { label: "Won deals", value: String(won), hint: "Closed this cycle" },
@@ -244,7 +243,7 @@ function DealsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"

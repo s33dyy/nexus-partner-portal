@@ -19,7 +19,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { DEAL_STAGE_ORDER, DEMO_DEALS, type DealRecord } from "@/lib/portal-demo-data";
+import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-demo-data";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
@@ -31,7 +31,7 @@ function AdminDealsPage() {
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -51,9 +51,9 @@ function AdminDealsPage() {
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
-      setDeals(DEMO_DEALS);
-      setSource("fallback");
-      setSelectedId((current) => current ?? DEMO_DEALS[0]?.id ?? null);
+      setDeals([]);
+      setSource("empty");
+      setSelectedId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -143,7 +143,7 @@ function AdminDealsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"

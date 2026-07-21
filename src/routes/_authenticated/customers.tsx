@@ -18,7 +18,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_CUSTOMERS, type CustomerRecord } from "@/lib/portal-demo-data";
+import { type CustomerRecord } from "@/lib/portal-demo-data";
 
 type CustomerForm = {
   company_name: string;
@@ -58,7 +58,7 @@ function CustomersPage() {
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -79,9 +79,9 @@ function CustomersPage() {
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
-      setCustomers(DEMO_CUSTOMERS);
-      setSource("fallback");
-      setSelectedId((current) => current ?? DEMO_CUSTOMERS[0]?.id ?? null);
+      setCustomers([]);
+      setSource("empty");
+      setSelectedId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -225,7 +225,7 @@ function CustomersPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -246,7 +246,7 @@ function CustomersPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Accounts" value={String(stats.total)} hint="Seeded customers" />
+        <Metric label="Accounts" value={String(stats.total)} hint="Current account rows" />
         <Metric label="Active" value={String(stats.active)} hint="Live accounts" />
         <Metric label="Avg. health" value={`${stats.avg}%`} hint="Account health score" />
       </div>
@@ -258,7 +258,7 @@ function CustomersPage() {
               <div>
                 <CardTitle className="text-base">Customer directory</CardTitle>
                 <CardDescription>
-                  Search, filter, and jump straight into an account record.
+                  Search, filter, and jump straight into a live account record.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -516,7 +516,7 @@ function CustomersPage() {
             <CardHeader className="border-b">
               <CardTitle className="text-base">Add customer</CardTitle>
               <CardDescription>
-                Insert a new seeded-style account into the customer list.
+                Insert a new account into the customer list.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

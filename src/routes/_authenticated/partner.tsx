@@ -18,8 +18,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_FEED_ITEMS, DEMO_METRICS, DEMO_PARTNER_SPOTLIGHTS } from "@/lib/demo-content";
-import type { DemoFeedItem, DemoMetric, DemoPartnerSpotlight } from "@/lib/demo-content";
 import { useAuth } from "@/hooks/use-auth";
 
 type Profile = {
@@ -76,12 +74,25 @@ function PartnerPage() {
   const [partner, setPartner] = useState<Partner | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [metrics, setMetrics] = useState<DemoMetric[]>([]);
-  const [feedItems, setFeedItems] = useState<DemoFeedItem[]>([]);
-  const [spotlights, setSpotlights] = useState<DemoPartnerSpotlight[]>([]);
+  const [metrics, setMetrics] = useState<{ id: string; label: string; value: string; hint: string }[]>([]);
+  const [feedItems, setFeedItems] = useState<
+    { id: string; title: string; body: string; time_label: string; tone: string }[]
+  >([]);
+  const [spotlights, setSpotlights] = useState<
+    {
+      id: string;
+      company_name: string;
+      contact_name: string;
+      region: string;
+      tier: string;
+      pipeline_value: string;
+      last_activity: string;
+      status: string;
+    }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [updating, setUpdating] = useState(false);
 
   const load = useCallback(async () => {
@@ -130,23 +141,44 @@ function PartnerPage() {
       const partnerRow = (partnerRes.data as Partner | null) ?? null;
       const docRows = (docsRes.data as DocRow[] | null) ?? [];
       const noteRows = (notesRes.data as NoteRow[] | null) ?? [];
-      const metricRows = (metricsRes.data as DemoMetric[] | null) ?? [];
-      const feedRows = (feedRes.data as DemoFeedItem[] | null) ?? [];
-      const spotlightRows = (spotlightRes.data as DemoPartnerSpotlight[] | null) ?? [];
+      const metricRows = (metricsRes.data as { id: string; label: string; value: string; hint: string }[] | null) ?? [];
+      const feedRows =
+        (feedRes.data as { id: string; title: string; body: string; time_label: string; tone: string }[] | null) ?? [];
+      const spotlightRows =
+        (spotlightRes.data as {
+          id: string;
+          company_name: string;
+          contact_name: string;
+          region: string;
+          tier: string;
+          pipeline_value: string;
+          last_activity: string;
+          status: string;
+        }[] | null) ?? [];
 
       setProfile(profileRow);
       setPartner(partnerRow);
       setDocs(docRows);
       setNotes(noteRows);
-      setMetrics(metricRows.length > 0 ? metricRows : DEMO_METRICS);
-      setFeedItems(feedRows.length > 0 ? feedRows : DEMO_FEED_ITEMS);
-      setSpotlights(spotlightRows.length > 0 ? spotlightRows : DEMO_PARTNER_SPOTLIGHTS);
-      setSource(profileRow || partnerRow || docRows.length > 0 ? "database" : "empty");
+      setMetrics(metricRows);
+      setFeedItems(feedRows);
+      setSpotlights(spotlightRows);
+      setSource(
+        profileRow ||
+          partnerRow ||
+          docRows.length > 0 ||
+          noteRows.length > 0 ||
+          metricRows.length > 0 ||
+          feedRows.length > 0 ||
+          spotlightRows.length > 0
+          ? "database"
+          : "empty",
+      );
     } catch {
-      setMetrics(DEMO_METRICS);
-      setFeedItems(DEMO_FEED_ITEMS);
-      setSpotlights(DEMO_PARTNER_SPOTLIGHTS);
-      setSource("fallback");
+      setMetrics([]);
+      setFeedItems([]);
+      setSpotlights([]);
+      setSource("empty");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -210,7 +242,7 @@ function PartnerPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -237,14 +269,28 @@ function PartnerPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map((metric) => (
-          <MetricCard
-            key={metric.id}
-            label={metric.label}
-            value={metric.value}
-            hint={metric.hint}
-          />
-        ))}
+        {metrics.length > 0 ? (
+          metrics.map((metric) => (
+            <MetricCard
+              key={metric.id}
+              label={metric.label}
+              value={metric.value}
+              hint={metric.hint}
+            />
+          ))
+        ) : (
+          <Card className="sm:col-span-2 xl:col-span-4">
+            <CardContent className="flex items-center justify-between gap-4 p-5">
+              <div>
+                <div className="text-sm font-medium">No partner metrics yet</div>
+                <div className="text-xs text-muted-foreground">
+                  Complete onboarding or add live partner rows in Postgres.
+                </div>
+              </div>
+              <Badge variant="outline">Empty</Badge>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -377,45 +423,57 @@ function PartnerPage() {
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">Activity feed</CardTitle>
-            <CardDescription>Seeded product updates and partner activity.</CardDescription>
+            <CardDescription>Live product updates and partner activity.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
-            {feedItems.map((item) => (
-              <div key={item.id} className="rounded-lg border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">{item.title}</div>
-                  <Badge variant="outline">{item.time_label}</Badge>
+            {feedItems.length > 0 ? (
+              feedItems.map((item) => (
+                <div key={item.id} className="rounded-lg border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium">{item.title}</div>
+                    <Badge variant="outline">{item.time_label}</Badge>
+                  </div>
+                  <div className="mt-2 text-sm text-muted-foreground">{item.body}</div>
                 </div>
-                <div className="mt-2 text-sm text-muted-foreground">{item.body}</div>
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                No activity feed items yet.
               </div>
-            ))}
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">Partner spotlight</CardTitle>
-            <CardDescription>A few seeded accounts and their pipeline pulse.</CardDescription>
+            <CardDescription>A few live accounts and their pipeline pulse.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
-            {spotlights.map((spotlight) => (
-              <div key={spotlight.id} className="rounded-lg border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-medium">{spotlight.company_name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {spotlight.contact_name} · {spotlight.region}
+            {spotlights.length > 0 ? (
+              spotlights.map((spotlight) => (
+                <div key={spotlight.id} className="rounded-lg border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{spotlight.company_name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {spotlight.contact_name} · {spotlight.region}
+                      </div>
                     </div>
+                    <Badge>{spotlight.status}</Badge>
                   </div>
-                  <Badge>{spotlight.status}</Badge>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+                    <div>{spotlight.tier}</div>
+                    <div>{spotlight.pipeline_value}</div>
+                    <div>{spotlight.last_activity}</div>
+                  </div>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-muted-foreground">
-                  <div>{spotlight.tier}</div>
-                  <div>{spotlight.pipeline_value}</div>
-                  <div>{spotlight.last_activity}</div>
-                </div>
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                No partner spotlights yet.
               </div>
-            ))}
+            )}
           </CardContent>
         </Card>
       </div>

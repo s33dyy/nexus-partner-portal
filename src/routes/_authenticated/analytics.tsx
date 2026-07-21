@@ -6,9 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/local/client";
 import {
-  DEMO_CATALOG_ITEMS,
-  DEMO_CUSTOMERS,
-  DEMO_DEALS,
   type CatalogItemRecord,
   type CustomerRecord,
   type DealRecord,
@@ -24,7 +21,7 @@ function AnalyticsPage() {
   const [catalog, setCatalog] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
 
   const load = async () => {
     setLoading(true);
@@ -47,10 +44,10 @@ function AnalyticsPage() {
         dealRows.length + customerRows.length + catalogRows.length > 0 ? "database" : "empty",
       );
     } catch {
-      setDeals(DEMO_DEALS);
-      setCustomers(DEMO_CUSTOMERS);
-      setCatalog(DEMO_CATALOG_ITEMS);
-      setSource("fallback");
+      setDeals([]);
+      setCustomers([]);
+      setCatalog([]);
+      setSource("empty");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -130,7 +127,7 @@ function AnalyticsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <button
             className="inline-flex items-center rounded-md border px-3 py-2 text-sm shadow-sm transition hover:bg-muted"
@@ -154,11 +151,11 @@ function AnalyticsPage() {
         <Metric
           label="Pipeline value"
           value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          hint="Seeded opportunities"
+          hint="Current deal rows"
         />
         <Metric label="Won deals" value={String(totals.won)} hint="Closed opportunities" />
         <Metric label="Open deals" value={String(totals.open)} hint="Still moving" />
-        <Metric label="Avg. health" value={`${totals.avgHealth}%`} hint="Across seeded customers" />
+        <Metric label="Avg. health" value={`${totals.avgHealth}%`} hint="Across live customers" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -172,6 +169,10 @@ function AnalyticsPage() {
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading charts...
+              </div>
+            ) : deals.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No deal records yet. Add one to populate the chart.
               </div>
             ) : (
               stageData.map((item) => (
@@ -195,23 +196,29 @@ function AnalyticsPage() {
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">Customer health bands</CardTitle>
-            <CardDescription>How strong the seeded account base looks by score.</CardDescription>
+            <CardDescription>How strong the live account base looks by score.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-6">
-            {healthBands.map((band) => (
-              <div key={band.label} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span>{band.label}</span>
-                  <span className="font-medium">{band.count}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-emerald-500"
-                    style={{ width: `${(band.count / maxHealth) * 100}%` }}
-                  />
-                </div>
+            {customers.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No customer records yet. Add one to populate the health bands.
               </div>
-            ))}
+            ) : (
+              healthBands.map((band) => (
+                <div key={band.label} className="space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>{band.label}</span>
+                    <span className="font-medium">{band.count}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-emerald-500"
+                      style={{ width: `${(band.count / maxHealth) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
@@ -220,47 +227,61 @@ function AnalyticsPage() {
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">Partner catalog mix</CardTitle>
-            <CardDescription>Which tiers are backing the seeded product set.</CardDescription>
+            <CardDescription>Which tiers are backing the live product set.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-6">
-            {catalogByTier.map((item) => (
-              <div key={item.tier} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span>{item.tier}</span>
-                  <span className="font-medium">{item.count}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-amber-500"
-                    style={{ width: `${(item.count / maxTier) * 100}%` }}
-                  />
-                </div>
+            {catalog.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No catalog items yet. Add one to populate this section.
               </div>
-            ))}
+            ) : (
+              catalogByTier.map((item) => (
+                <div key={item.tier} className="space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>{item.tier}</span>
+                    <span className="font-medium">{item.count}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-amber-500"
+                      style={{ width: `${(item.count / maxTier) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">Quick takeaways</CardTitle>
-            <CardDescription>Seeded data can still support decision-making.</CardDescription>
+            <CardDescription>Live data can still support decision-making.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6 text-sm">
-            <Insight
-              icon={TrendingUp}
-              title="Winning pace"
-              body={`${totals.won} opportunities have already closed won this cycle.`}
-            />
-            <Insight
-              icon={Sparkles}
-              title="Healthy accounts"
-              body={`${customers.filter((customer) => customer.health_score >= 90).length} customers are in top health.`}
-            />
-            <Insight
-              icon={BarChart3}
-              title="Catalog focus"
-              body={`${catalog.length} seeded catalog items are available for partner motion.`}
-            />
+            {deals.length === 0 && customers.length === 0 && catalog.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No analytics data is available yet.
+              </div>
+            ) : (
+              <>
+                <Insight
+                  icon={TrendingUp}
+                  title="Winning pace"
+                  body={`${totals.won} opportunities have already closed won this cycle.`}
+                />
+                <Insight
+                  icon={Sparkles}
+                  title="Healthy accounts"
+                  body={`${customers.filter((customer) => customer.health_score >= 90).length} customers are in top health.`}
+                />
+                <Insight
+                  icon={BarChart3}
+                  title="Catalog focus"
+                  body={`${catalog.length} catalog items are available for partner motion.`}
+                />
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -29,9 +29,6 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  DEMO_FEED_ITEMS,
-  DEMO_METRICS,
-  DEMO_PARTNER_SPOTLIGHTS,
   type DemoFeedItem,
   type DemoMetric,
   type DemoPartnerSpotlight,
@@ -54,7 +51,7 @@ function DashboardPage() {
   const [metrics, setMetrics] = useState<DemoMetric[]>([]);
   const [feedItems, setFeedItems] = useState<DemoFeedItem[]>([]);
   const [spotlights, setSpotlights] = useState<DemoPartnerSpotlight[]>([]);
-  const [demoSource, setDemoSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [demoSource, setDemoSource] = useState<"database" | "empty">("empty");
   const [loadingDemo, setLoadingDemo] = useState(true);
   const [refreshingDemo, setRefreshingDemo] = useState(false);
   const [clearingDemo, setClearingDemo] = useState(false);
@@ -83,10 +80,10 @@ function DashboardPage() {
       setSpotlights((spotlightRes.data as DemoPartnerSpotlight[] | null) ?? []);
       setDemoSource("database");
     } catch {
-      setMetrics(DEMO_METRICS);
-      setFeedItems(DEMO_FEED_ITEMS);
-      setSpotlights(DEMO_PARTNER_SPOTLIGHTS);
-      setDemoSource("fallback");
+      setMetrics([]);
+      setFeedItems([]);
+      setSpotlights([]);
+      setDemoSource("empty");
     } finally {
       setLoadingDemo(false);
       setRefreshingDemo(false);
@@ -97,11 +94,10 @@ function DashboardPage() {
     void loadDemoContent();
   }, []);
 
-  const hasSeededDemoData = useMemo(() => demoSource === "database", [demoSource]);
-
-  const effectiveMetrics = demoSource === "fallback" ? DEMO_METRICS : metrics;
-  const effectiveFeedItems = demoSource === "fallback" ? DEMO_FEED_ITEMS : feedItems;
-  const effectiveSpotlights = demoSource === "fallback" ? DEMO_PARTNER_SPOTLIGHTS : spotlights;
+  const hasLiveDemoData = useMemo(() => demoSource === "database", [demoSource]);
+  const effectiveMetrics = metrics;
+  const effectiveFeedItems = feedItems;
+  const effectiveSpotlights = spotlights;
 
   const clearSeededDemoData = async () => {
     setClearingDemo(true);
@@ -122,7 +118,7 @@ function DashboardPage() {
       const error = results.find((result) => result.error)?.error ?? null;
       if (error) throw error;
 
-      toast.success("Seeded demo data cleared");
+      toast.success("Demo rows cleared");
       await loadDemoContent();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to clear demo data";
@@ -149,7 +145,7 @@ function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary" className="gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-            Demo content
+            {demoSource === "database" ? "Postgres content" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -245,11 +241,11 @@ function DashboardPage() {
                     {index < effectiveFeedItems.length - 1 && <Separator className="my-4" />}
                   </div>
                 ))
-              ) : demoSource === "database" ? (
+              ) : (
                 <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No feed items remain. Use the seeded reset file to repopulate demo content.
+                  No feed items yet. Sync a record to populate the feed.
                 </div>
-              ) : null}
+              )}
             </CardContent>
           </Card>
 
@@ -257,7 +253,7 @@ function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Partner spotlight</CardTitle>
               <CardDescription>
-                A few seeded accounts and their current pipeline pulse.
+                A few live accounts and their current pipeline pulse.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -265,11 +261,11 @@ function DashboardPage() {
                 effectiveSpotlights.map((partner) => (
                   <SpotlightRow key={partner.id} partner={partner} />
                 ))
-              ) : demoSource === "database" ? (
+              ) : (
                 <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No partner spotlights remain after cleanup.
+                  No partner spotlights yet.
                 </div>
-              ) : null}
+              )}
             </CardContent>
           </Card>
         </div>
@@ -339,18 +335,16 @@ function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="text-sm text-muted-foreground">
-                {hasSeededDemoData
+                {hasLiveDemoData
                   ? "The current feed is coming from seeded rows in Postgres."
-                  : demoSource === "fallback"
-                    ? "Fallback demo content is shown because the demo tables are not available yet."
-                    : "The seeded demo rows have been cleared."}
+                  : "No live demo rows are available yet."}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={() => void clearSeededDemoData()}
-                  disabled={!hasSeededDemoData || !hasRole("super_admin") || clearingDemo}
+                  disabled={!hasLiveDemoData || !hasRole("super_admin") || clearingDemo}
                 >
                   {clearingDemo ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/local/client";
 import {
   DEAL_STAGE_ORDER,
-  DEMO_DEALS,
   nextDealStage,
   nextDealStatus,
   type DealRecord,
@@ -24,7 +23,7 @@ function PipelinePage() {
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<"database" | "fallback" | "empty">("empty");
+  const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
 
   const load = async () => {
@@ -39,8 +38,8 @@ function PipelinePage() {
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
     } catch {
-      setDeals(DEMO_DEALS);
-      setSource("fallback");
+      setDeals([]);
+      setSource("empty");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -118,7 +117,7 @@ function PipelinePage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
-            {source === "fallback" ? "Fallback demo data" : "Seeded demo data"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
           <Button
             variant="outline"
@@ -142,7 +141,7 @@ function PipelinePage() {
         <MetricCard
           label="Pipeline value"
           value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          hint="Seeded deals only"
+          hint="Current deal rows"
         />
         <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
         <MetricCard
@@ -158,7 +157,7 @@ function PipelinePage() {
             <div>
               <CardTitle className="text-base">Stage board</CardTitle>
               <CardDescription>
-                Move records across the pipeline while keeping the seeded dataset intact.
+                Move records across the pipeline using the live Postgres records.
               </CardDescription>
             </div>
             <div className="relative w-full max-w-sm">
