@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -77,14 +78,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "LIVEY Partner Portal — Deal registration, pipeline & tier benefits" },
+      {
+        name: "description",
+        content:
+          "LIVEY Partner Portal: register deals, protect customers with client-lock, manage your pipeline, and unlock Silver, Gold, and Platinum tier benefits.",
+      },
+      { name: "author", content: "LIVEY" },
+      { property: "og:title", content: "LIVEY Partner Portal" },
+      {
+        property: "og:description",
+        content:
+          "Enterprise partner relationship management for LIVEY partners — onboarding, deal registration, client-lock, and pipeline analytics.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:site", content: "@LIVEY" },
     ],
     links: [
       {
@@ -121,6 +130,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <Toaster />
     </QueryClientProvider>
   );
 }
