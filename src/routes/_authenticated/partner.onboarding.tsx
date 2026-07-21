@@ -44,13 +44,14 @@ export const Route = createFileRoute("/_authenticated/partner/onboarding")({
 
 type StepKey = "business" | "company" | "focus" | "documents" | "review";
 
-const STEPS: { key: StepKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: "business", label: "Business Info", icon: Building2 },
-  { key: "company", label: "Company Details", icon: MapPin },
-  { key: "focus", label: "Business Focus", icon: Target },
-  { key: "documents", label: "Documents", icon: FileUp },
-  { key: "review", label: "Review & Submit", icon: CheckCircle2 },
-];
+const STEPS: { key: StepKey; label: string; icon: React.ComponentType<{ className?: string }> }[] =
+  [
+    { key: "business", label: "Business Info", icon: Building2 },
+    { key: "company", label: "Company Details", icon: MapPin },
+    { key: "focus", label: "Business Focus", icon: Target },
+    { key: "documents", label: "Documents", icon: FileUp },
+    { key: "review", label: "Review & Submit", icon: CheckCircle2 },
+  ];
 
 const FOCUS_AREAS = [
   "Cloud Infrastructure",
@@ -74,13 +75,7 @@ const BUSINESS_TYPES = [
   "Other",
 ];
 
-const TURNOVER_BANDS = [
-  "< ₹1 Cr",
-  "₹1 – 10 Cr",
-  "₹10 – 50 Cr",
-  "₹50 – 250 Cr",
-  "₹250 Cr+",
-];
+const TURNOVER_BANDS = ["< ₹1 Cr", "₹1 – 10 Cr", "₹10 – 50 Cr", "₹50 – 250 Cr", "₹250 Cr+"];
 
 const EMPLOYEE_BANDS = ["1 – 10", "11 – 50", "51 – 200", "201 – 500", "500+"];
 
@@ -105,9 +100,10 @@ const companySchema = z.object({
   employee_count: z.string().min(1, "Select employee band"),
 });
 
-type Form = z.infer<typeof businessSchema> & z.infer<typeof companySchema> & {
-  business_focus: string[];
-};
+type Form = z.infer<typeof businessSchema> &
+  z.infer<typeof companySchema> & {
+    business_focus: string[];
+  };
 
 type DocRow = {
   id: string;
@@ -187,8 +183,7 @@ function OnboardingPage() {
   const progress = ((stepIdx + 1) / STEPS.length) * 100;
   const step = STEPS[stepIdx];
 
-  const setField = <K extends keyof Form>(k: K, v: Form[K]) =>
-    setForm((f) => ({ ...f, [k]: v }));
+  const setField = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const persistDraft = async (): Promise<string | null> => {
     if (!user) return null;
@@ -372,7 +367,9 @@ function OnboardingPage() {
         <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
           Partner registration · Step {stepIdx + 1} of {STEPS.length}
         </div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Complete your partner profile</h1>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+          Complete your partner profile
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Share your business details so LIVEY can verify and assign your partner tier.
         </p>
@@ -706,10 +703,7 @@ function OnboardingPage() {
                     <ReviewRow label="Country" value={form.country} />
                     <ReviewRow label="State" value={form.state} />
                     <ReviewRow label="Type" value={form.business_type} />
-                    <ReviewRow
-                      label="Years in business"
-                      value={String(form.years_in_business)}
-                    />
+                    <ReviewRow label="Years in business" value={String(form.years_in_business)} />
                     <ReviewRow label="Turnover" value={form.annual_turnover} />
                     <ReviewRow label="Employees" value={form.employee_count} />
                   </ReviewBlock>
@@ -749,11 +743,7 @@ function OnboardingPage() {
 
           <Separator className="my-6" />
           <div className="flex items-center justify-between gap-2">
-            <Button
-              variant="outline"
-              onClick={goPrev}
-              disabled={stepIdx === 0}
-            >
+            <Button variant="outline" onClick={goPrev} disabled={stepIdx === 0}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -768,10 +758,7 @@ function OnboardingPage() {
                 Continue <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             ) : (
-              <Button
-                onClick={() => void submit()}
-                disabled={submitting || readOnly}
-              >
+              <Button onClick={() => void submit()} disabled={submitting || readOnly}>
                 {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Submit for review
               </Button>
@@ -813,7 +800,9 @@ function ReviewRow({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="text-sm">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="truncate">{value?.trim() ? value : <span className="text-muted-foreground">—</span>}</div>
+      <div className="truncate">
+        {value?.trim() ? value : <span className="text-muted-foreground">—</span>}
+      </div>
     </div>
   );
 }

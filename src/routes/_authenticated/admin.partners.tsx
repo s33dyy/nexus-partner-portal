@@ -111,10 +111,7 @@ function AdminPartners() {
 
   const load = async () => {
     setLoading(true);
-    const q = supabase
-      .from("partners")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const q = supabase.from("partners").select("*").order("created_at", { ascending: false });
     if (status !== "all") q.eq("status", status);
     const { data, error } = await q;
     if (error) toast.error(error.message);
@@ -153,9 +150,7 @@ function AdminPartners() {
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
-  const decide = async (
-    decision: "approved" | "rejected" | "under_review" | "need_more_info",
-  ) => {
+  const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info") => {
     if (!selected) return;
     setActing(true);
     try {
@@ -165,8 +160,6 @@ function AdminPartners() {
           : { status: decision };
       const { error } = await supabase.from("partners").update(patch).eq("id", selected.id);
       if (error) throw error;
-
-
 
       await supabase
         .from("profiles")
@@ -363,11 +356,7 @@ function AdminPartners() {
                               </div>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => void openDoc(d)}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => void openDoc(d)}>
                             <ExternalLink className="mr-1 h-3.5 w-3.5" /> Open
                           </Button>
                         </li>
@@ -483,7 +472,9 @@ function KV({ k, v }: { k: string; v?: string | null }) {
   return (
     <div className="text-sm">
       <div className="text-xs text-muted-foreground">{k}</div>
-      <div className="truncate">{v?.trim() ? v : <span className="text-muted-foreground">—</span>}</div>
+      <div className="truncate">
+        {v?.trim() ? v : <span className="text-muted-foreground">—</span>}
+      </div>
     </div>
   );
 }

@@ -61,9 +61,21 @@ function AuthPage() {
             LIVEY team — all from a single enterprise-grade workspace.
           </p>
           <div className="grid gap-3 text-sm">
-            <Feature icon={ShieldCheck} title="Client-lock protection" text="No double-selling — reserved customers stay yours." />
-            <Feature icon={TrendingUp} title="Tiered rewards" text="Silver, Gold, Platinum — earn deeper margins as you grow." />
-            <Feature icon={Sparkles} title="Deal registration" text="Standard and strategic deals, approved fast." />
+            <Feature
+              icon={ShieldCheck}
+              title="Client-lock protection"
+              text="No double-selling — reserved customers stay yours."
+            />
+            <Feature
+              icon={TrendingUp}
+              title="Tiered rewards"
+              text="Silver, Gold, Platinum — earn deeper margins as you grow."
+            />
+            <Feature
+              icon={Sparkles}
+              title="Deal registration"
+              text="Standard and strategic deals, approved fast."
+            />
           </div>
         </div>
 
