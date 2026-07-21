@@ -293,6 +293,28 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function serializeDbValue<T>(value: T): T {
+  if (value instanceof Date) {
+    return value.toISOString() as T;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toString("base64") as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeDbValue(item)) as T;
+  }
+
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, serializeDbValue(entry)]),
+    ) as T;
+  }
+
+  return value;
+}
+
 function toBoolean(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
 }
@@ -355,7 +377,7 @@ export async function queryTable(query: TableQuery) {
       `SELECT * FROM ${quoteIdent(query.table)}${whereSql}${orderSql}`,
       params,
     );
-    const data = result.rows;
+    const data = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
         query.single === "single"
@@ -387,7 +409,7 @@ export async function queryTable(query: TableQuery) {
           ", ",
         )}) VALUES (${rowColumns.map((_, index) => `$${index + 1}`).join(", ")}) RETURNING *`;
       const result = await pool.query(sql, rowParams);
-      inserted.push(result.rows[0]);
+      inserted.push(serializeDbValue(result.rows[0]));
     }
 
     return {
@@ -419,13 +441,14 @@ export async function queryTable(query: TableQuery) {
       `UPDATE ${quoteIdent(query.table)} SET ${setSql}${whereSql} RETURNING *`,
       [...updateParams, ...params],
     );
+    const rows = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
         query.single === "single"
-          ? (result.rows[0] ?? null)
+          ? (rows[0] ?? null)
           : query.single === "maybeSingle"
-            ? (result.rows[0] ?? null)
-            : result.rows,
+            ? (rows[0] ?? null)
+            : rows,
       error: null,
     };
   }
@@ -435,13 +458,14 @@ export async function queryTable(query: TableQuery) {
       `DELETE FROM ${quoteIdent(query.table)}${whereSql} RETURNING *`,
       params,
     );
+    const rows = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
         query.single === "single"
-          ? (result.rows[0] ?? null)
+          ? (rows[0] ?? null)
           : query.single === "maybeSingle"
-            ? (result.rows[0] ?? null)
-            : result.rows,
+            ? (rows[0] ?? null)
+            : rows,
       error: null,
     };
   }
