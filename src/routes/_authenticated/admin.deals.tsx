@@ -19,7 +19,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-demo-data";
+import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
+import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
@@ -46,7 +47,10 @@ function AdminDealsPage() {
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) throw error;
-      const rows = (data as DealRecord[] | null) ?? [];
+      const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
+        ...deal,
+        close_date: toDateInputValue(deal.close_date),
+      }));
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
@@ -273,7 +277,7 @@ function AdminDealsPage() {
                   <Meta label="Contact" value={selectedDeal.contact_name} />
                   <Meta label="Owner" value={selectedDeal.owner_name} />
                   <Meta label="Product" value={selectedDeal.product} />
-                  <Meta label="Close date" value={selectedDeal.close_date} />
+                  <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
                 </div>
                 <Field label="Admin note">
                   <Textarea value={note} onChange={(e) => setNote(e.target.value)} />

@@ -170,14 +170,12 @@ function DocumentsPage() {
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Documents</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Manage compliance files, preview seeded uploads, and remove test records when you need
-            to reset the workspace.
+            Manage compliance files, preview uploads, and remove old records when you need to
+            reset the workspace.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "empty" ? "No documents found" : "Seeded documents"}
-          </Badge>
+          <Badge variant="secondary">{source === "empty" ? "No documents found" : "Live docs"}</Badge>
           <Button
             variant="outline"
             onClick={() => {

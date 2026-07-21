@@ -211,36 +211,15 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
   ],
-  portal_demo_metrics: [
-    "id",
-    "label",
-    "value",
-    "hint",
-    "tone",
-    "sort_order",
-    "is_seed",
-    "created_at",
-  ],
-  portal_demo_feed_items: [
+  portal_news_posts: [
     "id",
     "title",
-    "body",
-    "time_label",
-    "tone",
-    "sort_order",
-    "is_seed",
-    "created_at",
-  ],
-  portal_demo_partner_spotlights: [
-    "id",
-    "company_name",
-    "contact_name",
-    "region",
-    "tier",
-    "pipeline_value",
-    "last_activity",
-    "status",
-    "sort_order",
+    "caption",
+    "image_path",
+    "image_alt",
+    "posted_by_name",
+    "posted_by_role",
+    "updated_at",
     "is_seed",
     "created_at",
   ],
@@ -674,6 +653,58 @@ export async function signUpLocal(input: {
   };
 }
 
+export async function createWorkspaceUser(input: {
+  full_name: string;
+  email: string;
+  phone: string;
+  company_name: string | null;
+  password: string;
+  role: AppRole;
+  partner_status?: PartnerStatus;
+}) {
+  const ctx = await getAuthContext();
+  if (!ctx.roles.includes("super_admin")) {
+    throw new Error("Unauthorized");
+  }
+
+  const existing = await pool.query(`SELECT id FROM profiles WHERE lower(email) = lower($1)`, [
+    input.email,
+  ]);
+  if (existing.rows.length > 0) {
+    throw new Error("An account with that email already exists");
+  }
+
+  const id = randomUUID();
+  const passwordHash = await bcrypt.hash(input.password, 10);
+  await pool.query(
+    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, is_seed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
+    [
+      id,
+      input.email,
+      passwordHash,
+      input.full_name,
+      input.phone || null,
+      input.company_name,
+      input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+    ],
+  );
+  await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [
+    id,
+    input.role,
+  ]);
+
+  return {
+    id,
+    email: input.email,
+    full_name: input.full_name,
+    phone: input.phone || null,
+    company_name: input.company_name,
+    role: input.role,
+    partner_status: input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+  };
+}
+
 export async function signOutLocal() {
   const token = getCookie(SESSION_COOKIE);
   if (token) {
@@ -848,23 +879,6 @@ export async function removeDocumentBlobs(paths: string[]) {
     paths,
   ]);
   return { removed: result.rowCount ?? 0 };
-}
-
-export async function clearSeedData() {
-  await pool.query(`DELETE FROM password_reset_tokens`);
-  await pool.query(`DELETE FROM document_blobs WHERE is_seed = true`);
-  await pool.query(`DELETE FROM partner_review_notes WHERE is_seed = true`);
-  await pool.query(`DELETE FROM partners WHERE is_seed = true`);
-  await pool.query(`DELETE FROM user_roles WHERE is_seed = true`);
-  await pool.query(`DELETE FROM profiles WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_deals WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_customers WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_catalog_items WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_team_members WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_audit_events WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_demo_metrics WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_demo_feed_items WHERE is_seed = true`);
-  await pool.query(`DELETE FROM portal_demo_partner_spotlights WHERE is_seed = true`);
 }
 
 export async function createSessionForUser(userId: string) {

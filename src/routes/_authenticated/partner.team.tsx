@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
-import { type TeamMemberRecord } from "@/lib/portal-demo-data";
+import { type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
 type TeamForm = {
@@ -301,7 +301,7 @@ function PartnerTeamPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Invite teammate</CardTitle>
-              <CardDescription>Add a seeded-style record for a new partner user.</CardDescription>
+              <CardDescription>Add a live record for a new partner user.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
@@ -388,13 +388,13 @@ function PartnerTeamPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Access notes</CardTitle>
-              <CardDescription>What the seeded roster is set up to cover.</CardDescription>
+              <CardDescription>What the partner roster is set up to cover.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
               <div>Partner admins can manage deals, team, and document workflows.</div>
               <div>Partner users can handle onboarding and document tasks.</div>
               <Separator />
-              <div>The roster is deletable, so you can reset the demo cleanly when needed.</div>
+              <div>The roster is deletable, so you can reset the workspace cleanly when needed.</div>
             </CardContent>
           </Card>
         </div>

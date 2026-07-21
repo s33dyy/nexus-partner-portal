@@ -30,13 +30,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import {
   DEAL_STAGE_ORDER,
   nextDealStage,
   nextDealStatus,
   type DealRecord,
   type DealStage,
-} from "@/lib/portal-demo-data";
+} from "@/lib/portal-records";
 
 type DealForm = {
   account_name: string;
@@ -70,6 +71,21 @@ const EMPTY_FORM: DealForm = {
   notes: "",
 };
 
+const FALLBACK_DEAL_OPTIONS = {
+  accounts: ["ACME Infra", "Techilla", "PartnerShield Technologies", "Nimbus Retail"],
+  contacts: ["Raman Sethi", "Priya Nair", "Amit Verma", "Sara Khan"],
+  owners: ["John Doe", "Amit Verma", "Priya Nair", "Rahul Mehta"],
+  regions: ["India West", "India North", "India South", "India East", "APAC"],
+  products: ["LIVEY WC350 QHD Webcam", "LIVEY VPRO 4K Camera", "LIVEY RoomBar Pro", "LIVEY Stream Kit"],
+  statuses: ["draft", "submitted", "approved", "need_more_info", "rejected", "won", "lost"],
+  sources: ["Partner referral", "Inbound", "Account lock", "RFP", "Expansion"],
+  touches: ["New", "This week", "Last week", "30+ days ago", "Demo completed"],
+};
+
+function mergeOptions(existing: string[], fallback: string[]) {
+  return [...new Set([...existing, ...fallback])];
+}
+
 export const Route = createFileRoute("/_authenticated/deals")({
   component: DealsPage,
 });
@@ -95,7 +111,10 @@ function DealsPage() {
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) throw error;
-      const rows = (data as DealRecord[] | null) ?? [];
+      const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
+        ...deal,
+        close_date: toDateInputValue(deal.close_date),
+      }));
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
@@ -152,6 +171,25 @@ function DealsPage() {
       { label: "Won deals", value: String(won), hint: "Closed this cycle" },
       { label: "Avg. probability", value: `${avgProbability}%`, hint: "Current weighted mix" },
     ];
+  }, [deals]);
+
+  const editOptions = useMemo(() => {
+    return {
+      accounts: mergeOptions(
+        deals.map((deal) => deal.account_name),
+        FALLBACK_DEAL_OPTIONS.accounts,
+      ),
+      contacts: mergeOptions(
+        deals.map((deal) => deal.contact_name),
+        FALLBACK_DEAL_OPTIONS.contacts,
+      ),
+      owners: mergeOptions(deals.map((deal) => deal.owner_name), FALLBACK_DEAL_OPTIONS.owners),
+      regions: mergeOptions(deals.map((deal) => deal.region), FALLBACK_DEAL_OPTIONS.regions),
+      products: mergeOptions(deals.map((deal) => deal.product), FALLBACK_DEAL_OPTIONS.products),
+      statuses: mergeOptions(deals.map((deal) => deal.status), FALLBACK_DEAL_OPTIONS.statuses),
+      sources: mergeOptions(deals.map((deal) => deal.source), FALLBACK_DEAL_OPTIONS.sources),
+      touches: mergeOptions(deals.map((deal) => deal.last_touch), FALLBACK_DEAL_OPTIONS.touches),
+    };
   }, [deals]);
 
   const createDeal = async () => {
@@ -284,7 +322,7 @@ function DealsPage() {
               <div>
                 <CardTitle className="text-base">Pipeline queue</CardTitle>
                 <CardDescription>
-                  Search seeded deals or create a fresh one for testing.
+                  Search live deals or create a fresh one for testing.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -353,7 +391,7 @@ function DealsPage() {
                     <div className="text-right">
                       <div className="font-medium">{deal.amount}</div>
                       <div className="text-xs text-muted-foreground">
-                        {deal.probability}% · closes {deal.close_date}
+                        {deal.probability}% · closes {formatDateLabel(deal.close_date)}
                       </div>
                     </div>
                   </button>
@@ -367,63 +405,109 @@ function DealsPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Create deal</CardTitle>
-              <CardDescription>Add a new seeded-style opportunity to the portal.</CardDescription>
+              <CardDescription>Add a new live opportunity to the portal.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="account_name">Account</Label>
-                  <Input
-                    id="account_name"
+                  <Select
                     value={draft.account_name}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, account_name: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, account_name: value }))
                     }
-                    placeholder="ACME Infra"
-                  />
+                  >
+                    <SelectTrigger id="account_name">
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.accounts.map((account) => (
+                        <SelectItem key={account} value={account}>
+                          {account}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contact_name">Contact</Label>
-                  <Input
-                    id="contact_name"
+                  <Select
                     value={draft.contact_name}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, contact_name: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, contact_name: value }))
                     }
-                    placeholder="Raman Sethi"
-                  />
+                  >
+                    <SelectTrigger id="contact_name">
+                      <SelectValue placeholder="Select contact" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.contacts.map((contact) => (
+                        <SelectItem key={contact} value={contact}>
+                          {contact}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="owner_name">Owner</Label>
-                  <Input
-                    id="owner_name"
+                  <Select
                     value={draft.owner_name}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, owner_name: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, owner_name: value }))
                     }
-                    placeholder="Amit Verma"
-                  />
+                  >
+                    <SelectTrigger id="owner_name">
+                      <SelectValue placeholder="Select owner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.owners.map((owner) => (
+                        <SelectItem key={owner} value={owner}>
+                          {owner}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="region">Region</Label>
-                  <Input
-                    id="region"
+                  <Select
                     value={draft.region}
-                    onChange={(e) => setDraft((value) => ({ ...value, region: e.target.value }))}
-                    placeholder="India West"
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
+                  >
+                    <SelectTrigger id="region">
+                      <SelectValue placeholder="Select region" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.regions.map((region) => (
+                        <SelectItem key={region} value={region}>
+                          {region}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="product">Product</Label>
-                  <Input
-                    id="product"
+                  <Select
                     value={draft.product}
-                    onChange={(e) => setDraft((value) => ({ ...value, product: e.target.value }))}
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, product: value }))}
+                  >
+                    <SelectTrigger id="product">
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.products.map((product) => (
+                        <SelectItem key={product} value={product}>
+                          {product}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount</Label>
@@ -458,12 +542,21 @@ function DealsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="status">Status</Label>
-                  <Input
-                    id="status"
+                  <Select
                     value={draft.status}
-                    onChange={(e) => setDraft((value) => ({ ...value, status: e.target.value }))}
-                    placeholder="submitted"
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, status: value }))}
+                  >
+                    <SelectTrigger id="status">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.statuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -479,6 +572,46 @@ function DealsPage() {
                       setDraft((value) => ({ ...value, probability: Number(e.target.value) || 0 }))
                     }
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="source">Source</Label>
+                  <Select
+                    value={draft.source}
+                    onValueChange={(value) => setDraft((current) => ({ ...current, source: value }))}
+                  >
+                    <SelectTrigger id="source">
+                      <SelectValue placeholder="Select source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.sources.map((sourceOption) => (
+                        <SelectItem key={sourceOption} value={sourceOption}>
+                          {sourceOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="last_touch">Last touch</Label>
+                  <Select
+                    value={draft.last_touch}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, last_touch: value }))
+                    }
+                  >
+                    <SelectTrigger id="last_touch">
+                      <SelectValue placeholder="Select last touch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.touches.map((touch) => (
+                        <SelectItem key={touch} value={touch}>
+                          {touch}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="close_date">Close date</Label>
@@ -533,7 +666,7 @@ function DealsPage() {
                     <Meta label="Contact" value={selectedDeal.contact_name} />
                     <Meta label="Owner" value={selectedDeal.owner_name} />
                     <Meta label="Region" value={selectedDeal.region} />
-                    <Meta label="Close date" value={selectedDeal.close_date} />
+                    <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
                     <Meta label="Source" value={selectedDeal.source} />
                     <Meta label="Probability" value={`${selectedDeal.probability}%`} />
                   </div>

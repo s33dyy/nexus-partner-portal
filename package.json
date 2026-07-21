@@ -10,8 +10,6 @@
     "start": "node .output/server/index.mjs",
     "preview": "vite preview",
     "db:migrate": "bun scripts/apply-migrations.ts",
-    "db:seed": "bun scripts/seed-demo.ts",
-    "db:clear-seed": "bun scripts/clear-seed.ts",
     "db:bootstrap": "bun scripts/bootstrap-db.ts",
     "lint": "eslint .",
     "format": "prettier --write ."

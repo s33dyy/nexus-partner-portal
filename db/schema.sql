@@ -207,38 +207,15 @@ CREATE TABLE IF NOT EXISTS portal_audit_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS portal_demo_metrics (
-  id UUID PRIMARY KEY,
-  label TEXT NOT NULL,
-  value TEXT NOT NULL,
-  hint TEXT NOT NULL,
-  tone TEXT NOT NULL DEFAULT 'default',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS portal_demo_feed_items (
+CREATE TABLE IF NOT EXISTS portal_news_posts (
   id UUID PRIMARY KEY,
   title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  time_label TEXT NOT NULL,
-  tone TEXT NOT NULL DEFAULT 'default',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS portal_demo_partner_spotlights (
-  id UUID PRIMARY KEY,
-  company_name TEXT NOT NULL,
-  contact_name TEXT NOT NULL,
-  region TEXT NOT NULL,
-  tier TEXT NOT NULL,
-  pipeline_value TEXT NOT NULL,
-  last_activity TEXT NOT NULL,
-  status TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0,
+  caption TEXT NOT NULL,
+  image_path TEXT NOT NULL,
+  image_alt TEXT NOT NULL DEFAULT '',
+  posted_by_name TEXT NOT NULL,
+  posted_by_role TEXT NOT NULL DEFAULT 'super_admin',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

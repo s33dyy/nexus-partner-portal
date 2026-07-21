@@ -9,7 +9,7 @@ import {
   type CatalogItemRecord,
   type CustomerRecord,
   type DealRecord,
-} from "@/lib/portal-demo-data";
+} from "@/lib/portal-records";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   component: AnalyticsPage,
@@ -121,8 +121,8 @@ function AnalyticsPage() {
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Analytics</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Review revenue, health, and catalog trends using the same seeded records that power the
-            rest of the portal.
+            Review revenue, health, and catalog trends using the live records that power the rest
+            of the portal.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

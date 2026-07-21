@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link, Outlet, useLocation } from "@tanstack/react-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   Building2,
   CheckCircle2,
@@ -19,6 +19,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { formatDateLabel } from "@/lib/date-utils";
+import { type NewsPostRecord } from "@/lib/portal-news-data";
 
 type Profile = {
   id: string;
@@ -70,26 +72,13 @@ export const Route = createFileRoute("/_authenticated/partner")({
 
 function PartnerPage() {
   const { hasRole, profile: authProfile } = useAuth();
+  const { pathname } = useLocation();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [partner, setPartner] = useState<Partner | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [metrics, setMetrics] = useState<{ id: string; label: string; value: string; hint: string }[]>([]);
-  const [feedItems, setFeedItems] = useState<
-    { id: string; title: string; body: string; time_label: string; tone: string }[]
-  >([]);
-  const [spotlights, setSpotlights] = useState<
-    {
-      id: string;
-      company_name: string;
-      contact_name: string;
-      region: string;
-      tier: string;
-      pipeline_value: string;
-      last_activity: string;
-      status: string;
-    }[]
-  >([]);
+  const [newsPosts, setNewsPosts] = useState<NewsPostRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -100,84 +89,83 @@ function PartnerPage() {
     try {
       const currentUserId = authProfile?.id;
       const currentPartnerId = authProfile?.partner_id ?? null;
-      const [profileRes, partnerRes, docsRes, notesRes, metricsRes, feedRes, spotlightRes] =
-        await Promise.all([
-          currentUserId
-            ? supabase.from("profiles").select("*").eq("id", currentUserId).maybeSingle()
-            : Promise.resolve({ data: null, error: null }),
-          currentPartnerId
-            ? supabase.from("partners").select("*").eq("id", currentPartnerId).maybeSingle()
-            : Promise.resolve({ data: null, error: null }),
-          currentPartnerId
-            ? supabase
-                .from("partner_documents")
-                .select("id, doc_type, file_name, created_at")
-                .eq("partner_id", currentPartnerId)
-                .order("created_at", { ascending: false })
-            : Promise.resolve({ data: [], error: null }),
-          currentPartnerId
-            ? supabase
-                .from("partner_review_notes")
-                .select("id, note, status_change, created_at")
-                .eq("partner_id", currentPartnerId)
-                .order("created_at", { ascending: false })
-            : Promise.resolve({ data: [], error: null }),
-          supabase.from("portal_demo_metrics").select("*").order("sort_order", { ascending: true }),
-          supabase
-            .from("portal_demo_feed_items")
-            .select("*")
-            .order("sort_order", { ascending: true }),
-          supabase
-            .from("portal_demo_partner_spotlights")
-            .select("*")
-            .order("sort_order", { ascending: true }),
-        ]);
+      const [profileRes, partnerRes, docsRes, notesRes, newsRes] = await Promise.all([
+        currentUserId
+          ? supabase.from("profiles").select("*").eq("id", currentUserId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        currentPartnerId
+          ? supabase.from("partners").select("*").eq("id", currentPartnerId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        currentPartnerId
+          ? supabase
+              .from("partner_documents")
+              .select("id, doc_type, file_name, created_at")
+              .eq("partner_id", currentPartnerId)
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        currentPartnerId
+          ? supabase
+              .from("partner_review_notes")
+              .select("id, note, status_change, created_at")
+              .eq("partner_id", currentPartnerId)
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+      ]);
 
-      if (profileRes.error || partnerRes.error || docsRes.error || notesRes.error) {
-        throw profileRes.error ?? partnerRes.error ?? docsRes.error ?? notesRes.error;
+      if (profileRes.error || partnerRes.error || docsRes.error || notesRes.error || newsRes.error) {
+        throw profileRes.error ?? partnerRes.error ?? docsRes.error ?? notesRes.error ?? newsRes.error;
       }
 
       const profileRow = (profileRes.data as Profile | null) ?? null;
       const partnerRow = (partnerRes.data as Partner | null) ?? null;
       const docRows = (docsRes.data as DocRow[] | null) ?? [];
       const noteRows = (notesRes.data as NoteRow[] | null) ?? [];
-      const metricRows = (metricsRes.data as { id: string; label: string; value: string; hint: string }[] | null) ?? [];
-      const feedRows =
-        (feedRes.data as { id: string; title: string; body: string; time_label: string; tone: string }[] | null) ?? [];
-      const spotlightRows =
-        (spotlightRes.data as {
-          id: string;
-          company_name: string;
-          contact_name: string;
-          region: string;
-          tier: string;
-          pipeline_value: string;
-          last_activity: string;
-          status: string;
-        }[] | null) ?? [];
+      const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
 
       setProfile(profileRow);
       setPartner(partnerRow);
       setDocs(docRows);
       setNotes(noteRows);
-      setMetrics(metricRows);
-      setFeedItems(feedRows);
-      setSpotlights(spotlightRows);
+      setNewsPosts(newsRows);
+      setMetrics([
+        {
+          id: "status",
+          label: "Status",
+          value: statusLabel[profileRow?.partner_status ?? partnerRow?.status ?? "pending_partner_registration"],
+          hint: "Current registration state",
+        },
+        {
+          id: "documents",
+          label: "Documents",
+          value: String(docRows.length),
+          hint: "Uploaded files",
+        },
+        {
+          id: "notes",
+          label: "Review notes",
+          value: String(noteRows.length),
+          hint: "Internal comments",
+        },
+        {
+          id: "focus",
+          label: "Focus areas",
+          value: String(partnerRow?.business_focus?.length ?? 0),
+          hint: "Business areas mapped",
+        },
+      ]);
       setSource(
         profileRow ||
           partnerRow ||
           docRows.length > 0 ||
           noteRows.length > 0 ||
-          metricRows.length > 0 ||
-          feedRows.length > 0 ||
-          spotlightRows.length > 0
+          newsRows.length > 0
           ? "database"
           : "empty",
       );
     } catch {
       setMetrics([]);
-      setFeedItems([]);
-      setSpotlights([]);
+      setNewsPosts([]);
       setSource("empty");
     } finally {
       setLoading(false);
@@ -192,6 +180,8 @@ function PartnerPage() {
   const status = profile?.partner_status ?? partner?.status ?? "pending_partner_registration";
   const progress =
     status === "approved" ? 100 : status === "submitted" ? 75 : status === "under_review" ? 55 : 30;
+  const isOnboardingChild = pathname === "/partner/onboarding";
+  const isPartnerChild = pathname !== "/partner";
 
   const submitForReview = async () => {
     if (!profile?.id || !partner?.id) {
@@ -215,7 +205,7 @@ function PartnerPage() {
     }
   };
 
-  if (!hasRole("partner_user") && !hasRole("partner_admin") && !hasRole("super_admin")) {
+  if (!hasRole("partner_user") && !hasRole("partner_admin") && !hasRole("super_admin") && !isOnboardingChild) {
     return (
       <AccessDeniedPage
         title="Company profile"
@@ -223,6 +213,10 @@ function PartnerPage() {
         description="Company profile management is reserved for partner operators."
       />
     );
+  }
+
+  if (isPartnerChild) {
+    return <Outlet />;
   }
 
   return (
@@ -284,7 +278,7 @@ function PartnerPage() {
               <div>
                 <div className="text-sm font-medium">No partner metrics yet</div>
                 <div className="text-xs text-muted-foreground">
-                  Complete onboarding or add live partner rows in Postgres.
+                  Complete onboarding to populate this summary.
                 </div>
               </div>
               <Badge variant="outline">Empty</Badge>
@@ -318,10 +312,7 @@ function PartnerPage() {
                   <Meta label="Website" value={partner.website ?? "Not set"} />
                   <Meta label="GST" value={partner.gst_number ?? "Not set"} />
                   <Meta label="PAN" value={partner.pan ?? "Not set"} />
-                  <Meta
-                    label="Region"
-                    value={[partner.state, partner.country].filter(Boolean).join(", ")}
-                  />
+                  <Meta label="Region" value={[partner.state, partner.country].filter(Boolean).join(", ")} />
                   <Meta label="Turnover" value={partner.annual_turnover ?? "Not set"} />
                 </div>
                 <Separator />
@@ -403,8 +394,7 @@ function PartnerPage() {
                 notes.map((note) => (
                   <div key={note.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
                     <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                      {note.status_change ?? "Note"} ·{" "}
-                      {new Date(note.created_at).toLocaleDateString()}
+                      {note.status_change ?? "Note"} · {formatDateLabel(note.created_at)}
                     </div>
                     <div className="mt-2">{note.note}</div>
                   </div>
@@ -422,23 +412,35 @@ function PartnerPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader className="border-b">
-            <CardTitle className="text-base">Activity feed</CardTitle>
-            <CardDescription>Live product updates and partner activity.</CardDescription>
+            <CardTitle className="text-base">News feed</CardTitle>
+            <CardDescription>Photo-first updates from LIVEY admins.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
-            {feedItems.length > 0 ? (
-              feedItems.map((item) => (
-                <div key={item.id} className="rounded-lg border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium">{item.title}</div>
-                    <Badge variant="outline">{item.time_label}</Badge>
+            {newsPosts.length > 0 ? (
+              newsPosts.map((post) => (
+                <div key={post.id} className="overflow-hidden rounded-2xl border bg-card">
+                  <img
+                    src={post.image_path}
+                    alt={post.image_alt}
+                    className="aspect-[4/3] w-full object-cover"
+                  />
+                  <div className="space-y-3 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium">{post.title}</div>
+                        <div className="text-xs text-muted-foreground">{post.posted_by_name}</div>
+                      </div>
+                      <Badge variant="outline">{formatDateLabel(post.created_at)}</Badge>
+                    </div>
+                    <div className="whitespace-pre-line text-sm text-muted-foreground">
+                      {post.caption}
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm text-muted-foreground">{item.body}</div>
                 </div>
               ))
             ) : (
               <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                No activity feed items yet.
+                No news posts yet.
               </div>
             )}
           </CardContent>
@@ -446,34 +448,18 @@ function PartnerPage() {
 
         <Card>
           <CardHeader className="border-b">
-            <CardTitle className="text-base">Partner spotlight</CardTitle>
-            <CardDescription>A few live accounts and their pipeline pulse.</CardDescription>
+            <CardTitle className="text-base">What this account can do</CardTitle>
+            <CardDescription>Partner access depends on registration status.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3 pt-6">
-            {spotlights.length > 0 ? (
-              spotlights.map((spotlight) => (
-                <div key={spotlight.id} className="rounded-lg border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium">{spotlight.company_name}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {spotlight.contact_name} · {spotlight.region}
-                      </div>
-                    </div>
-                    <Badge>{spotlight.status}</Badge>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-muted-foreground">
-                    <div>{spotlight.tier}</div>
-                    <div>{spotlight.pipeline_value}</div>
-                    <div>{spotlight.last_activity}</div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                No partner spotlights yet.
-              </div>
-            )}
+          <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
+            <div>Partner admins can manage deals, team, and document workflows.</div>
+            <div>Partner users can handle onboarding and document tasks.</div>
+            <Separator />
+            <div>
+              {status === "approved"
+                ? "The account is fully approved."
+                : "Complete onboarding and submit for review to unlock partner access."}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -501,3 +487,12 @@ function Meta({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+const statusLabel: Record<string, string> = {
+  pending_partner_registration: "Partner Registration Pending",
+  submitted: "Application Submitted",
+  under_review: "Under Review",
+  need_more_info: "Info Requested",
+  approved: "Approved",
+  rejected: "Rejected",
+};

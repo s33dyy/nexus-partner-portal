@@ -72,6 +72,23 @@ const signUp = createServerFn({ method: "POST" })
     return {};
   });
 
+const createUser = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      full_name: string;
+      email: string;
+      phone: string;
+      company_name: string | null;
+      password: string;
+      role: AppRole;
+      partner_status?: PartnerStatus;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    const { createWorkspaceUser } = await import("@/server/livey-service.server");
+    return createWorkspaceUser(data);
+  });
+
 const requestReset = createServerFn({ method: "POST" })
   .validator((input: { email: string; redirectTo?: string }) => input)
   .handler(async ({ data }) => {
@@ -299,6 +316,23 @@ type AuthApi = {
   ) => Promise<RpcResult<{ resetLink: string | null }>>;
   updateUser: (input: { password: string }) => Promise<RpcResult<{}>>;
   signOut: () => Promise<RpcResult<{}>>;
+  createWorkspaceUser: (input: {
+    full_name: string;
+    email: string;
+    phone: string;
+    company_name: string | null;
+    password: string;
+    role: AppRole;
+    partner_status?: PartnerStatus;
+  }) => Promise<RpcResult<{
+    id: string;
+    email: string;
+    full_name: string;
+    phone: string | null;
+    company_name: string | null;
+    role: AppRole;
+    partner_status: PartnerStatus;
+  }>>;
 };
 
 const auth: AuthApi = {
@@ -374,6 +408,17 @@ const auth: AuthApi = {
       await signOut();
       emitAuth("SIGNED_OUT", null);
       return { data: {}, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  },
+  async createWorkspaceUser(input) {
+    try {
+      const data = await createUser({ data: input });
+      return { data, error: null };
     } catch (error) {
       return {
         data: null,

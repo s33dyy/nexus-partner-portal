@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/local/client";
-import { type AuditEventRecord } from "@/lib/portal-demo-data";
+import { type AuditEventRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/audit")({

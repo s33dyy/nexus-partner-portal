@@ -1,38 +1,49 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   ArrowRight,
   Building2,
   CheckCircle2,
   Clock,
-  DollarSign,
   FileText,
   Handshake,
   Loader2,
+  Megaphone,
   RefreshCw,
   Sparkles,
-  Trash2,
-  TrendingUp,
   Trophy,
-  UserPlus,
   Users,
 } from "lucide-react";
-import { toast } from "sonner";
 
-import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/local/client";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  type DemoFeedItem,
-  type DemoMetric,
-  type DemoPartnerSpotlight,
-} from "@/lib/demo-content";
+import { formatDateLabel } from "@/lib/date-utils";
+import { type NewsPostRecord } from "@/lib/portal-news-data";
+import { supabase } from "@/integrations/local/client";
+import { useAuth } from "@/hooks/use-auth";
+
+type PartnerSpotlight = {
+  id: string;
+  company_name: string;
+  tier: string;
+  status: string;
+  annual_turnover: string | null;
+  business_focus: string[] | null;
+  created_at: string;
+};
+
+type DashboardMetric = {
+  id: string;
+  label: string;
+  value: string;
+  hint: string;
+  tone: "default" | "primary" | "success" | "warning" | "info";
+};
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
@@ -48,85 +59,99 @@ function DashboardPage() {
       ? "Partner Admin"
       : "Partner User";
 
-  const [metrics, setMetrics] = useState<DemoMetric[]>([]);
-  const [feedItems, setFeedItems] = useState<DemoFeedItem[]>([]);
-  const [spotlights, setSpotlights] = useState<DemoPartnerSpotlight[]>([]);
-  const [demoSource, setDemoSource] = useState<"database" | "empty">("empty");
-  const [loadingDemo, setLoadingDemo] = useState(true);
-  const [refreshingDemo, setRefreshingDemo] = useState(false);
-  const [clearingDemo, setClearingDemo] = useState(false);
+  const [metrics, setMetrics] = useState<DashboardMetric[]>([]);
+  const [newsPosts, setNewsPosts] = useState<NewsPostRecord[]>([]);
+  const [spotlights, setSpotlights] = useState<PartnerSpotlight[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [source, setSource] = useState<"database" | "empty">("empty");
 
-  const loadDemoContent = async () => {
-    setLoadingDemo(true);
+  const loadDashboard = async () => {
+    setLoading(true);
     try {
-      const [metricsRes, feedRes, spotlightRes] = await Promise.all([
-        supabase.from("portal_demo_metrics").select("*").order("sort_order", { ascending: true }),
+      const [dealsRes, customersRes, partnersRes, newsRes] = await Promise.all([
         supabase
-          .from("portal_demo_feed_items")
-          .select("*")
-          .order("sort_order", { ascending: true }),
+          .from("portal_deals")
+          .select("id, amount, stage, status")
+          .order("updated_at", { ascending: false }),
+        supabase.from("portal_customers").select("id"),
         supabase
-          .from("portal_demo_partner_spotlights")
-          .select("*")
-          .order("sort_order", { ascending: true }),
+          .from("partners")
+          .select("id, company_name, tier, status, annual_turnover, business_focus, created_at")
+          .order("created_at", { ascending: false }),
+        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
       ]);
 
-      if (metricsRes.error || feedRes.error || spotlightRes.error) {
-        throw metricsRes.error ?? feedRes.error ?? spotlightRes.error;
+      if (dealsRes.error || customersRes.error || partnersRes.error || newsRes.error) {
+        throw dealsRes.error ?? customersRes.error ?? partnersRes.error ?? newsRes.error;
       }
 
-      setMetrics((metricsRes.data as DemoMetric[] | null) ?? []);
-      setFeedItems((feedRes.data as DemoFeedItem[] | null) ?? []);
-      setSpotlights((spotlightRes.data as DemoPartnerSpotlight[] | null) ?? []);
-      setDemoSource("database");
+      const dealRows = (dealsRes.data as Array<{ amount: string; stage: string; status: string }> | null) ?? [];
+      const customerRows = (customersRes.data as Array<{ id: string }> | null) ?? [];
+      const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
+      const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
+
+      const pipeline = dealRows.reduce((sum, deal) => {
+        const value = Number.parseFloat(String(deal.amount).replace(/[^0-9.]/g, ""));
+        return sum + (Number.isFinite(value) ? value : 0);
+      }, 0);
+      const openDeals = dealRows.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
+      const wonDeals = dealRows.filter((deal) => deal.stage === "won").length;
+      const approvedPartners = partnerRows.filter((partner) => partner.status === "approved").length;
+      const totalFocusAreas = partnerRows.reduce(
+        (sum, partner) => sum + (partner.business_focus?.length ?? 0),
+        0,
+      );
+
+      setMetrics([
+        {
+          id: "pipeline",
+          label: "Pipeline value",
+          value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+          hint: "Across all live opportunity rows",
+          tone: "primary",
+        },
+        {
+          id: "deals",
+          label: "Open deals",
+          value: String(openDeals),
+          hint: `${wonDeals} won in this cycle`,
+          tone: "success",
+        },
+        {
+          id: "partners",
+          label: "Approved partners",
+          value: String(approvedPartners),
+          hint: "Ready for active collaboration",
+          tone: "warning",
+        },
+        {
+          id: "customers",
+          label: "Customers",
+          value: String(customerRows.length),
+          hint: `${totalFocusAreas} focus areas mapped`,
+          tone: "info",
+        },
+      ]);
+      setNewsPosts(newsRows);
+      setSpotlights(partnerRows.slice(0, 3));
+      setSource(dealRows.length || customerRows.length || partnerRows.length || newsRows.length ? "database" : "empty");
     } catch {
       setMetrics([]);
-      setFeedItems([]);
+      setNewsPosts([]);
       setSpotlights([]);
-      setDemoSource("empty");
+      setSource("empty");
     } finally {
-      setLoadingDemo(false);
-      setRefreshingDemo(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    void loadDemoContent();
+    void loadDashboard();
   }, []);
 
-  const hasLiveDemoData = useMemo(() => demoSource === "database", [demoSource]);
-  const effectiveMetrics = metrics;
-  const effectiveFeedItems = feedItems;
-  const effectiveSpotlights = spotlights;
-
-  const clearSeededDemoData = async () => {
-    setClearingDemo(true);
-    try {
-      const results = await Promise.all([
-        supabase.from("password_reset_tokens").delete(),
-        supabase.from("document_blobs").delete().eq("is_seed", true),
-        supabase.from("partner_review_notes").delete().eq("is_seed", true),
-        supabase.from("partner_documents").delete().eq("is_seed", true),
-        supabase.from("partners").delete().eq("is_seed", true),
-        supabase.from("user_roles").delete().eq("is_seed", true),
-        supabase.from("profiles").delete().eq("is_seed", true),
-        supabase.from("portal_demo_metrics").delete().eq("is_seed", true),
-        supabase.from("portal_demo_feed_items").delete().eq("is_seed", true),
-        supabase.from("portal_demo_partner_spotlights").delete().eq("is_seed", true),
-      ]);
-
-      const error = results.find((result) => result.error)?.error ?? null;
-      if (error) throw error;
-
-      toast.success("Demo rows cleared");
-      await loadDemoContent();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to clear demo data";
-      toast.error(msg);
-    } finally {
-      setClearingDemo(false);
-    }
-  };
+  const feedEmpty = newsPosts.length === 0;
 
   return (
     <div className="space-y-6">
@@ -145,18 +170,26 @@ function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary" className="gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-            {demoSource === "database" ? "Postgres content" : "Empty state"}
+            {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
+          {hasRole("super_admin") && (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/admin/news">
+                <Megaphone className="mr-2 h-4 w-4" />
+                Publish news
+              </Link>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
             onClick={() => {
-              setRefreshingDemo(true);
-              void loadDemoContent();
+              setRefreshing(true);
+              void loadDashboard();
             }}
-            disabled={loadingDemo || refreshingDemo}
+            disabled={loading || refreshing}
           >
-            {loadingDemo || refreshingDemo ? (
+            {loading || refreshing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -193,9 +226,9 @@ function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {effectiveMetrics.length > 0 ? (
-          effectiveMetrics.map((metric) => (
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {metrics.length > 0 ? (
+          metrics.map((metric) => (
             <Kpi
               key={metric.id}
               label={metric.label}
@@ -206,12 +239,12 @@ function DashboardPage() {
             />
           ))
         ) : (
-          <Card className="sm:col-span-2 xl:col-span-3">
+          <Card className="sm:col-span-2 xl:col-span-4">
             <CardContent className="flex items-center justify-between gap-4 p-5">
               <div>
-                <div className="text-sm font-medium">No seeded metrics remain</div>
+                <div className="text-sm font-medium">No workspace data yet</div>
                 <div className="text-xs text-muted-foreground">
-                  Run the seed script again to repopulate the dashboard cards.
+                  Create partners, customers, or deals to populate the overview.
                 </div>
               </div>
               <Badge variant="outline">Empty</Badge>
@@ -225,8 +258,10 @@ function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <div>
-                <CardTitle className="text-base">Activity feed</CardTitle>
-                <CardDescription>Real-time updates across your partnership</CardDescription>
+                <CardTitle className="text-base">News feed</CardTitle>
+                <CardDescription>
+                  Photo-first updates from LIVEY that partner teams can actually consume.
+                </CardDescription>
               </div>
               <Badge variant="secondary" className="gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
@@ -234,17 +269,18 @@ function DashboardPage() {
               </Badge>
             </CardHeader>
             <CardContent className="space-y-4">
-              {effectiveFeedItems.length > 0 ? (
-                effectiveFeedItems.map((item, index) => (
-                  <div key={item.id}>
-                    <FeedItem item={item} />
-                    {index < effectiveFeedItems.length - 1 && <Separator className="my-4" />}
+              {feedEmpty ? (
+                <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                  No news posts yet. LIVEY admins can publish photo updates from the admin news
+                  page.
+                </div>
+              ) : (
+                newsPosts.map((post, index) => (
+                  <div key={post.id}>
+                    <NewsCard post={post} />
+                    {index < newsPosts.length - 1 && <Separator className="my-4" />}
                   </div>
                 ))
-              ) : (
-                <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No feed items yet. Sync a record to populate the feed.
-                </div>
               )}
             </CardContent>
           </Card>
@@ -252,18 +288,16 @@ function DashboardPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Partner spotlight</CardTitle>
-              <CardDescription>
-                A few live accounts and their current pipeline pulse.
-              </CardDescription>
+              <CardDescription>Active partner records in the live workspace.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {effectiveSpotlights.length > 0 ? (
-                effectiveSpotlights.map((partner) => (
+              {spotlights.length > 0 ? (
+                spotlights.map((partner) => (
                   <SpotlightRow key={partner.id} partner={partner} />
                 ))
               ) : (
                 <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No partner spotlights yet.
+                  No partner spotlight rows yet.
                 </div>
               )}
             </CardContent>
@@ -309,6 +343,9 @@ function DashboardPage() {
               <QuickAction to="/deals" icon={Handshake} label="Register a deal" />
               <QuickAction to="/customers" icon={Users} label="Reserve a customer" />
               <QuickAction to="/documents" icon={FileText} label="Upload documents" />
+              {hasRole("super_admin") && (
+                <QuickAction to="/admin/news" icon={Megaphone} label="Publish news" />
+              )}
             </CardContent>
           </Card>
 
@@ -323,38 +360,6 @@ function DashboardPage() {
               <Step label="Submit partner registration" />
               <Step label="LIVEY approval" />
               <Step label="Register your first deal" />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Demo controls</CardTitle>
-              <CardDescription>
-                Seeded data can be cleared without touching the schema.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="text-sm text-muted-foreground">
-                {hasLiveDemoData
-                  ? "The current feed is coming from seeded rows in Postgres."
-                  : "No live demo rows are available yet."}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => void clearSeededDemoData()}
-                  disabled={!hasLiveDemoData || !hasRole("super_admin") || clearingDemo}
-                >
-                  {clearingDemo ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="mr-2 h-4 w-4" />
-                  )}
-                  Clear seeded demo rows
-                </Button>
-                {!hasRole("super_admin") && <Badge variant="outline">Super Admin only</Badge>}
-              </div>
             </CardContent>
           </Card>
         </div>
@@ -411,33 +416,27 @@ function Kpi({
   );
 }
 
-function FeedItem({ item }: { item: DemoFeedItem }) {
-  const Icon = iconForFeed(item.tone);
-  const toneClass = {
-    info: "bg-info/15 text-info",
-    success: "bg-success/15 text-success",
-    warning: "bg-warning/20 text-warning-foreground",
-    primary: "bg-primary/10 text-primary",
-    default: "bg-muted text-foreground",
-  }[item.tone];
-
+function NewsCard({ post }: { post: NewsPostRecord }) {
   return (
-    <div className="flex gap-3">
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${toneClass}`}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="truncate text-sm font-medium">{item.title}</div>
-          <div className="whitespace-nowrap text-xs text-muted-foreground">{item.time_label}</div>
+    <div className="overflow-hidden rounded-2xl border bg-card">
+      <img src={post.image_path} alt={post.image_alt} className="aspect-[4/3] w-full object-cover" />
+      <div className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">{post.title}</div>
+            <div className="text-xs text-muted-foreground">
+              {post.posted_by_name} · {post.posted_by_role.replace(/_/g, " ")}
+            </div>
+          </div>
+          <Badge variant="outline">{formatDateLabel(post.created_at)}</Badge>
         </div>
-        <div className="text-sm text-muted-foreground">{item.body}</div>
+        <div className="text-sm text-muted-foreground whitespace-pre-line">{post.caption}</div>
       </div>
     </div>
   );
 }
 
-function SpotlightRow({ partner }: { partner: DemoPartnerSpotlight }) {
+function SpotlightRow({ partner }: { partner: PartnerSpotlight }) {
   return (
     <div className="rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -449,17 +448,23 @@ function SpotlightRow({ partner }: { partner: DemoPartnerSpotlight }) {
             </Badge>
           </div>
           <div className="text-xs text-muted-foreground">
-            {partner.contact_name} · {partner.region}
+            {partner.annual_turnover ?? "Turnover not set"}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-sm font-medium">{partner.pipeline_value}</div>
-          <div className="text-xs text-muted-foreground">{partner.status}</div>
+          <div className="text-sm font-medium">{partner.status}</div>
+          <div className="text-xs text-muted-foreground">{formatDateLabel(partner.created_at)}</div>
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{partner.last_activity}</span>
-        <span>Seeded account</span>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(partner.business_focus ?? []).slice(0, 3).map((focus) => (
+          <Badge key={focus} variant="secondary">
+            {focus}
+          </Badge>
+        ))}
+        {(partner.business_focus ?? []).length === 0 && (
+          <span className="text-xs text-muted-foreground">No focus areas yet.</span>
+        )}
       </div>
     </div>
   );
@@ -512,27 +517,17 @@ function Step({ label, done }: { label: string; done?: boolean }) {
   );
 }
 
-function iconForFeed(tone: DemoFeedItem["tone"]) {
-  switch (tone) {
-    case "success":
-      return CheckCircle2;
-    case "warning":
-      return Trophy;
-    case "info":
-      return Users;
-    case "primary":
-      return Sparkles;
-    default:
-      return UserPlus;
-  }
-}
-
 function iconForMetric(label: string) {
-  const normalized = label.toLowerCase();
-  if (normalized.includes("revenue") || normalized.includes("value")) return DollarSign;
-  if (normalized.includes("deal")) return Handshake;
-  if (normalized.includes("win")) return TrendingUp;
-  if (normalized.includes("tier")) return Trophy;
-  if (normalized.includes("avg")) return FileText;
-  return Building2;
+  switch (label) {
+    case "Pipeline value":
+      return Sparkles;
+    case "Open deals":
+      return Handshake;
+    case "Approved partners":
+      return Trophy;
+    case "Customers":
+      return Users;
+    default:
+      return Activity;
+  }
 }

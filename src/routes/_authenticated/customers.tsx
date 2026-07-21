@@ -18,7 +18,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { type CustomerRecord } from "@/lib/portal-demo-data";
+import { toDateInputValue } from "@/lib/date-utils";
+import { type CustomerRecord } from "@/lib/portal-records";
 
 type CustomerForm = {
   company_name: string;
@@ -44,6 +45,17 @@ const EMPTY_FORM: CustomerForm = {
   status: "active",
   next_step: "Schedule QBR",
   last_touch: "Today",
+};
+
+const HEALTH_SCORE_OPTIONS = [0, 25, 50, 75, 100] as const;
+const LAST_TOUCH_OPTIONS = ["Today", "This week", "Last week", "30+ days ago", "Needs follow up"] as const;
+const FALLBACK_CUSTOMER_OPTIONS = {
+  companies: ["Techilla", "ACME Infra", "PartnerShield Technologies", "Nimbus Retail"],
+  owners: ["John Doe", "Amit Verma", "Priya Nair", "Rahul Mehta"],
+  regions: ["India West", "India North", "India South", "India East", "APAC"],
+  segments: ["Mid-market", "Enterprise", "SMB", "Strategic", "Expansion"],
+  mrr: ["$1K", "$5K", "$10K", "$25K", "$50K", "$100K"],
+  statuses: ["active", "expansion", "watchlist", "champion", "growth"],
 };
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -74,7 +86,10 @@ function CustomersPage() {
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) throw error;
-      const rows = (data as CustomerRecord[] | null) ?? [];
+      const rows = ((data as CustomerRecord[] | null) ?? []).map((customer) => ({
+        ...customer,
+        renewal_date: toDateInputValue(customer.renewal_date),
+      }));
       setCustomers(rows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
@@ -119,12 +134,42 @@ function CustomersPage() {
 
   const editOptions = useMemo(() => {
     return {
-      companyNames: uniqueStrings(customers.map((customer) => customer.company_name)),
-      owners: uniqueStrings(customers.map((customer) => customer.account_owner)),
-      regions: uniqueStrings(customers.map((customer) => customer.region)),
-      segments: uniqueStrings(customers.map((customer) => customer.segment)),
-      mrrs: uniqueStrings(customers.map((customer) => customer.mrr)),
-      statuses: uniqueStrings(customers.map((customer) => customer.status)),
+      companyNames: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.companies,
+          ...uniqueStrings(customers.map((customer) => customer.company_name)),
+        ]),
+      ],
+      owners: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.owners,
+          ...uniqueStrings(customers.map((customer) => customer.account_owner)),
+        ]),
+      ],
+      regions: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.regions,
+          ...uniqueStrings(customers.map((customer) => customer.region)),
+        ]),
+      ],
+      segments: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.segments,
+          ...uniqueStrings(customers.map((customer) => customer.segment)),
+        ]),
+      ],
+      mrrs: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.mrr,
+          ...uniqueStrings(customers.map((customer) => customer.mrr)),
+        ]),
+      ],
+      statuses: [
+        ...new Set([
+          ...FALLBACK_CUSTOMER_OPTIONS.statuses,
+          ...uniqueStrings(customers.map((customer) => customer.status)),
+        ]),
+      ],
     };
   }, [customers]);
 
@@ -203,7 +248,7 @@ function CustomersPage() {
       segment: selectedCustomer.segment,
       health_score: selectedCustomer.health_score,
       mrr: selectedCustomer.mrr,
-      renewal_date: selectedCustomer.renewal_date,
+      renewal_date: toDateInputValue(selectedCustomer.renewal_date),
       status: selectedCustomer.status,
       next_step: selectedCustomer.next_step,
       last_touch: selectedCustomer.last_touch,
@@ -419,18 +464,26 @@ function CustomersPage() {
                       </Select>
                     </Field>
                     <Field label="Health score">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={draft.health_score}
-                        onChange={(e) =>
-                          setDraft((value) => ({
-                            ...value,
-                            health_score: Number(e.target.value) || 0,
+                      <Select
+                        value={String(draft.health_score)}
+                        onValueChange={(value) =>
+                          setDraft((valueState) => ({
+                            ...valueState,
+                            health_score: Number(value) || 0,
                           }))
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select score" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {HEALTH_SCORE_OPTIONS.map((score) => (
+                            <SelectItem key={score} value={String(score)}>
+                              {score}%
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field label="MRR">
                       <Select
@@ -487,12 +540,23 @@ function CustomersPage() {
                     />
                   </Field>
                   <Field label="Last touch">
-                    <Input
+                    <Select
                       value={draft.last_touch}
-                      onChange={(e) =>
-                        setDraft((value) => ({ ...value, last_touch: e.target.value }))
+                      onValueChange={(value) =>
+                        setDraft((current) => ({ ...current, last_touch: value }))
                       }
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select last touch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LAST_TOUCH_OPTIONS.map((touch) => (
+                          <SelectItem key={touch} value={touch}>
+                            {touch}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => void saveCustomer()} disabled={saving}>
@@ -522,34 +586,76 @@ function CustomersPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Company">
-                  <Input
+                  <Select
                     value={draft.company_name}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, company_name: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, company_name: value }))
                     }
-                    placeholder="New account"
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.companyNames.map((company) => (
+                        <SelectItem key={company} value={company}>
+                          {company}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Owner">
-                  <Input
+                  <Select
                     value={draft.account_owner}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, account_owner: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, account_owner: value }))
                     }
-                    placeholder="Partner owner"
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select owner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.owners.map((owner) => (
+                        <SelectItem key={owner} value={owner}>
+                          {owner}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Region">
-                  <Input
+                  <Select
                     value={draft.region}
-                    onChange={(e) => setDraft((value) => ({ ...value, region: e.target.value }))}
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select region" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.regions.map((region) => (
+                        <SelectItem key={region} value={region}>
+                          {region}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Segment">
-                  <Input
+                  <Select
                     value={draft.segment}
-                    onChange={(e) => setDraft((value) => ({ ...value, segment: e.target.value }))}
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, segment: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select segment" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.segments.map((segment) => (
+                        <SelectItem key={segment} value={segment}>
+                          {segment}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Health score">
                   <Input
@@ -563,10 +669,21 @@ function CustomersPage() {
                   />
                 </Field>
                 <Field label="MRR">
-                  <Input
+                  <Select
                     value={draft.mrr}
-                    onChange={(e) => setDraft((value) => ({ ...value, mrr: e.target.value }))}
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select MRR" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.mrrs.map((mrr) => (
+                        <SelectItem key={mrr} value={mrr}>
+                          {mrr}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Renewal date">
                   <Input
@@ -578,10 +695,23 @@ function CustomersPage() {
                   />
                 </Field>
                 <Field label="Status">
-                  <Input
+                  <Select
                     value={draft.status}
-                    onChange={(e) => setDraft((value) => ({ ...value, status: e.target.value }))}
-                  />
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, status: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.statuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               </div>
               <Field label="Next step">
@@ -591,10 +721,23 @@ function CustomersPage() {
                 />
               </Field>
               <Field label="Last touch">
-                <Input
+                <Select
                   value={draft.last_touch}
-                  onChange={(e) => setDraft((value) => ({ ...value, last_touch: e.target.value }))}
-                />
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, last_touch: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select touch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LAST_TOUCH_OPTIONS.map((touch) => (
+                      <SelectItem key={touch} value={touch}>
+                        {touch}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Button onClick={() => void createCustomer()} disabled={adding}>
                 {adding ? (

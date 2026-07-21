@@ -11,6 +11,7 @@ import {
   Bell,
   Settings,
   LifeBuoy,
+  Image,
   Sparkles,
 } from "lucide-react";
 
@@ -55,6 +56,7 @@ const admin: Item[] = [
   { title: "Deal Approvals", url: "/admin/deals", icon: Handshake, roles: ["super_admin"] },
   { title: "Users & Roles", url: "/admin/users", icon: Users, roles: ["super_admin"] },
   { title: "Tiers & Products", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
+  { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
   { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
 ];
 

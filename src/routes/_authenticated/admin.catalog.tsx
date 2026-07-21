@@ -19,7 +19,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { type CatalogItemRecord } from "@/lib/portal-demo-data";
+import { type CatalogItemRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
 type CatalogForm = {

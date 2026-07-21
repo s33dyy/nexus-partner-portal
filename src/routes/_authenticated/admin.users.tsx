@@ -16,9 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
-import { DEMO_CREDENTIALS } from "@/lib/portal-demo-data";
 import { useAuth } from "@/hooks/use-auth";
 
 type Profile = {
@@ -41,7 +39,7 @@ type UserRow = Profile & {
   roles: string[];
 };
 
-const ROLE_OPTIONS = ["super_admin", "partner_admin", "partner_user"] as const;
+const ROLE_OPTIONS = ["partner_admin", "partner_user"] as const;
 const PARTNER_STATUS_OPTIONS = [
   "pending_partner_registration",
   "submitted",
@@ -66,6 +64,15 @@ function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [draftRole, setDraftRole] = useState<(typeof ROLE_OPTIONS)[number]>("partner_user");
   const [draftStatus, setDraftStatus] = useState("approved");
+  const [creating, setCreating] = useState(false);
+  const [newUser, setNewUser] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    company_name: "",
+    password: "",
+    role: "partner_admin" as (typeof ROLE_OPTIONS)[number],
+  });
 
   const load = async () => {
     setLoading(true);
@@ -163,7 +170,39 @@ function AdminUsersPage() {
     }
   };
 
-  const seedHints = DEMO_CREDENTIALS.map((user) => `${user.email} / ${user.password}`);
+  const createUser = async () => {
+    if (!newUser.full_name.trim() || !newUser.email.trim() || !newUser.password.trim()) {
+      toast.error("Name, email, and password are required");
+      return;
+    }
+    setCreating(true);
+    try {
+      const { error } = await supabase.auth.createWorkspaceUser({
+        full_name: newUser.full_name.trim(),
+        email: newUser.email.trim(),
+        phone: newUser.phone.trim(),
+        company_name: newUser.company_name.trim() || null,
+        password: newUser.password,
+        role: newUser.role,
+        partner_status: "pending_partner_registration",
+      });
+      if (error) throw error;
+      toast.success("User created");
+      setNewUser({
+        full_name: "",
+        email: "",
+        phone: "",
+        company_name: "",
+        password: "",
+        role: "partner_admin",
+      });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create user");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -179,7 +218,7 @@ function AdminUsersPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">Seeded demo users</Badge>
+          <Badge variant="secondary">Live access</Badge>
           <Button
             variant="outline"
             onClick={() => {
@@ -199,7 +238,7 @@ function AdminUsersPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Users" value={String(users.length)} hint="Seeded profiles" />
+        <Metric label="Users" value={String(users.length)} hint="Active profiles" />
         <Metric
           label="Admins"
           value={String(users.filter((user) => user.roles.includes("super_admin")).length)}
@@ -221,7 +260,7 @@ function AdminUsersPage() {
               <div>
                 <CardTitle className="text-base">User directory</CardTitle>
                 <CardDescription>
-                  Search and switch between the seeded access records.
+                  Search and switch between live access records.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -367,21 +406,78 @@ function AdminUsersPage() {
 
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base">Demo credentials</CardTitle>
+              <CardTitle className="text-base">Create user</CardTitle>
               <CardDescription>
-                These credentials match the seeded Postgres accounts.
+                Create partner admins or partner users from the super-admin account.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 pt-6 text-sm">
-              {seedHints.map((hint) => (
-                <div key={hint} className="rounded-lg border bg-muted/20 p-3 font-mono text-xs">
-                  {hint}
-                </div>
-              ))}
-              <Separator />
-              <div className="text-muted-foreground">
-                Use these accounts to test admin and partner flows locally.
+            <CardContent className="space-y-4 pt-6">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Full name">
+                  <Input
+                    value={newUser.full_name}
+                    onChange={(e) => setNewUser((current) => ({ ...current, full_name: e.target.value }))}
+                    placeholder="Asha Mehta"
+                  />
+                </Field>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser((current) => ({ ...current, email: e.target.value }))}
+                    placeholder="partner@example.com"
+                  />
+                </Field>
+                <Field label="Phone">
+                  <Input
+                    value={newUser.phone}
+                    onChange={(e) => setNewUser((current) => ({ ...current, phone: e.target.value }))}
+                    placeholder="+91 98765 43210"
+                  />
+                </Field>
+                <Field label="Company">
+                  <Input
+                    value={newUser.company_name}
+                    onChange={(e) =>
+                      setNewUser((current) => ({ ...current, company_name: e.target.value }))
+                    }
+                    placeholder="Techilla"
+                  />
+                </Field>
+                <Field label="Password" className="md:col-span-2">
+                  <Input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) =>
+                      setNewUser((current) => ({ ...current, password: e.target.value }))
+                    }
+                    placeholder="Set an initial password"
+                  />
+                </Field>
+                <Field label="Role" className="md:col-span-2">
+                  <Select
+                    value={newUser.role}
+                    onValueChange={(value) =>
+                      setNewUser((current) => ({ ...current, role: value as (typeof ROLE_OPTIONS)[number] }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLE_OPTIONS.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {role.replace("_", " ")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
               </div>
+              <Button onClick={() => void createUser()} disabled={creating}>
+                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Create user
+              </Button>
             </CardContent>
           </Card>
         </div>

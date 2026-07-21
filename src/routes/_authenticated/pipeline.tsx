@@ -13,7 +13,7 @@ import {
   nextDealStage,
   nextDealStatus,
   type DealRecord,
-} from "@/lib/portal-demo-data";
+} from "@/lib/portal-records";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
