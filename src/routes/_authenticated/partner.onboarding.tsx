@@ -94,7 +94,7 @@ type DocRow = {
 };
 
 function OnboardingPage() {
-  const { user, profile, refresh } = useAuth();
+  const { user, profile, refresh, hasRole } = useAuth();
   const navigate = useNavigate();
   const [stepIdx, setStepIdx] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -121,6 +121,8 @@ function OnboardingPage() {
 
   const status = profile?.partner_status ?? "pending_partner_registration";
   const readOnly = status === "submitted" || status === "under_review" || status === "approved";
+  const canAccessOnboarding =
+    hasRole("partner_user") || hasRole("partner_admin") || hasRole("super_admin");
 
   // Load existing partner if any
   useEffect(() => {
@@ -178,6 +180,18 @@ function OnboardingPage() {
       }
     })();
   }, [user]);
+
+  if (!canAccessOnboarding) {
+    return (
+      <Alert>
+        <ShieldCheck className="h-4 w-4" />
+        <AlertTitle>Onboarding unavailable</AlertTitle>
+        <AlertDescription>
+          You need a partner account to complete onboarding.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   const progress = ((stepIdx + 1) / STEPS.length) * 100;
   const step = STEPS[stepIdx];

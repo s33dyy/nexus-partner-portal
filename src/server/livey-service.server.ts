@@ -640,7 +640,38 @@ export async function signUpLocal(input: {
     [id, input.email, passwordHash, input.full_name, input.phone || null, input.company_name],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'partner_user')`, [id]);
-  return { user_id: id };
+
+  const token = createToken();
+  const expiresAt = sessionExpiresAt();
+  await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
+    id,
+    hashSha256(token),
+    expiresAt,
+  ]);
+  setCookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    expires: expiresAt,
+  });
+
+  return {
+    session: {
+      access_token: token,
+      expires_at: Math.floor(expiresAt.getTime() / 1000),
+      user: toLocalUser({
+        id,
+        email: input.email,
+        full_name: input.full_name,
+        phone: input.phone || null,
+        company_name: input.company_name,
+        partner_id: null,
+        partner_status: "pending_partner_registration",
+      }),
+    } satisfies LocalSession,
+    user_id: id,
+  };
 }
 
 export async function signOutLocal() {

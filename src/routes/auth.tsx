@@ -103,7 +103,7 @@ function AuthPage() {
               <SignInForm redirect={search.redirect} />
             </TabsContent>
             <TabsContent value="signup" className="mt-6">
-              <SignUpForm onDone={() => setTab("signin")} />
+              <SignUpForm />
             </TabsContent>
             <TabsContent value="forgot" className="mt-6">
               <ForgotForm />
@@ -223,7 +223,8 @@ const signUpSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 
-function SignUpForm({ onDone }: { onDone: () => void }) {
+function SignUpForm() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     full_name: "",
@@ -245,7 +246,7 @@ function SignUpForm({ onDone }: { onDone: () => void }) {
       email: parsed.data.email,
       password: parsed.data.password,
       options: {
-        emailRedirectTo: `${window.location.origin}/dashboard`,
+        emailRedirectTo: `${window.location.origin}/partner/onboarding`,
         data: {
           full_name: parsed.data.full_name,
           phone: parsed.data.phone,
@@ -258,8 +259,8 @@ function SignUpForm({ onDone }: { onDone: () => void }) {
       toast.error(error.message);
       return;
     }
-    toast.success("Account created — you can sign in now.");
-    onDone();
+    toast.success("Account created — continuing to onboarding.");
+    navigate({ to: "/partner/onboarding", replace: true });
   };
 
   return (
