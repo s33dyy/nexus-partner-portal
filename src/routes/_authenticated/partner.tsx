@@ -183,7 +183,7 @@ function PartnerPage() {
     }
   };
 
-  if (!hasRole("partner_admin") && !hasRole("super_admin")) {
+  if (!hasRole("partner_user") && !hasRole("partner_admin") && !hasRole("super_admin")) {
     return (
       <AccessDeniedPage
         title="Company profile"
