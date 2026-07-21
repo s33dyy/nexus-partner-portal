@@ -159,12 +159,14 @@ function AdminPartners() {
     if (!selected) return;
     setActing(true);
     try {
-      const patch: { status: string; tier?: string } = { status: decision };
-      if (decision === "approved") {
-        patch.tier = tierForTurnover(selected.annual_turnover);
-      }
+      const patch =
+        decision === "approved"
+          ? { status: decision, tier: tierForTurnover(selected.annual_turnover) }
+          : { status: decision };
       const { error } = await supabase.from("partners").update(patch).eq("id", selected.id);
       if (error) throw error;
+
+
 
       await supabase
         .from("profiles")
