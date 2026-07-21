@@ -1,55 +1,53 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { z } from "zod";
 
-import { supabase } from "@/integrations/supabase/client";
+import { completePasswordReset } from "@/integrations/local/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
+const resetSearchSchema = z.object({
+  token: z.string().min(1).optional(),
+});
+
 export const Route = createFileRoute("/reset-password")({
   ssr: false,
+  validateSearch: resetSearchSchema,
   component: ResetPasswordPage,
 });
 
 function ResetPasswordPage() {
   const navigate = useNavigate();
-  const [ready, setReady] = useState(false);
+  const search = useSearch({ from: "/reset-password" });
   const [loading, setLoading] = useState(false);
   const [password, setPassword] = useState("");
 
-  useEffect(() => {
-    // Supabase auto-processes the recovery hash and emits a SIGNED_IN / PASSWORD_RECOVERY event.
-    const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
-        setReady(true);
-      }
-    });
-    supabase.auth.getSession().then(({ data: s }) => {
-      if (s.session) setReady(true);
-    });
-    return () => data.subscription.unsubscribe();
-  }, []);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!search.token) {
+      toast.error("Missing reset token");
+      return;
+    }
     const parsed = z.string().min(8, "Password must be at least 8 characters").safeParse(password);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0].message);
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password: parsed.data });
-    setLoading(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      await completePasswordReset(search.token, parsed.data);
+      toast.success("Password updated");
+      navigate({ to: "/dashboard", replace: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Password reset failed";
+      toast.error(message);
+    } finally {
+      setLoading(false);
     }
-    toast.success("Password updated");
-    navigate({ to: "/dashboard", replace: true });
   };
 
   return (
@@ -59,8 +57,18 @@ function ResetPasswordPage() {
           <CardTitle>Set a new password</CardTitle>
         </CardHeader>
         <CardContent>
-          {!ready ? (
-            <p className="text-sm text-muted-foreground">Verifying reset link…</p>
+          {!search.token ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This reset page needs a token. Use the password reset link generated from the
+                partner portal.
+              </p>
+              <Button asChild className="w-full">
+                <Link to="/auth" search={{ mode: "forgot" }}>
+                  Back to sign in
+                </Link>
+              </Button>
+            </div>
           ) : (
             <form onSubmit={submit} className="space-y-4">
               <div className="space-y-2">

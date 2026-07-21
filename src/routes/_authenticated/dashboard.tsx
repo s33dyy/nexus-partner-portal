@@ -21,7 +21,7 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/local/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -97,14 +97,7 @@ function DashboardPage() {
     void loadDemoContent();
   }, []);
 
-  const hasSeededDemoData = useMemo(
-    () =>
-      demoSource === "database" &&
-      (metrics.some((item) => item.is_seed) ||
-        feedItems.some((item) => item.is_seed) ||
-        spotlights.some((item) => item.is_seed)),
-    [demoSource, feedItems, metrics, spotlights],
-  );
+  const hasSeededDemoData = useMemo(() => demoSource === "database", [demoSource]);
 
   const effectiveMetrics = demoSource === "fallback" ? DEMO_METRICS : metrics;
   const effectiveFeedItems = demoSource === "fallback" ? DEMO_FEED_ITEMS : feedItems;
@@ -113,13 +106,20 @@ function DashboardPage() {
   const clearSeededDemoData = async () => {
     setClearingDemo(true);
     try {
-      const [metricsRes, feedRes, spotlightsRes] = await Promise.all([
+      const results = await Promise.all([
+        supabase.from("password_reset_tokens").delete(),
+        supabase.from("document_blobs").delete().eq("is_seed", true),
+        supabase.from("partner_review_notes").delete().eq("is_seed", true),
+        supabase.from("partner_documents").delete().eq("is_seed", true),
+        supabase.from("partners").delete().eq("is_seed", true),
+        supabase.from("user_roles").delete().eq("is_seed", true),
+        supabase.from("profiles").delete().eq("is_seed", true),
         supabase.from("portal_demo_metrics").delete().eq("is_seed", true),
         supabase.from("portal_demo_feed_items").delete().eq("is_seed", true),
         supabase.from("portal_demo_partner_spotlights").delete().eq("is_seed", true),
       ]);
 
-      const error = metricsRes.error ?? feedRes.error ?? spotlightsRes.error;
+      const error = results.find((result) => result.error)?.error ?? null;
       if (error) throw error;
 
       toast.success("Seeded demo data cleared");
@@ -340,7 +340,7 @@ function DashboardPage() {
             <CardContent className="space-y-3">
               <div className="text-sm text-muted-foreground">
                 {hasSeededDemoData
-                  ? "The current feed is coming from seeded rows in Supabase."
+                  ? "The current feed is coming from seeded rows in Postgres."
                   : demoSource === "fallback"
                     ? "Fallback demo content is shown because the demo tables are not available yet."
                     : "The seeded demo rows have been cleared."}

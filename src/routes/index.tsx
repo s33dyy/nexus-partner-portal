@@ -5,7 +5,7 @@ export const Route = createFileRoute("/")({
   ssr: false,
   beforeLoad: async () => {
     if (typeof window === "undefined") return;
-    const { supabase } = await import("@/integrations/supabase/client");
+    const { supabase } = await import("@/integrations/local/client");
     const { data } = await supabase.auth.getSession();
     if (data.session) {
       throw redirect({ to: "/dashboard" });
