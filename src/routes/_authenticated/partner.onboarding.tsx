@@ -93,6 +93,10 @@ type DocRow = {
   size_bytes: number | null;
 };
 
+function isDocRow(doc: DocRow | null | undefined): doc is DocRow {
+  return Boolean(doc?.id && doc?.doc_type && doc?.file_name && doc?.file_path);
+}
+
 function OnboardingPage() {
   const { user, profile, refresh } = useAuth();
   const navigate = useNavigate();
@@ -131,25 +135,23 @@ function OnboardingPage() {
         .select("*")
         .eq("owner_user_id", user.id)
         .maybeSingle();
-      const partner = data as
-        | {
-            id: string;
-            company_name: string | null;
-            legal_name: string | null;
-            gst_number: string | null;
-            pan: string | null;
-            cin: string | null;
-            website: string | null;
-            business_address: string | null;
-            country: string | null;
-            state: string | null;
-            business_type: string | null;
-            years_in_business: number | null;
-            annual_turnover: string | null;
-            employee_count: string | null;
-            business_focus: string[] | null;
-          }
-        | null;
+      const partner = data as {
+        id: string;
+        company_name: string | null;
+        legal_name: string | null;
+        gst_number: string | null;
+        pan: string | null;
+        cin: string | null;
+        website: string | null;
+        business_address: string | null;
+        country: string | null;
+        state: string | null;
+        business_type: string | null;
+        years_in_business: number | null;
+        annual_turnover: string | null;
+        employee_count: string | null;
+        business_focus: string[] | null;
+      } | null;
       if (partner) {
         setPartnerId(partner.id);
         setForm((f) => ({
@@ -174,7 +176,7 @@ function OnboardingPage() {
           .select("id, doc_type, file_name, file_path, size_bytes")
           .eq("partner_id", partner.id)
           .order("created_at", { ascending: false });
-        setDocs((d as DocRow[]) ?? []);
+        setDocs(((d as Array<DocRow | null | undefined>) ?? []).filter(isDocRow));
       }
     })();
   }, [user]);
@@ -241,7 +243,10 @@ function OnboardingPage() {
           id = (conflictedPartner as { id: string } | null)?.id ?? null;
           if (!id) throw error;
 
-          const { error: retryError } = await supabase.from("partners").update(payload).eq("id", id);
+          const { error: retryError } = await supabase
+            .from("partners")
+            .update(payload)
+            .eq("id", id);
           if (retryError) throw retryError;
         } else {
           id = (data as { id: string } | null)?.id ?? null;
@@ -332,7 +337,10 @@ function OnboardingPage() {
           .select("id, doc_type, file_name, file_path, size_bytes")
           .single();
         if (insErr) throw insErr;
-        setDocs((d) => [row as DocRow, ...d]);
+        if (!isDocRow(row)) {
+          throw new Error("Uploaded file saved, but the partner document row was not returned");
+        }
+        setDocs((d) => [row, ...d.filter(isDocRow)]);
       } catch (insertError) {
         if (upResult?.path) {
           await supabase.storage.from("partner-documents").remove([upResult.path]);
@@ -363,7 +371,8 @@ function OnboardingPage() {
     if (!user) return;
     const id = partnerId ?? (await persistDraft());
     if (!id) return;
-    if (docs.length === 0) {
+    const validDocs = docs.filter(isDocRow);
+    if (validDocs.length === 0) {
       toast.error("Please upload at least one supporting document");
       return;
     }
@@ -392,13 +401,14 @@ function OnboardingPage() {
 
   const docsByType = useMemo(() => {
     const m = new Map<string, DocRow[]>();
-    for (const d of docs) {
+    for (const d of docs.filter(isDocRow)) {
       const arr = m.get(d.doc_type) ?? [];
       arr.push(d);
       m.set(d.doc_type, arr);
     }
     return m;
   }, [docs]);
+  const validDocs = useMemo(() => docs.filter(isDocRow), [docs]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -729,13 +739,13 @@ function OnboardingPage() {
                     </div>
                   </ReviewBlock>
                   <ReviewBlock title="Documents">
-                    {docs.length === 0 ? (
+                    {validDocs.length === 0 ? (
                       <span className="text-sm text-muted-foreground">
                         No documents uploaded yet
                       </span>
                     ) : (
                       <ul className="space-y-1 text-sm">
-                        {docs.map((d) => (
+                        {validDocs.map((d) => (
                           <li key={d.id} className="flex items-center gap-2">
                             <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="font-medium">{d.doc_type}:</span>
