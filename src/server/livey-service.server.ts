@@ -293,6 +293,31 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function buildWhereClause(
+  filters: QueryFilter[],
+  columns: string[],
+  parameterOffset = 0,
+) {
+  const whereClauses: string[] = [];
+  const whereParams: unknown[] = [];
+
+  filters.forEach((filter, index) => {
+    if (filter.operator !== "eq") {
+      throw new Error(`Unsupported filter operator: ${filter.operator}`);
+    }
+    if (!columns.includes(filter.column)) {
+      throw new Error(`Unsupported filter column: ${filter.column}`);
+    }
+    whereClauses.push(`${quoteIdent(filter.column)} = $${parameterOffset + index + 1}`);
+    whereParams.push(filter.value);
+  });
+
+  return {
+    whereSql: whereClauses.length > 0 ? ` WHERE ${whereClauses.join(" AND ")}` : "",
+    whereParams,
+  };
+}
+
 function serializeDbValue<T>(value: T): T {
   if (value instanceof Date) {
     return value.toISOString() as T;
@@ -351,31 +376,16 @@ export async function queryTable(query: TableQuery) {
   const filters = query.filters ?? [];
   const order = query.order;
   const values = query.values;
-
-  const whereClauses: string[] = [];
-  const params: unknown[] = [];
-
-  filters.forEach((filter, index) => {
-    if (filter.operator !== "eq") {
-      throw new Error(`Unsupported filter operator: ${filter.operator}`);
-    }
-    if (!columns.includes(filter.column)) {
-      throw new Error(`Unsupported filter column: ${filter.column}`);
-    }
-    whereClauses.push(`${quoteIdent(filter.column)} = $${index + 1}`);
-    params.push(filter.value);
-  });
-
-  const whereSql = whereClauses.length > 0 ? ` WHERE ${whereClauses.join(" AND ")}` : "";
   const orderSql =
     order && columns.includes(order.column)
       ? ` ORDER BY ${quoteIdent(order.column)} ${order.ascending === false ? "DESC" : "ASC"}`
       : "";
 
   if (query.operation === "select") {
+    const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
       `SELECT * FROM ${quoteIdent(query.table)}${whereSql}${orderSql}`,
-      params,
+      whereParams,
     );
     const data = result.rows.map((row) => serializeDbValue(row));
     return {
@@ -437,9 +447,10 @@ export async function queryTable(query: TableQuery) {
       .map((column, index) => `${quoteIdent(column)} = $${index + 1}`)
       .join(", ");
     const updateParams = updateColumns.map((column) => values[column]);
+    const { whereSql, whereParams } = buildWhereClause(filters, columns, updateColumns.length);
     const result = await pool.query(
       `UPDATE ${quoteIdent(query.table)} SET ${setSql}${whereSql} RETURNING *`,
-      [...updateParams, ...params],
+      [...updateParams, ...whereParams],
     );
     const rows = result.rows.map((row) => serializeDbValue(row));
     return {
@@ -454,9 +465,10 @@ export async function queryTable(query: TableQuery) {
   }
 
   if (query.operation === "delete") {
+    const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
       `DELETE FROM ${quoteIdent(query.table)}${whereSql} RETURNING *`,
-      params,
+      whereParams,
     );
     const rows = result.rows.map((row) => serializeDbValue(row));
     return {

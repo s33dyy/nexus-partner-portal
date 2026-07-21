@@ -12,6 +12,7 @@ import {
   DEAL_STAGE_ORDER,
   DEMO_DEALS,
   nextDealStage,
+  nextDealStatus,
   type DealRecord,
 } from "@/lib/portal-demo-data";
 
@@ -89,7 +90,7 @@ function PipelinePage() {
         .from("portal_deals")
         .update({
           stage,
-          status: stage === "won" ? "won" : stage === "lost" ? "lost" : "in_progress",
+          status: nextDealStatus(deal.status, stage),
           last_touch: `Moved to ${stage}`,
           updated_at: new Date().toISOString(),
         })

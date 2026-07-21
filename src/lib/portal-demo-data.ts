@@ -519,3 +519,10 @@ export function nextDealStage(stage: DealStage): DealStage {
   const index = DEAL_STAGE_ORDER.indexOf(stage);
   return index >= 0 && index < DEAL_STAGE_ORDER.length - 1 ? DEAL_STAGE_ORDER[index + 1] : stage;
 }
+
+export function nextDealStatus(currentStatus: string, stage: DealStage): string {
+  if (stage === "won" || stage === "lost") {
+    return stage;
+  }
+  return currentStatus;
+}

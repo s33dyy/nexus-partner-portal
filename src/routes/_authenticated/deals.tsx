@@ -34,6 +34,7 @@ import {
   DEAL_STAGE_ORDER,
   DEMO_DEALS,
   nextDealStage,
+  nextDealStatus,
   type DealRecord,
   type DealStage,
 } from "@/lib/portal-demo-data";
@@ -206,7 +207,7 @@ function DealsPage() {
     const stage = nextDealStage(selectedDeal.stage);
     await updateDeal({
       stage,
-      status: stage === "won" ? "won" : stage === "lost" ? "lost" : "in_progress",
+      status: nextDealStatus(selectedDeal.status, stage),
       last_touch: "Advanced in pipeline",
       notes: note.trim() || selectedDeal.notes,
       updated_at: new Date().toISOString(),
