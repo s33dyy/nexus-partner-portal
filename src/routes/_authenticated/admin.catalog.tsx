@@ -46,6 +46,16 @@ const EMPTY_FORM: CatalogForm = {
   benefits: "",
 };
 
+const FALLBACK_CATALOG_OPTIONS = {
+  skus: ["LIVEY-WC350", "LIVEY-VPRO-4K", "LIVEY-ROOMBAR-PRO", "LIVEY-STREAM-KIT"],
+  productNames: ["LIVEY WC350 QHD Webcam", "LIVEY VPRO 4K Camera", "LIVEY RoomBar Pro", "LIVEY Stream Kit"],
+  categories: ["Hardware", "Bundles", "Accessories", "Software"],
+  tiers: ["Registered", "Silver", "Gold", "Platinum"],
+  prices: ["$99", "$149", "$249", "$499", "$899"],
+  margins: ["10%", "15%", "20%", "25%", "30%"],
+  availability: ["In stock", "Low stock", "Preorder", "Out of stock"],
+};
+
 function uniqueStrings(values: Array<string | number | null | undefined>) {
   return [...new Set(values.map((value) => String(value ?? "").trim()).filter((value) => !!value))];
 }
@@ -114,13 +124,13 @@ function AdminCatalogPage() {
 
   const editOptions = useMemo(() => {
     return {
-      skus: uniqueStrings(items.map((item) => item.sku)),
-      productNames: uniqueStrings(items.map((item) => item.product_name)),
-      categories: uniqueStrings(items.map((item) => item.category)),
-      tiers: uniqueStrings(items.map((item) => item.partner_tier)),
-      prices: uniqueStrings(items.map((item) => item.list_price)),
-      margins: uniqueStrings(items.map((item) => item.margin)),
-      availability: uniqueStrings(items.map((item) => item.availability)),
+      skus: [...new Set([...FALLBACK_CATALOG_OPTIONS.skus, ...uniqueStrings(items.map((item) => item.sku))])],
+      productNames: [...new Set([...FALLBACK_CATALOG_OPTIONS.productNames, ...uniqueStrings(items.map((item) => item.product_name))])],
+      categories: [...new Set([...FALLBACK_CATALOG_OPTIONS.categories, ...uniqueStrings(items.map((item) => item.category))])],
+      tiers: [...new Set([...FALLBACK_CATALOG_OPTIONS.tiers, ...uniqueStrings(items.map((item) => item.partner_tier))])],
+      prices: [...new Set([...FALLBACK_CATALOG_OPTIONS.prices, ...uniqueStrings(items.map((item) => item.list_price))])],
+      margins: [...new Set([...FALLBACK_CATALOG_OPTIONS.margins, ...uniqueStrings(items.map((item) => item.margin))])],
+      availability: [...new Set([...FALLBACK_CATALOG_OPTIONS.availability, ...uniqueStrings(items.map((item) => item.availability))])],
     };
   }, [items]);
 
@@ -511,40 +521,97 @@ function AdminCatalogPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="SKU">
-                  <Input
+                  <Select
                     value={draft.sku}
-                    onChange={(e) => setDraft((value) => ({ ...value, sku: e.target.value }))}
-                  />
+                    onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select SKU" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.skus.map((sku) => (
+                        <SelectItem key={sku} value={sku}>
+                          {sku}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Product name">
-                  <Input
+                  <Select
                     value={draft.product_name}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, product_name: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, product_name: value }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.productNames.map((product) => (
+                        <SelectItem key={product} value={product}>
+                          {product}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Category">
-                  <Input
+                  <Select
                     value={draft.category}
-                    onChange={(e) => setDraft((value) => ({ ...value, category: e.target.value }))}
-                  />
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, category: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.categories.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Tier">
-                  <Input
+                  <Select
                     value={draft.partner_tier}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, partner_tier: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, partner_tier: value }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select tier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.tiers.map((tier) => (
+                        <SelectItem key={tier} value={tier}>
+                          {tier}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Price">
-                  <Input
+                  <Select
                     value={draft.list_price}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, list_price: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, list_price: value }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select price" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editOptions.prices.map((price) => (
+                        <SelectItem key={price} value={price}>
+                          {price}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Stock">
                   <Input
