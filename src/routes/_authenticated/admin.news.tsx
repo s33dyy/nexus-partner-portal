@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
@@ -49,6 +49,7 @@ function AdminNewsPage() {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -120,7 +121,7 @@ function AdminNewsPage() {
 
   const createPost = async () => {
     if (!draft.title.trim() || !draft.caption.trim() || !draft.image_path.trim()) {
-      toast.error("Title, caption, and image path are required");
+      toast.error("Title, caption, and image are required");
       return;
     }
     setCreating(true);
@@ -190,6 +191,27 @@ function AdminNewsPage() {
       toast.error(error instanceof Error ? error.message : "Failed to delete news post");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const uploadImage = async (file: File) => {
+    setUploadingImage(true);
+    try {
+      const extension = file.name.split(".").pop() ?? "jpg";
+      const path = `news/${globalThis.crypto.randomUUID()}-${Date.now()}.${extension}`;
+      const { data, error } = await supabase.storage.from("news-media").upload(path, file, {
+        upsert: false,
+        contentType: file.type,
+      });
+      if (error || !data) {
+        throw error ?? new Error("Image upload failed");
+      }
+      setDraft((current) => ({ ...current, image_path: data.signedUrl }));
+      toast.success("Image uploaded to Cloudinary");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Image upload failed");
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -344,12 +366,35 @@ function AdminNewsPage() {
                       />
                     </Field>
                     <Field label="Image path">
-                      <Input
-                        value={draft.image_path}
-                        onChange={(e) =>
-                          setDraft((current) => ({ ...current, image_path: e.target.value }))
-                        }
-                      />
+                      <div className="space-y-2">
+                        <Input
+                          value={draft.image_path}
+                          onChange={(e) =>
+                            setDraft((current) => ({ ...current, image_path: e.target.value }))
+                          }
+                          placeholder="Paste a Cloudinary URL or upload below"
+                        />
+                        <label className="inline-flex cursor-pointer">
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void uploadImage(file);
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                          <Button type="button" variant="secondary" size="sm" disabled={uploadingImage}>
+                            {uploadingImage ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Upload className="mr-2 h-4 w-4" />
+                            )}
+                            Upload image
+                          </Button>
+                        </label>
+                      </div>
                     </Field>
                     <Field label="Caption" className="md:col-span-2">
                       <Textarea
@@ -407,13 +452,35 @@ function AdminNewsPage() {
                   />
                 </Field>
                 <Field label="Image path">
-                  <Input
-                    value={draft.image_path}
-                    onChange={(e) =>
-                      setDraft((current) => ({ ...current, image_path: e.target.value }))
-                    }
-                    placeholder="/news/livey-wc350-qhd.png"
-                  />
+                  <div className="space-y-2">
+                    <Input
+                      value={draft.image_path}
+                      onChange={(e) =>
+                        setDraft((current) => ({ ...current, image_path: e.target.value }))
+                      }
+                      placeholder="Paste a Cloudinary URL or upload below"
+                    />
+                    <label className="inline-flex cursor-pointer">
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void uploadImage(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <Button type="button" variant="secondary" size="sm" disabled={uploadingImage}>
+                        {uploadingImage ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        Upload image
+                      </Button>
+                    </label>
+                  </div>
                 </Field>
                 <Field label="Caption" className="md:col-span-2">
                   <Textarea

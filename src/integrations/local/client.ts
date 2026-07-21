@@ -241,11 +241,11 @@ class QueryBuilder {
 
 function createStorageBucket(bucket: string) {
   return {
-    async upload(
+  async upload(
       filePath: string,
       file: File,
       options?: { upsert?: boolean; contentType?: string },
-    ): Promise<RpcResult<{ path: string }>> {
+    ): Promise<RpcResult<{ path: string; signedUrl: string; publicId: string }>> {
       try {
         const form = new FormData();
         form.append("bucket", bucket);

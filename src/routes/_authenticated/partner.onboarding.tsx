@@ -188,7 +188,9 @@ function OnboardingPage() {
     if (!user) return null;
     setSaving(true);
     try {
+      const recordId = partnerId ?? globalThis.crypto.randomUUID();
       const payload = {
+        id: recordId,
         owner_user_id: user.id,
         company_name: form.company_name || "Unnamed Company",
         legal_name: form.legal_name || null,
@@ -207,14 +209,44 @@ function OnboardingPage() {
       };
       let id = partnerId;
       if (!id) {
+        const { data: existingPartner, error: lookupError } = await supabase
+          .from("partners")
+          .select("id")
+          .eq("owner_user_id", user.id)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        id = (existingPartner as { id: string } | null)?.id ?? null;
+        if (id) {
+          setPartnerId(id);
+        }
+      }
+      if (!id) {
         const { data, error } = await supabase
           .from("partners")
           .insert(payload)
           .select("id")
           .single();
-        if (error) throw error;
-        id = (data as { id: string } | null)?.id ?? null;
-        if (!id) throw new Error("Failed to create partner record");
+        if (error) {
+          const duplicateOwner =
+            error.message.includes("duplicate key value violates unique constraint") ||
+            error.message.includes("partners_owner_user_id_key");
+          if (!duplicateOwner) throw error;
+
+          const { data: conflictedPartner, error: conflictLookupError } = await supabase
+            .from("partners")
+            .select("id")
+            .eq("owner_user_id", user.id)
+            .maybeSingle();
+          if (conflictLookupError) throw conflictLookupError;
+          id = (conflictedPartner as { id: string } | null)?.id ?? null;
+          if (!id) throw error;
+
+          const { error: retryError } = await supabase.from("partners").update(payload).eq("id", id);
+          if (retryError) throw retryError;
+        } else {
+          id = (data as { id: string } | null)?.id ?? null;
+          if (!id) throw new Error("Failed to create partner record");
+        }
         setPartnerId(id);
         // link profile.partner_id
         await supabase.from("profiles").update({ partner_id: id }).eq("id", user.id);
@@ -281,25 +313,32 @@ function OnboardingPage() {
     try {
       const ext = file.name.split(".").pop() ?? "bin";
       const path = `${id}/${docType.replace(/\W+/g, "_")}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
+      const { data: upResult, error: upErr } = await supabase.storage
         .from("partner-documents")
         .upload(path, file, { upsert: false, contentType: file.type });
       if (upErr) throw upErr;
-      const { data: row, error: insErr } = await supabase
-        .from("partner_documents")
-        .insert({
-          partner_id: id,
-          uploaded_by: user.id,
-          doc_type: docType,
-          file_path: path,
-          file_name: file.name,
-          mime_type: file.type,
-          size_bytes: file.size,
-        })
-        .select("id, doc_type, file_name, file_path, size_bytes")
-        .single();
-      if (insErr) throw insErr;
-      setDocs((d) => [row as DocRow, ...d]);
+      try {
+        const { data: row, error: insErr } = await supabase
+          .from("partner_documents")
+          .insert({
+            partner_id: id,
+            uploaded_by: user.id,
+            doc_type: docType,
+            file_path: path,
+            file_name: file.name,
+            mime_type: file.type,
+            size_bytes: file.size,
+          })
+          .select("id, doc_type, file_name, file_path, size_bytes")
+          .single();
+        if (insErr) throw insErr;
+        setDocs((d) => [row as DocRow, ...d]);
+      } catch (insertError) {
+        if (upResult?.path) {
+          await supabase.storage.from("partner-documents").remove([upResult.path]);
+        }
+        throw insertError;
+      }
       toast.success(`${docType} uploaded`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Upload failed";

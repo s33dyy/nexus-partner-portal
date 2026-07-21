@@ -5,6 +5,12 @@ import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 
+import {
+  buildCloudinaryMediaUrl,
+  deleteFromCloudinary,
+  uploadToCloudinary,
+} from "@/server/cloudinary.server";
+
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
@@ -829,28 +835,54 @@ export async function uploadDocumentBlob(input: {
   file: File;
   isSeed?: boolean;
 }) {
-  const bytes = new Uint8Array(await input.file.arrayBuffer());
-  await pool.query(
-    `INSERT INTO document_blobs (file_path, bucket, file_name, mime_type, size_bytes, file_data, is_seed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (file_path) DO UPDATE SET
-       bucket = EXCLUDED.bucket,
-       file_name = EXCLUDED.file_name,
-       mime_type = EXCLUDED.mime_type,
-       size_bytes = EXCLUDED.size_bytes,
-       file_data = EXCLUDED.file_data,
-       is_seed = EXCLUDED.is_seed`,
-    [
-      input.filePath,
-      input.bucket,
-      input.fileName,
-      input.mimeType,
-      bytes.length,
-      Buffer.from(bytes),
-      input.isSeed ?? false,
-    ],
-  );
-  return { path: input.filePath };
+  const resourceType = input.mimeType.startsWith("image/") ? "image" : "raw";
+  const upload = await uploadToCloudinary({
+    file: input.file,
+    publicId: input.filePath,
+    resourceType,
+    folder: input.bucket,
+  });
+  try {
+    await pool.query(
+      `INSERT INTO document_blobs (file_path, bucket, file_name, mime_type, size_bytes, file_data, is_seed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (file_path) DO UPDATE SET
+         bucket = EXCLUDED.bucket,
+         file_name = EXCLUDED.file_name,
+         mime_type = EXCLUDED.mime_type,
+         size_bytes = EXCLUDED.size_bytes,
+         file_data = EXCLUDED.file_data,
+         is_seed = EXCLUDED.is_seed`,
+      [
+        upload.public_id,
+        input.bucket,
+        input.fileName,
+        input.mimeType,
+        upload.bytes,
+        Buffer.from(
+          JSON.stringify({
+            publicId: upload.public_id,
+            secureUrl: upload.secure_url,
+            resourceType: upload.resource_type,
+            format: upload.format ?? null,
+          }),
+          "utf8",
+        ),
+        input.isSeed ?? false,
+      ],
+    );
+  } catch (error) {
+    await deleteFromCloudinary({
+      publicId: upload.public_id,
+      resourceType: upload.resource_type,
+    }).catch(() => {});
+    throw error;
+  }
+  return {
+    path: upload.public_id,
+    signedUrl: upload.secure_url,
+    publicId: upload.public_id,
+  };
 }
 
 export async function createDocumentDataUrl(filePath: string) {
@@ -864,6 +896,36 @@ export async function createDocumentDataUrl(filePath: string) {
   if (!blob) {
     throw new Error("Document not found");
   }
+  const raw = Buffer.from(blob.file_data ?? Buffer.from([])).toString("utf8");
+  try {
+    const parsed = JSON.parse(raw) as
+      | {
+          publicId?: string;
+          secureUrl?: string;
+          resourceType?: "image" | "raw";
+          format?: string | null;
+        }
+      | undefined;
+    if (parsed?.secureUrl) {
+      return {
+        signedUrl: parsed.secureUrl,
+        fileName: blob.file_name,
+      };
+    }
+    if (parsed?.publicId && parsed?.resourceType) {
+      return {
+        signedUrl: buildCloudinaryMediaUrl({
+          publicId: parsed.publicId,
+          resourceType: parsed.resourceType,
+          format: parsed.format ?? null,
+        }),
+        fileName: blob.file_name,
+      };
+    }
+  } catch {
+    // Fall back to the legacy in-DB binary blob format below.
+  }
+
   const base64 = Buffer.from(blob.file_data).toString("base64");
   return {
     signedUrl: `data:${blob.mime_type};base64,${base64}`,
@@ -875,6 +937,30 @@ export async function removeDocumentBlobs(paths: string[]) {
   if (paths.length === 0) {
     return { removed: 0 };
   }
+  const blobRows = await pool.query(
+    `SELECT file_path, file_data FROM document_blobs WHERE file_path = ANY($1::text[])`,
+    [paths],
+  );
+  await Promise.all(
+    blobRows.rows.map(async (row) => {
+      try {
+        const parsed = JSON.parse(Buffer.from(row.file_data ?? Buffer.from([])).toString("utf8")) as
+          | {
+              publicId?: string;
+              resourceType?: "image" | "raw";
+            }
+          | undefined;
+        if (parsed?.publicId && parsed?.resourceType) {
+          await deleteFromCloudinary({
+            publicId: parsed.publicId,
+            resourceType: parsed.resourceType,
+          });
+        }
+      } catch {
+        // Legacy binary blobs or malformed metadata: delete the database row only.
+      }
+    }),
+  );
   const result = await pool.query(`DELETE FROM document_blobs WHERE file_path = ANY($1::text[])`, [
     paths,
   ]);
