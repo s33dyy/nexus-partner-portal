@@ -177,7 +177,6 @@ class QueryBuilder {
   }
 
   select(columns = "*") {
-    this.state.operation = "select";
     this.state.select = columns;
     return this;
   }
