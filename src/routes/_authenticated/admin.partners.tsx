@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   ShieldCheck,
@@ -14,17 +14,11 @@ import {
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -35,6 +29,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/partners")({
@@ -109,7 +104,7 @@ function AdminPartners() {
   const [noteDraft, setNoteDraft] = useState("");
   const [acting, setActing] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     const q = supabase.from("partners").select("*").order("created_at", { ascending: false });
     if (status !== "all") q.eq("status", status);
@@ -117,11 +112,11 @@ function AdminPartners() {
     if (error) toast.error(error.message);
     setPartners((data as Partner[]) ?? []);
     setLoading(false);
-  };
+  }, [status]);
 
   useEffect(() => {
     void load();
-  }, [status]);
+  }, [load]);
 
   const openPartner = async (p: Partner) => {
     setSelected(p);
@@ -228,18 +223,17 @@ function AdminPartners() {
               className="pl-8"
             />
           </div>
-          <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_FILTERS.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s === "all" ? "All statuses" : s.replace("_", " ")}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <LookupCombobox
+            fieldName={LOOKUP_FIELDS.partnerStatus}
+            label="Status"
+            value={status === "all" ? "" : status}
+            onValueChange={(value) => setStatus((value || "all") as typeof status)}
+            placeholder="All statuses"
+            clearLabel="All statuses"
+            allowClear
+            options={STATUS_FILTERS.filter((s) => s !== "all")}
+            triggerClassName="w-48"
+          />
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (

@@ -18,18 +18,13 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import {
   DEAL_STAGE_ORDER,
@@ -71,19 +66,10 @@ const EMPTY_FORM: DealForm = {
   notes: "",
 };
 
-const FALLBACK_DEAL_OPTIONS = {
-  accounts: ["ACME Infra", "Techilla", "PartnerShield Technologies", "Nimbus Retail"],
-  contacts: ["Raman Sethi", "Priya Nair", "Amit Verma", "Sara Khan"],
-  owners: ["John Doe", "Amit Verma", "Priya Nair", "Rahul Mehta"],
-  regions: ["India West", "India North", "India South", "India East", "APAC"],
-  products: ["LIVEY WC350 QHD Webcam", "LIVEY VPRO 4K Camera", "LIVEY RoomBar Pro", "LIVEY Stream Kit"],
-  statuses: ["draft", "submitted", "approved", "need_more_info", "rejected", "won", "lost"],
-  sources: ["Partner referral", "Inbound", "Account lock", "RFP", "Expansion"],
-  touches: ["New", "This week", "Last week", "30+ days ago", "Demo completed"],
-};
-
-function mergeOptions(existing: string[], fallback: string[]) {
-  return [...new Set([...existing, ...fallback])];
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [
+    ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+  ];
 }
 
 export const Route = createFileRoute("/_authenticated/deals")({
@@ -175,20 +161,14 @@ function DealsPage() {
 
   const editOptions = useMemo(() => {
     return {
-      accounts: mergeOptions(
-        deals.map((deal) => deal.account_name),
-        FALLBACK_DEAL_OPTIONS.accounts,
-      ),
-      contacts: mergeOptions(
-        deals.map((deal) => deal.contact_name),
-        FALLBACK_DEAL_OPTIONS.contacts,
-      ),
-      owners: mergeOptions(deals.map((deal) => deal.owner_name), FALLBACK_DEAL_OPTIONS.owners),
-      regions: mergeOptions(deals.map((deal) => deal.region), FALLBACK_DEAL_OPTIONS.regions),
-      products: mergeOptions(deals.map((deal) => deal.product), FALLBACK_DEAL_OPTIONS.products),
-      statuses: mergeOptions(deals.map((deal) => deal.status), FALLBACK_DEAL_OPTIONS.statuses),
-      sources: mergeOptions(deals.map((deal) => deal.source), FALLBACK_DEAL_OPTIONS.sources),
-      touches: mergeOptions(deals.map((deal) => deal.last_touch), FALLBACK_DEAL_OPTIONS.touches),
+      accounts: uniqueStrings(deals.map((deal) => deal.account_name)),
+      contacts: uniqueStrings(deals.map((deal) => deal.contact_name)),
+      owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
+      regions: uniqueStrings(deals.map((deal) => deal.region)),
+      products: uniqueStrings(deals.map((deal) => deal.product)),
+      statuses: uniqueStrings(deals.map((deal) => deal.status)),
+      sources: uniqueStrings(deals.map((deal) => deal.source)),
+      touches: uniqueStrings(deals.map((deal) => deal.last_touch)),
     };
   }, [deals]);
 
@@ -335,23 +315,17 @@ function DealsPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select
-                  value={stageFilter}
-                  onValueChange={(value) => setStageFilter(value as DealStage | "all")}
-                >
-                  <SelectTrigger className="w-44">
-                    <Filter className="mr-2 h-4 w-4" />
-                    <SelectValue placeholder="All stages" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All stages</SelectItem>
-                    {DEAL_STAGE_ORDER.map((stage) => (
-                      <SelectItem key={stage} value={stage}>
-                        {stage}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.dealStage}
+                  label="Stage"
+                  value={stageFilter === "all" ? "" : stageFilter}
+                  onValueChange={(value) => setStageFilter((value || "all") as DealStage | "all")}
+                  placeholder="All stages"
+                  clearLabel="All stages"
+                  allowClear
+                  options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>
@@ -411,103 +385,72 @@ function DealsPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="account_name">Account</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealAccount}
+                    label="Account"
                     value={draft.account_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, account_name: value }))
                     }
-                  >
-                    <SelectTrigger id="account_name">
-                      <SelectValue placeholder="Select account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.accounts.map((account) => (
-                        <SelectItem key={account} value={account}>
-                          {account}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create account"
+                    options={editOptions.accounts}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contact_name">Contact</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealContact}
+                    label="Contact"
                     value={draft.contact_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, contact_name: value }))
                     }
-                  >
-                    <SelectTrigger id="contact_name">
-                      <SelectValue placeholder="Select contact" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.contacts.map((contact) => (
-                        <SelectItem key={contact} value={contact}>
-                          {contact}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create contact"
+                    options={editOptions.contacts}
+                  />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="owner_name">Owner</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealOwner}
+                    label="Owner"
                     value={draft.owner_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, owner_name: value }))
                     }
-                  >
-                    <SelectTrigger id="owner_name">
-                      <SelectValue placeholder="Select owner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.owners.map((owner) => (
-                        <SelectItem key={owner} value={owner}>
-                          {owner}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create owner"
+                    options={editOptions.owners}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="region">Region</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealRegion}
+                    label="Region"
                     value={draft.region}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
-                  >
-                    <SelectTrigger id="region">
-                      <SelectValue placeholder="Select region" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.regions.map((region) => (
-                        <SelectItem key={region} value={region}>
-                          {region}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, region: value }))
+                    }
+                    placeholder="Select or create region"
+                    options={editOptions.regions}
+                  />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="product">Product</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealProduct}
+                    label="Product"
                     value={draft.product}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, product: value }))}
-                  >
-                    <SelectTrigger id="product">
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.products.map((product) => (
-                        <SelectItem key={product} value={product}>
-                          {product}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, product: value }))
+                    }
+                    placeholder="Select or create product"
+                    options={editOptions.products}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount</Label>
@@ -522,41 +465,29 @@ function DealsPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="stage">Stage</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealStage}
+                    label="Stage"
                     value={draft.stage}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, stage: value as DealStage }))
                     }
-                  >
-                    <SelectTrigger id="stage">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DEAL_STAGE_ORDER.map((stage) => (
-                        <SelectItem key={stage} value={stage}>
-                          {stage}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create stage"
+                    options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="status">Status</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealStatus}
+                    label="Status"
                     value={draft.status}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, status: value }))}
-                  >
-                    <SelectTrigger id="status">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.statuses.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, status: value }))
+                    }
+                    placeholder="Select or create status"
+                    options={editOptions.statuses}
+                  />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -575,43 +506,31 @@ function DealsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="source">Source</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealSource}
+                    label="Source"
                     value={draft.source}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, source: value }))}
-                  >
-                    <SelectTrigger id="source">
-                      <SelectValue placeholder="Select source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.sources.map((sourceOption) => (
-                        <SelectItem key={sourceOption} value={sourceOption}>
-                          {sourceOption}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, source: value }))
+                    }
+                    placeholder="Select or create source"
+                    options={editOptions.sources}
+                  />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="last_touch">Last touch</Label>
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealLastTouch}
+                    label="Last touch"
                     value={draft.last_touch}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, last_touch: value }))
                     }
-                  >
-                    <SelectTrigger id="last_touch">
-                      <SelectValue placeholder="Select last touch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.touches.map((touch) => (
-                        <SelectItem key={touch} value={touch}>
-                          {touch}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create last touch"
+                    options={editOptions.touches}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="close_date">Close date</Label>

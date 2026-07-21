@@ -4,20 +4,15 @@ import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserPlus } from 
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -327,20 +322,15 @@ function PartnerTeamPage() {
                   />
                 </Field>
                 <Field label="Portal role">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.teamRole}
+                    label="Portal role"
                     value={draft.portal_role}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, portal_role: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="partner_user">Partner user</SelectItem>
-                      <SelectItem value="partner_admin">Partner admin</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={["partner_user", "partner_admin"]}
+                  />
                 </Field>
                 <Field label="Responsibility">
                   <Input
@@ -357,21 +347,15 @@ function PartnerTeamPage() {
                   />
                 </Field>
                 <Field label="Status">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.teamStatus}
+                    label="Status"
                     value={draft.status}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, status: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="invited">Invited</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="paused">Paused</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={["invited", "active", "paused"]}
+                  />
                 </Field>
               </div>
               <Button onClick={() => void addMember()} disabled={adding}>
@@ -394,7 +378,9 @@ function PartnerTeamPage() {
               <div>Partner admins can manage deals, team, and document workflows.</div>
               <div>Partner users can handle onboarding and document tasks.</div>
               <Separator />
-              <div>The roster is deletable, so you can reset the workspace cleanly when needed.</div>
+              <div>
+                The roster is deletable, so you can reset the workspace cleanly when needed.
+              </div>
             </CardContent>
           </Card>
         </div>

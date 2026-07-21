@@ -6,18 +6,13 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { toDateInputValue } from "@/lib/date-utils";
 import { type CustomerRecord } from "@/lib/portal-records";
 
@@ -48,18 +43,18 @@ const EMPTY_FORM: CustomerForm = {
 };
 
 const HEALTH_SCORE_OPTIONS = [0, 25, 50, 75, 100] as const;
-const LAST_TOUCH_OPTIONS = ["Today", "This week", "Last week", "30+ days ago", "Needs follow up"] as const;
-const FALLBACK_CUSTOMER_OPTIONS = {
-  companies: ["Techilla", "ACME Infra", "PartnerShield Technologies", "Nimbus Retail"],
-  owners: ["John Doe", "Amit Verma", "Priya Nair", "Rahul Mehta"],
-  regions: ["India West", "India North", "India South", "India East", "APAC"],
-  segments: ["Mid-market", "Enterprise", "SMB", "Strategic", "Expansion"],
-  mrr: ["$1K", "$5K", "$10K", "$25K", "$50K", "$100K"],
-  statuses: ["active", "expansion", "watchlist", "champion", "growth"],
-};
+const LAST_TOUCH_OPTIONS = [
+  "Today",
+  "This week",
+  "Last week",
+  "30+ days ago",
+  "Needs follow up",
+] as const;
 
 function uniqueStrings(values: Array<string | null | undefined>) {
-  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value))];
+  return [
+    ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+  ];
 }
 
 export const Route = createFileRoute("/_authenticated/customers")({
@@ -134,42 +129,12 @@ function CustomersPage() {
 
   const editOptions = useMemo(() => {
     return {
-      companyNames: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.companies,
-          ...uniqueStrings(customers.map((customer) => customer.company_name)),
-        ]),
-      ],
-      owners: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.owners,
-          ...uniqueStrings(customers.map((customer) => customer.account_owner)),
-        ]),
-      ],
-      regions: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.regions,
-          ...uniqueStrings(customers.map((customer) => customer.region)),
-        ]),
-      ],
-      segments: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.segments,
-          ...uniqueStrings(customers.map((customer) => customer.segment)),
-        ]),
-      ],
-      mrrs: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.mrr,
-          ...uniqueStrings(customers.map((customer) => customer.mrr)),
-        ]),
-      ],
-      statuses: [
-        ...new Set([
-          ...FALLBACK_CUSTOMER_OPTIONS.statuses,
-          ...uniqueStrings(customers.map((customer) => customer.status)),
-        ]),
-      ],
+      companyNames: uniqueStrings(customers.map((customer) => customer.company_name)),
+      owners: uniqueStrings(customers.map((customer) => customer.account_owner)),
+      regions: uniqueStrings(customers.map((customer) => customer.region)),
+      segments: uniqueStrings(customers.map((customer) => customer.segment)),
+      mrrs: uniqueStrings(customers.map((customer) => customer.mrr)),
+      statuses: uniqueStrings(customers.map((customer) => customer.status)),
     };
   }, [customers]);
 
@@ -316,19 +281,17 @@ function CustomersPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue placeholder="All statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="expansion">Expansion</SelectItem>
-                    <SelectItem value="watchlist">Watchlist</SelectItem>
-                    <SelectItem value="champion">Champion</SelectItem>
-                    <SelectItem value="growth">Growth</SelectItem>
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.customerStatus}
+                  label="Status"
+                  value={statusFilter === "all" ? "" : statusFilter}
+                  onValueChange={(value) => setStatusFilter(value || "all")}
+                  placeholder="All statuses"
+                  clearLabel="All statuses"
+                  allowClear
+                  options={editOptions.statuses}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>
@@ -390,117 +353,78 @@ function CustomersPage() {
                 <>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="Company">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerCompany}
+                        label="Company"
                         value={draft.company_name}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, company_name: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select company" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.companyNames.map((company) => (
-                            <SelectItem key={company} value={company}>
-                              {company}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create company"
+                        options={editOptions.companyNames}
+                      />
                     </Field>
                     <Field label="Owner">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerOwner}
+                        label="Owner"
                         value={draft.account_owner}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, account_owner: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select owner" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.owners.map((owner) => (
-                            <SelectItem key={owner} value={owner}>
-                              {owner}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create owner"
+                        options={editOptions.owners}
+                      />
                     </Field>
                     <Field label="Region">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerRegion}
+                        label="Region"
                         value={draft.region}
-                        onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select region" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.regions.map((region) => (
-                            <SelectItem key={region} value={region}>
-                              {region}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, region: value }))
+                        }
+                        placeholder="Select or create region"
+                        options={editOptions.regions}
+                      />
                     </Field>
                     <Field label="Segment">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerSegment}
+                        label="Segment"
                         value={draft.segment}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, segment: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select segment" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.segments.map((segment) => (
-                            <SelectItem key={segment} value={segment}>
-                              {segment}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create segment"
+                        options={editOptions.segments}
+                      />
                     </Field>
                     <Field label="Health score">
-                      <Select
-                        value={String(draft.health_score)}
-                        onValueChange={(value) =>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={draft.health_score}
+                        onChange={(e) =>
                           setDraft((valueState) => ({
                             ...valueState,
-                            health_score: Number(value) || 0,
+                            health_score: Number(e.target.value) || 0,
                           }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select score" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {HEALTH_SCORE_OPTIONS.map((score) => (
-                            <SelectItem key={score} value={String(score)}>
-                              {score}%
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </Field>
                     <Field label="MRR">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerMrr}
+                        label="MRR"
                         value={draft.mrr}
-                        onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select MRR" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.mrrs.map((mrr) => (
-                            <SelectItem key={mrr} value={mrr}>
-                              {mrr}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, mrr: value }))
+                        }
+                        placeholder="Select or create MRR"
+                        options={editOptions.mrrs}
+                      />
                     </Field>
                     <Field label="Renewal date">
                       <Input
@@ -512,23 +436,16 @@ function CustomersPage() {
                       />
                     </Field>
                     <Field label="Status">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.customerStatus}
+                        label="Status"
                         value={draft.status}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, status: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.statuses.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create status"
+                        options={editOptions.statuses}
+                      />
                     </Field>
                   </div>
                   <Field label="Next step">
@@ -540,23 +457,16 @@ function CustomersPage() {
                     />
                   </Field>
                   <Field label="Last touch">
-                    <Select
+                    <LookupCombobox
+                      fieldName={LOOKUP_FIELDS.customerLastTouch}
+                      label="Last touch"
                       value={draft.last_touch}
                       onValueChange={(value) =>
                         setDraft((current) => ({ ...current, last_touch: value }))
                       }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select last touch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LAST_TOUCH_OPTIONS.map((touch) => (
-                          <SelectItem key={touch} value={touch}>
-                            {touch}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Select or create last touch"
+                      options={LAST_TOUCH_OPTIONS as unknown as string[]}
+                    />
                   </Field>
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => void saveCustomer()} disabled={saving}>
@@ -579,83 +489,57 @@ function CustomersPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Add customer</CardTitle>
-              <CardDescription>
-                Insert a new account into the customer list.
-              </CardDescription>
+              <CardDescription>Insert a new account into the customer list.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Company">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerCompany}
+                    label="Company"
                     value={draft.company_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, company_name: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select company" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.companyNames.map((company) => (
-                        <SelectItem key={company} value={company}>
-                          {company}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create company"
+                    options={editOptions.companyNames}
+                  />
                 </Field>
                 <Field label="Owner">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerOwner}
+                    label="Owner"
                     value={draft.account_owner}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, account_owner: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select owner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.owners.map((owner) => (
-                        <SelectItem key={owner} value={owner}>
-                          {owner}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create owner"
+                    options={editOptions.owners}
+                  />
                 </Field>
                 <Field label="Region">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerRegion}
+                    label="Region"
                     value={draft.region}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select region" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.regions.map((region) => (
-                        <SelectItem key={region} value={region}>
-                          {region}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, region: value }))
+                    }
+                    placeholder="Select or create region"
+                    options={editOptions.regions}
+                  />
                 </Field>
                 <Field label="Segment">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerSegment}
+                    label="Segment"
                     value={draft.segment}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, segment: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select segment" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.segments.map((segment) => (
-                        <SelectItem key={segment} value={segment}>
-                          {segment}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, segment: value }))
+                    }
+                    placeholder="Select or create segment"
+                    options={editOptions.segments}
+                  />
                 </Field>
                 <Field label="Health score">
                   <Input
@@ -669,21 +553,14 @@ function CustomersPage() {
                   />
                 </Field>
                 <Field label="MRR">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerMrr}
+                    label="MRR"
                     value={draft.mrr}
                     onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select MRR" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.mrrs.map((mrr) => (
-                        <SelectItem key={mrr} value={mrr}>
-                          {mrr}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create MRR"
+                    options={editOptions.mrrs}
+                  />
                 </Field>
                 <Field label="Renewal date">
                   <Input
@@ -695,23 +572,16 @@ function CustomersPage() {
                   />
                 </Field>
                 <Field label="Status">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerStatus}
+                    label="Status"
                     value={draft.status}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, status: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.statuses.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create status"
+                    options={editOptions.statuses}
+                  />
                 </Field>
               </div>
               <Field label="Next step">
@@ -721,23 +591,16 @@ function CustomersPage() {
                 />
               </Field>
               <Field label="Last touch">
-                <Select
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.customerLastTouch}
+                  label="Last touch"
                   value={draft.last_touch}
                   onValueChange={(value) =>
                     setDraft((current) => ({ ...current, last_touch: value }))
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select touch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LAST_TOUCH_OPTIONS.map((touch) => (
-                      <SelectItem key={touch} value={touch}>
-                        {touch}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Select or create last touch"
+                  options={LAST_TOUCH_OPTIONS as unknown as string[]}
+                />
               </Field>
               <Button onClick={() => void createCustomer()} disabled={adding}>
                 {adding ? (

@@ -4,18 +4,13 @@ import { Download, Loader2, RefreshCw, Search, ShieldCheck } from "lucide-react"
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type AuditEventRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -181,17 +176,17 @@ function AdminAuditPage() {
                   className="pl-8"
                 />
               </div>
-              <Select value={severityFilter} onValueChange={setSeverityFilter}>
-                <SelectTrigger className="w-44">
-                  <SelectValue placeholder="All severities" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All severities</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.auditSeverity}
+                label="Severity"
+                value={severityFilter === "all" ? "" : severityFilter}
+                onValueChange={(value) => setSeverityFilter(value || "all")}
+                placeholder="All severities"
+                clearLabel="All severities"
+                allowClear
+                options={["low", "medium", "high"]}
+                triggerClassName="w-44"
+              />
             </div>
           </div>
         </CardHeader>

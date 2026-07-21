@@ -338,10 +338,11 @@ function OnboardingPage() {
           .select("id, doc_type, file_name, file_path, size_bytes")
           .single();
         if (insErr) throw insErr;
-        if (!isDocRow(row)) {
+        const docRow = row as DocRow | null;
+        if (!isDocRow(docRow)) {
           throw new Error("Uploaded file saved, but the partner document row was not returned");
         }
-        setDocs((d) => [row, ...d.filter(isDocRow)]);
+        setDocs((d) => [docRow, ...d.filter(isDocRow)]);
       } catch (insertError) {
         await supabase.storage.from("partner-documents").remove([storedPath]);
         throw insertError;

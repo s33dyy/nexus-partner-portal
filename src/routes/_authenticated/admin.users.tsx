@@ -4,19 +4,16 @@ import { Loader2, RefreshCw, Search, ShieldCheck, UserRoundCog } from "lucide-re
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { cn } from "@/lib/utils";
+import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
 
 type Profile = {
@@ -62,7 +59,7 @@ function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [draftRole, setDraftRole] = useState<(typeof ROLE_OPTIONS)[number]>("partner_user");
+  const [draftRole, setDraftRole] = useState("partner_user");
   const [draftStatus, setDraftStatus] = useState("approved");
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -71,7 +68,7 @@ function AdminUsersPage() {
     phone: "",
     company_name: "",
     password: "",
-    role: "partner_admin" as (typeof ROLE_OPTIONS)[number],
+    role: "partner_admin" as AppRole,
   });
 
   const load = async () => {
@@ -136,7 +133,7 @@ function AdminUsersPage() {
 
   useEffect(() => {
     if (!selectedUser) return;
-    setDraftRole((selectedUser.roles[0] as (typeof ROLE_OPTIONS)[number]) ?? "partner_user");
+    setDraftRole(selectedUser.roles[0] ?? "partner_user");
     setDraftStatus(selectedUser.partner_status);
   }, [selectedUser]);
 
@@ -259,9 +256,7 @@ function AdminUsersPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <CardTitle className="text-base">User directory</CardTitle>
-                <CardDescription>
-                  Search and switch between live access records.
-                </CardDescription>
+                <CardDescription>Search and switch between live access records.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative w-full max-w-xs">
@@ -273,19 +268,17 @@ function AdminUsersPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue placeholder="All roles" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All roles</SelectItem>
-                    {ROLE_OPTIONS.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {role}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.userRole}
+                  label="Role"
+                  value={roleFilter === "all" ? "" : roleFilter}
+                  onValueChange={(value) => setRoleFilter(value || "all")}
+                  placeholder="All roles"
+                  clearLabel="All roles"
+                  allowClear
+                  options={[...ROLE_OPTIONS]}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>
@@ -354,37 +347,22 @@ function AdminUsersPage() {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="Primary role">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.userRole}
+                        label="Role"
                         value={draftRole}
-                        onValueChange={(value) =>
-                          setDraftRole(value as (typeof ROLE_OPTIONS)[number])
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ROLE_OPTIONS.map((role) => (
-                            <SelectItem key={role} value={role}>
-                              {role}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onValueChange={setDraftRole}
+                        options={[...ROLE_OPTIONS]}
+                      />
                     </Field>
                     <Field label="Partner status">
-                      <Select value={draftStatus} onValueChange={setDraftStatus}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PARTNER_STATUS_OPTIONS.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status.replace(/_/g, " ")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.partnerStatus}
+                        label="Partner status"
+                        value={draftStatus}
+                        onValueChange={setDraftStatus}
+                        options={[...PARTNER_STATUS_OPTIONS]}
+                      />
                     </Field>
                   </div>
                   <Button onClick={() => void saveRoles()} disabled={saving}>
@@ -416,7 +394,9 @@ function AdminUsersPage() {
                 <Field label="Full name">
                   <Input
                     value={newUser.full_name}
-                    onChange={(e) => setNewUser((current) => ({ ...current, full_name: e.target.value }))}
+                    onChange={(e) =>
+                      setNewUser((current) => ({ ...current, full_name: e.target.value }))
+                    }
                     placeholder="Asha Mehta"
                   />
                 </Field>
@@ -424,14 +404,18 @@ function AdminUsersPage() {
                   <Input
                     type="email"
                     value={newUser.email}
-                    onChange={(e) => setNewUser((current) => ({ ...current, email: e.target.value }))}
+                    onChange={(e) =>
+                      setNewUser((current) => ({ ...current, email: e.target.value }))
+                    }
                     placeholder="partner@example.com"
                   />
                 </Field>
                 <Field label="Phone">
                   <Input
                     value={newUser.phone}
-                    onChange={(e) => setNewUser((current) => ({ ...current, phone: e.target.value }))}
+                    onChange={(e) =>
+                      setNewUser((current) => ({ ...current, phone: e.target.value }))
+                    }
                     placeholder="+91 98765 43210"
                   />
                 </Field>
@@ -455,23 +439,16 @@ function AdminUsersPage() {
                   />
                 </Field>
                 <Field label="Role" className="md:col-span-2">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.userRole}
+                    label="Role"
                     value={newUser.role}
                     onValueChange={(value) =>
-                      setNewUser((current) => ({ ...current, role: value as (typeof ROLE_OPTIONS)[number] }))
+                      setNewUser((current) => ({ ...current, role: value as AppRole }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ROLE_OPTIONS.map((role) => (
-                        <SelectItem key={role} value={role}>
-                          {role.replace("_", " ")}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={[...ROLE_OPTIONS]}
+                    allowCreate={false}
+                  />
                 </Field>
               </div>
               <Button onClick={() => void createUser()} disabled={creating}>
@@ -507,9 +484,17 @@ function Meta({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="space-y-2">
+    <div className={cn("space-y-2", className)}>
       <Label>{label}</Label>
       {children}
     </div>

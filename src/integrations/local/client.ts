@@ -370,7 +370,8 @@ const auth: AuthApi = {
   async signUp(input) {
     try {
       const data = await signUp({ data: input });
-      emitAuth("SIGNED_IN", data.session ?? null);
+      const session = (data as { session?: LocalSession | null }).session ?? null;
+      emitAuth("SIGNED_IN", session);
       return { data, error: null };
     } catch (error) {
       return {

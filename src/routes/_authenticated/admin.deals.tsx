@@ -7,19 +7,14 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -38,6 +33,12 @@ function AdminDealsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+
+  function uniqueStrings(values: Array<string | null | undefined>) {
+    return [
+      ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+    ];
+  }
 
   const load = async () => {
     setLoading(true);
@@ -95,6 +96,9 @@ function AdminDealsPage() {
     ).length;
     return { queue, reviewed };
   }, [deals]);
+
+  const statusOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.status)), [deals]);
+  const stageOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.stage)), [deals]);
 
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Deal approvals" roleLabel="Super Admin" />;
@@ -192,24 +196,17 @@ function AdminDealsPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue placeholder="All statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="submitted">Submitted</SelectItem>
-                    <SelectItem value="need_more_info">Need more info</SelectItem>
-                    <SelectItem value="approved">Approved</SelectItem>
-                    <SelectItem value="won">Won</SelectItem>
-                    <SelectItem value="lost">Lost</SelectItem>
-                    {DEAL_STAGE_ORDER.map((stage) => (
-                      <SelectItem key={stage} value={stage}>
-                        Stage: {stage}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.dealStatus}
+                  label="Status"
+                  value={statusFilter === "all" ? "" : statusFilter}
+                  onValueChange={(value) => setStatusFilter(value || "all")}
+                  placeholder="All statuses"
+                  clearLabel="All statuses"
+                  allowClear
+                  options={[...statusOptions, ...stageOptions]}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>

@@ -111,7 +111,7 @@ export async function uploadToCloudinary(input: {
     throw new Error(message ?? `Cloudinary upload failed (${response.status})`);
   }
 
-  return json;
+  return json as CloudinaryUploadResult;
 }
 
 export async function deleteFromCloudinary(input: {

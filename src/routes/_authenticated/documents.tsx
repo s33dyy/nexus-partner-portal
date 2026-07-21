@@ -6,17 +6,12 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 
 type Partner = {
   id: string;
@@ -51,6 +46,12 @@ function DocumentsPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  function uniqueStrings(values: Array<string | null | undefined>) {
+    return [
+      ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+    ];
+  }
 
   const load = async () => {
     setLoading(true);
@@ -159,6 +160,7 @@ function DocumentsPage() {
   };
 
   const docTypes = useMemo(() => ["all", ...new Set(docs.map((doc) => doc.doc_type))], [docs]);
+  const docTypeOptions = useMemo(() => uniqueStrings(docs.map((doc) => doc.doc_type)), [docs]);
 
   return (
     <div className="space-y-6">
@@ -170,12 +172,14 @@ function DocumentsPage() {
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Documents</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Manage compliance files, preview uploads, and remove old records when you need to
-            reset the workspace.
+            Manage compliance files, preview uploads, and remove old records when you need to reset
+            the workspace.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{source === "empty" ? "No documents found" : "Live docs"}</Badge>
+          <Badge variant="secondary">
+            {source === "empty" ? "No documents found" : "Live docs"}
+          </Badge>
           <Button
             variant="outline"
             onClick={() => {
@@ -212,18 +216,17 @@ function DocumentsPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={docTypeFilter} onValueChange={setDocTypeFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue placeholder="All document types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {docTypes.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {type === "all" ? "All document types" : type}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.documentType}
+                  label="Document type"
+                  value={docTypeFilter === "all" ? "" : docTypeFilter}
+                  onValueChange={(value) => setDocTypeFilter(value || "all")}
+                  placeholder="All document types"
+                  clearLabel="All document types"
+                  allowClear
+                  options={docTypeOptions}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>

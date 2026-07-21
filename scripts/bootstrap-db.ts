@@ -13,6 +13,7 @@ const ADMIN_NAME = process.env.BOOTSTRAP_SUPER_ADMIN_NAME ?? "LIVEY Super Admin"
 const ADMIN_COMPANY = process.env.BOOTSTRAP_SUPER_ADMIN_COMPANY ?? "LIVEY Technologies";
 
 const RESET_TABLES = [
+  "lookup_values",
   "password_reset_tokens",
   "sessions",
   "document_blobs",

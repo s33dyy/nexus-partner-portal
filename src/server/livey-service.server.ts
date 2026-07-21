@@ -1,38 +1,16 @@
 import "dotenv/config";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 
+import { pool } from "@/server/postgres.server";
 import {
   buildCloudinaryMediaUrl,
   deleteFromCloudinary,
   hasCloudinaryConfig,
   uploadToCloudinary,
 } from "@/server/cloudinary.server";
-
-const DATABASE_URL = process.env.DATABASE_URL;
-
-if (!DATABASE_URL) {
-  throw new Error("Missing DATABASE_URL");
-}
-
-function shouldUseSsl(connectionString: string): boolean {
-  try {
-    const url = new URL(connectionString);
-    return !["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: shouldUseSsl(DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
-  max: 10,
-  idleTimeoutMillis: 30_000,
-});
 
 export type AppRole = "super_admin" | "partner_admin" | "partner_user";
 export type PartnerStatus =
@@ -230,6 +208,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
   ],
+  lookup_values: ["id", "field_name", "value", "value_key", "created_by", "is_seed", "created_at"],
   document_blobs: [
     "file_path",
     "bucket",
@@ -648,8 +627,6 @@ export async function signUpLocal(input: {
         full_name: input.full_name,
         phone: input.phone || null,
         company_name: input.company_name,
-        partner_id: null,
-        partner_status: "pending_partner_registration",
       }),
     } satisfies LocalSession,
     user_id: id,

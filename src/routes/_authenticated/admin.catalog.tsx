@@ -7,18 +7,13 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CatalogItemRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -44,16 +39,6 @@ const EMPTY_FORM: CatalogForm = {
   stock: 0,
   availability: "In stock",
   benefits: "",
-};
-
-const FALLBACK_CATALOG_OPTIONS = {
-  skus: ["LIVEY-WC350", "LIVEY-VPRO-4K", "LIVEY-ROOMBAR-PRO", "LIVEY-STREAM-KIT"],
-  productNames: ["LIVEY WC350 QHD Webcam", "LIVEY VPRO 4K Camera", "LIVEY RoomBar Pro", "LIVEY Stream Kit"],
-  categories: ["Hardware", "Bundles", "Accessories", "Software"],
-  tiers: ["Registered", "Silver", "Gold", "Platinum"],
-  prices: ["$99", "$149", "$249", "$499", "$899"],
-  margins: ["10%", "15%", "20%", "25%", "30%"],
-  availability: ["In stock", "Low stock", "Preorder", "Out of stock"],
 };
 
 function uniqueStrings(values: Array<string | number | null | undefined>) {
@@ -124,13 +109,13 @@ function AdminCatalogPage() {
 
   const editOptions = useMemo(() => {
     return {
-      skus: [...new Set([...FALLBACK_CATALOG_OPTIONS.skus, ...uniqueStrings(items.map((item) => item.sku))])],
-      productNames: [...new Set([...FALLBACK_CATALOG_OPTIONS.productNames, ...uniqueStrings(items.map((item) => item.product_name))])],
-      categories: [...new Set([...FALLBACK_CATALOG_OPTIONS.categories, ...uniqueStrings(items.map((item) => item.category))])],
-      tiers: [...new Set([...FALLBACK_CATALOG_OPTIONS.tiers, ...uniqueStrings(items.map((item) => item.partner_tier))])],
-      prices: [...new Set([...FALLBACK_CATALOG_OPTIONS.prices, ...uniqueStrings(items.map((item) => item.list_price))])],
-      margins: [...new Set([...FALLBACK_CATALOG_OPTIONS.margins, ...uniqueStrings(items.map((item) => item.margin))])],
-      availability: [...new Set([...FALLBACK_CATALOG_OPTIONS.availability, ...uniqueStrings(items.map((item) => item.availability))])],
+      skus: uniqueStrings(items.map((item) => item.sku)),
+      productNames: uniqueStrings(items.map((item) => item.product_name)),
+      categories: uniqueStrings(items.map((item) => item.category)),
+      tiers: uniqueStrings(items.map((item) => item.partner_tier)),
+      prices: uniqueStrings(items.map((item) => item.list_price)),
+      margins: uniqueStrings(items.map((item) => item.margin)),
+      availability: uniqueStrings(items.map((item) => item.availability)),
     };
   }, [items]);
 
@@ -280,18 +265,17 @@ function AdminCatalogPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue placeholder="All categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category === "all" ? "All categories" : category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.catalogCategory}
+                  label="Category"
+                  value={categoryFilter === "all" ? "" : categoryFilter}
+                  onValueChange={(value) => setCategoryFilter(value || "all")}
+                  placeholder="All categories"
+                  clearLabel="All categories"
+                  allowClear
+                  options={categories.filter((category) => category !== "all")}
+                  triggerClassName="w-44"
+                />
               </div>
             </div>
           </CardHeader>
@@ -350,116 +334,76 @@ function AdminCatalogPage() {
                 <>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="SKU">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogSku}
+                        label="SKU"
                         value={draft.sku}
-                        onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select SKU" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.skus.map((sku) => (
-                            <SelectItem key={sku} value={sku}>
-                              {sku}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, sku: value }))
+                        }
+                        placeholder="Select or create SKU"
+                        options={editOptions.skus}
+                      />
                     </Field>
                     <Field label="Product name">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogProduct}
+                        label="Product name"
                         value={draft.product_name}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, product_name: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select product" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.productNames.map((productName) => (
-                            <SelectItem key={productName} value={productName}>
-                              {productName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create product"
+                        options={editOptions.productNames}
+                      />
                     </Field>
                     <Field label="Category">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogCategory}
+                        label="Category"
                         value={draft.category}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, category: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.categories.map((category) => (
-                            <SelectItem key={category} value={category}>
-                              {category}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create category"
+                        options={editOptions.categories}
+                      />
                     </Field>
                     <Field label="Tier">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogTier}
+                        label="Tier"
                         value={draft.partner_tier}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, partner_tier: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select tier" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.tiers.map((tier) => (
-                            <SelectItem key={tier} value={tier}>
-                              {tier}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create tier"
+                        options={editOptions.tiers}
+                      />
                     </Field>
                     <Field label="List price">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogPrice}
+                        label="List price"
                         value={draft.list_price}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, list_price: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select price" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.prices.map((price) => (
-                            <SelectItem key={price} value={price}>
-                              {price}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create price"
+                        options={editOptions.prices}
+                      />
                     </Field>
                     <Field label="Margin">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogMargin}
+                        label="Margin"
                         value={draft.margin}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, margin: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select margin" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.margins.map((margin) => (
-                            <SelectItem key={margin} value={margin}>
-                              {margin}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create margin"
+                        options={editOptions.margins}
+                      />
                     </Field>
                     <Field label="Stock">
                       <Input
@@ -471,23 +415,16 @@ function AdminCatalogPage() {
                       />
                     </Field>
                     <Field label="Availability">
-                      <Select
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogAvailability}
+                        label="Availability"
                         value={draft.availability}
                         onValueChange={(value) =>
                           setDraft((current) => ({ ...current, availability: value }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select availability" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {editOptions.availability.map((availability) => (
-                            <SelectItem key={availability} value={availability}>
-                              {availability}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select or create availability"
+                        options={editOptions.availability}
+                      />
                     </Field>
                   </div>
                   <Field label="Benefits">
@@ -521,97 +458,62 @@ function AdminCatalogPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="SKU">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogSku}
+                    label="SKU"
                     value={draft.sku}
                     onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select SKU" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.skus.map((sku) => (
-                        <SelectItem key={sku} value={sku}>
-                          {sku}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create SKU"
+                    options={editOptions.skus}
+                  />
                 </Field>
                 <Field label="Product name">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogProduct}
+                    label="Product name"
                     value={draft.product_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, product_name: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.productNames.map((product) => (
-                        <SelectItem key={product} value={product}>
-                          {product}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create product"
+                    options={editOptions.productNames}
+                  />
                 </Field>
                 <Field label="Category">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogCategory}
+                    label="Category"
                     value={draft.category}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, category: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.categories.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create category"
+                    options={editOptions.categories}
+                  />
                 </Field>
                 <Field label="Tier">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogTier}
+                    label="Tier"
                     value={draft.partner_tier}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, partner_tier: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select tier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.tiers.map((tier) => (
-                        <SelectItem key={tier} value={tier}>
-                          {tier}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create tier"
+                    options={editOptions.tiers}
+                  />
                 </Field>
                 <Field label="Price">
-                  <Select
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogPrice}
+                    label="Price"
                     value={draft.list_price}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, list_price: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select price" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {editOptions.prices.map((price) => (
-                        <SelectItem key={price} value={price}>
-                          {price}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select or create price"
+                    options={editOptions.prices}
+                  />
                 </Field>
                 <Field label="Stock">
                   <Input

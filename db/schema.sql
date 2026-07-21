@@ -220,6 +220,17 @@ CREATE TABLE IF NOT EXISTS portal_news_posts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS lookup_values (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  field_name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  value_key TEXT NOT NULL,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (field_name, value_key)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
