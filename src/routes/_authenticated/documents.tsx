@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
+import { applyPartnerScope } from "@/lib/partner-scope";
 
 type Partner = {
   id: string;
@@ -65,13 +66,12 @@ function DocumentsPage() {
         )
         .order("created_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          docQuery = docQuery.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          docQuery = docQuery.eq("uploaded_by", profile.id);
-        }
-      }
+      docQuery = applyPartnerScope(docQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+        fallbackColumn: "uploaded_by",
+      });
 
       const [docsRes, partnersRes] = await Promise.all([
         docQuery,

@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
+import { applyPartnerScope } from "@/lib/partner-scope";
 import {
   rewardProgress,
   rewardTierForPoints,
@@ -78,15 +79,16 @@ function RewardsPage() {
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          pointsQuery = pointsQuery.eq("partner_id", profile.partner_id);
-          redemptionQuery = redemptionQuery.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          pointsQuery = pointsQuery.eq("user_id", profile.id);
-          redemptionQuery = redemptionQuery.eq("user_id", profile.id);
-        }
-      }
+      pointsQuery = applyPartnerScope(pointsQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
+      redemptionQuery = applyPartnerScope(redemptionQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const [catalogRes, pointsRes, redemptionRes] = await Promise.all([
         catalogQuery,

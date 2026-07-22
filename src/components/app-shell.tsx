@@ -66,7 +66,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       const { data } = await query;
       if (active) {
-        setUnreadCount((data ?? []).length);
+        setUnreadCount(Array.isArray(data) ? data.length : 0);
       }
     };
     void loadUnreadCount();

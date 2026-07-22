@@ -1,9 +1,6 @@
 type WorkflowDbClient = {
   from(table: string): {
-    insert(values: Record<string, unknown> | Array<Record<string, unknown>>): Promise<{
-      data: unknown;
-      error: { message: string } | null;
-    }>;
+    insert(values: Record<string, unknown> | Array<Record<string, unknown>>): any;
   };
 };
 

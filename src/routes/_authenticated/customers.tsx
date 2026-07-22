@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { toDateInputValue } from "@/lib/date-utils";
 import { type CustomerRecord } from "@/lib/portal-records";
@@ -80,13 +81,11 @@ function CustomersPage() {
     try {
       let query = supabase.from("portal_customers").select("*").order("updated_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          query = query.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          query = query.eq("user_id", profile.id);
-        }
-      }
+      query = applyPartnerScope(query, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const { data, error } = await query;
       if (error) throw error;
@@ -138,7 +137,6 @@ function CustomersPage() {
 
   const editOptions = useMemo(() => {
     return {
-      companyNames: uniqueStrings(customers.map((customer) => customer.company_name)),
       owners: uniqueStrings(customers.map((customer) => customer.account_owner)),
       regions: uniqueStrings(customers.map((customer) => customer.region)),
       segments: uniqueStrings(customers.map((customer) => customer.segment)),
@@ -363,19 +361,16 @@ function CustomersPage() {
             <CardContent className="space-y-4">
               {selectedCustomer ? (
                 <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Company">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerCompany}
-                        label="Company"
-                        value={draft.company_name}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, company_name: value }))
-                        }
-                        placeholder="Select or create company"
-                        options={editOptions.companyNames}
-                      />
-                    </Field>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field label="Company">
+                    <Input
+                      value={draft.company_name}
+                      onChange={(e) =>
+                        setDraft((current) => ({ ...current, company_name: e.target.value }))
+                      }
+                      placeholder="Acme Infra"
+                    />
+                  </Field>
                     <Field label="Owner">
                       <LookupCombobox
                         fieldName={LOOKUP_FIELDS.customerOwner}
@@ -506,15 +501,12 @@ function CustomersPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Company">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.customerCompany}
-                    label="Company"
+                  <Input
                     value={draft.company_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, company_name: value }))
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, company_name: e.target.value }))
                     }
-                    placeholder="Select or create company"
-                    options={editOptions.companyNames}
+                    placeholder="Acme Infra"
                   />
                 </Field>
                 <Field label="Owner">

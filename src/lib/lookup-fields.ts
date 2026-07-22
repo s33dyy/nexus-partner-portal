@@ -39,4 +39,48 @@ export const LOOKUP_FIELDS = {
   partnerEmployeeCount: "partners.onboarding.employee_count",
 } as const;
 
+export const ENTITY_DROPDOWN_FIELDS = {
+  dealAccount: LOOKUP_FIELDS.dealAccount,
+  dealContact: LOOKUP_FIELDS.dealContact,
+  dealOwner: LOOKUP_FIELDS.dealOwner,
+  customerCompany: LOOKUP_FIELDS.customerCompany,
+} as const;
+
+export const LOOKUP_DROPDOWN_FIELDS = {
+  dealCountry: LOOKUP_FIELDS.dealCountry,
+  dealRegion: LOOKUP_FIELDS.dealRegion,
+  dealRegionPrefix: LOOKUP_FIELDS.dealRegionPrefix,
+  dealProduct: LOOKUP_FIELDS.dealProduct,
+  dealStage: LOOKUP_FIELDS.dealStage,
+  dealStatus: LOOKUP_FIELDS.dealStatus,
+  dealCustomerBudget: LOOKUP_FIELDS.dealCustomerBudget,
+  dealSource: LOOKUP_FIELDS.dealSource,
+  dealLastTouch: LOOKUP_FIELDS.dealLastTouch,
+  customerOwner: LOOKUP_FIELDS.customerOwner,
+  customerRegion: LOOKUP_FIELDS.customerRegion,
+  customerSegment: LOOKUP_FIELDS.customerSegment,
+  customerMrr: LOOKUP_FIELDS.customerMrr,
+  customerStatus: LOOKUP_FIELDS.customerStatus,
+  customerLastTouch: LOOKUP_FIELDS.customerLastTouch,
+  catalogSku: LOOKUP_FIELDS.catalogSku,
+  catalogProduct: LOOKUP_FIELDS.catalogProduct,
+  catalogCategory: LOOKUP_FIELDS.catalogCategory,
+  catalogTier: LOOKUP_FIELDS.catalogTier,
+  catalogPrice: LOOKUP_FIELDS.catalogPrice,
+  catalogMargin: LOOKUP_FIELDS.catalogMargin,
+  catalogAvailability: LOOKUP_FIELDS.catalogAvailability,
+  rewardCategory: LOOKUP_FIELDS.rewardCategory,
+  documentType: LOOKUP_FIELDS.documentType,
+  userRole: LOOKUP_FIELDS.userRole,
+  teamRole: LOOKUP_FIELDS.teamRole,
+  teamStatus: LOOKUP_FIELDS.teamStatus,
+  auditSeverity: LOOKUP_FIELDS.auditSeverity,
+  partnerStatus: LOOKUP_FIELDS.partnerStatus,
+  partnerCountry: LOOKUP_FIELDS.partnerCountry,
+  partnerRegionPrefix: LOOKUP_FIELDS.partnerRegionPrefix,
+  partnerBusinessType: LOOKUP_FIELDS.partnerBusinessType,
+  partnerAnnualTurnover: LOOKUP_FIELDS.partnerAnnualTurnover,
+  partnerEmployeeCount: LOOKUP_FIELDS.partnerEmployeeCount,
+} as const;
+
 export type LookupFieldName = (typeof LOOKUP_FIELDS)[keyof typeof LOOKUP_FIELDS];

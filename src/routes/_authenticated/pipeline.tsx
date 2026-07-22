@@ -26,6 +26,7 @@ import {
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
+import { applyPartnerScope } from "@/lib/partner-scope";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -50,13 +51,11 @@ function PipelinePage() {
         .select("*")
         .order("updated_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          queryBuilder = queryBuilder.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          queryBuilder = queryBuilder.eq("user_id", profile.id);
-        }
-      }
+      queryBuilder = applyPartnerScope(queryBuilder, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const { data, error } = await queryBuilder;
       if (error) throw error;

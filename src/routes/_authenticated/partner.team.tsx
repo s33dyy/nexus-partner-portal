@@ -112,7 +112,7 @@ function PartnerTeamPage() {
         company_name: companyName,
         password: draft.password.trim(),
         role: draft.portal_role as any,
-        partner_status: "active",
+        partner_status: "approved",
       });
       
       if (userError) throw userError;

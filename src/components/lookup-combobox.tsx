@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronsUpDown, Loader2, Plus } from "lucide-react";
+import { toast } from "sonner";
 
+import { listLookupValues as listLegacyLookupValues, upsertLookupValue as saveLookupValue } from "@/integrations/local/lookups";
+import { listDropdownSourceValues as listCanonicalDropdownValues } from "@/integrations/local/dropdown-sources";
+import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
+import { type DropdownOption, type DropdownSourceKey } from "@/lib/dropdown-sources";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -12,16 +17,14 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  listLookupValues as fetchLookupValues,
-  upsertLookupValue as saveLookupValue,
-} from "@/integrations/local/lookups";
 
 type LookupComboboxProps = {
   fieldName: string;
   label: string;
   value: string;
   onValueChange: (value: string) => void;
+  onSelectionChange?: (selection: DropdownOption | null) => void;
+  source?: DropdownSourceKey;
   placeholder?: string;
   clearLabel?: string;
   className?: string;
@@ -31,20 +34,19 @@ type LookupComboboxProps = {
   allowClear?: boolean;
   options?: string[];
   emptyLabel?: string;
+  onCreateRequest?: (value: string) => void;
 };
 
-const lookupCache = new Map<string, string[]>();
-
-function uniqueValues(values: string[]) {
+function uniqueOptions(values: DropdownOption[]) {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of values) {
-    const value = raw.trim();
-    if (!value) continue;
-    const key = value.toLowerCase();
+  const out: DropdownOption[] = [];
+  for (const option of values) {
+    const label = option.label.trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(value);
+    out.push({ ...option, label });
   }
   return out;
 }
@@ -53,11 +55,22 @@ function normalize(value: string) {
   return value.trim().toLowerCase();
 }
 
+function toStaticOption(label: string, source: DropdownSourceKey): DropdownOption {
+  return {
+    id: `${source}:${normalize(label)}`,
+    label: label.trim(),
+    description: null,
+    source,
+  };
+}
+
 export function LookupCombobox({
   fieldName,
   label,
   value,
   onValueChange,
+  onSelectionChange,
+  source = "lookup",
   placeholder,
   clearLabel,
   className,
@@ -67,75 +80,136 @@ export function LookupCombobox({
   allowClear = false,
   options = [],
   emptyLabel,
+  onCreateRequest,
 }: LookupComboboxProps) {
+  const { profile, hasRole } = useAuth();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
-  const [lookupValues, setLookupValues] = useState<string[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadedOptions, setLoadedOptions] = useState<DropdownOption[]>([]);
+
+  const resolvedSource = source ?? "lookup";
+  const scopedPartnerId = hasRole("super_admin") ? null : profile?.partner_id ?? null;
+  const scopedUserId = hasRole("super_admin") ? null : profile?.id ?? null;
 
   useEffect(() => {
     let active = true;
-    const cached = lookupCache.get(fieldName);
-    if (cached) {
-      setLookupValues(cached);
-      return;
+    if (!open && hasLoaded) {
+      return () => {
+        active = false;
+      };
     }
+
     setLoading(true);
-    void fetchLookupValues(fieldName)
-      .then((rows) => {
+    const loadOptions = async () => {
+      try {
+        if (resolvedSource === "lookup") {
+          const rows = await listLegacyLookupValues(fieldName);
+          if (!active) return;
+          setLoadedOptions(
+            uniqueOptions(
+              rows.map((row) => ({
+                id: row.id,
+                label: row.value,
+                description: null,
+                source: "lookup",
+              })),
+            ),
+          );
+          setHasLoaded(true);
+          return;
+        }
+
+        const rows = await listCanonicalDropdownValues({
+          source: resolvedSource,
+          fieldName,
+          partnerId: scopedPartnerId,
+          userId: scopedUserId,
+        });
         if (!active) return;
-        const values = uniqueValues(rows.map((row) => row.value));
-        lookupCache.set(fieldName, values);
-        setLookupValues(values);
-      })
-      .catch(() => {
+        setLoadedOptions(uniqueOptions(rows));
+        setHasLoaded(true);
+      } catch {
         if (!active) return;
-        setLookupValues([]);
-      })
-      .finally(() => {
+        setLoadedOptions([]);
+        setHasLoaded(true);
+      } finally {
         if (!active) return;
         setLoading(false);
-      });
+      }
+    };
+
+    void loadOptions();
+
     return () => {
       active = false;
     };
-  }, [fieldName]);
+  }, [fieldName, hasLoaded, open, profile?.id, profile?.partner_id, resolvedSource, hasRole]);
 
-  const mergedOptions = useMemo(
-    () => uniqueValues([...lookupValues, ...options]),
-    [lookupValues, options],
-  );
+  const mergedOptions = useMemo(() => {
+    const mappedStatic = options.map((option) => toStaticOption(option, resolvedSource));
+    return uniqueOptions([...loadedOptions, ...mappedStatic]);
+  }, [loadedOptions, options, resolvedSource]);
 
   const filteredOptions = useMemo(() => {
     const term = normalize(search);
     if (!term) return mergedOptions;
-    return mergedOptions.filter((option) => option.toLowerCase().includes(term));
+    return mergedOptions.filter((option) => {
+      const haystack = [option.label, option.description ?? ""].join(" ").toLowerCase();
+      return haystack.includes(term);
+    });
   }, [mergedOptions, search]);
 
-  const selectedLabel = value.trim() || placeholder || `Select ${label.toLowerCase()}`;
   const normalizedValue = normalize(value);
   const hasCurrentValue = normalizedValue
-    ? mergedOptions.some((option) => normalize(option) === normalizedValue)
+    ? mergedOptions.some((option) => normalize(option.label) === normalizedValue)
     : false;
+  const selectedLabel = value.trim() || placeholder || `Select ${label.toLowerCase()}`;
   const createValue = search.trim();
-  const canCreate =
+  const optionExists = mergedOptions.some((option) => normalize(option.label) === normalize(createValue));
+  const canCreateLookup = resolvedSource === "lookup" && allowCreate && createValue.length > 0 && !optionExists;
+  const canCreateClient =
+    resolvedSource === "client" &&
     allowCreate &&
+    Boolean(onCreateRequest) &&
     createValue.length > 0 &&
-    !mergedOptions.some((option) => normalize(option) === normalize(createValue));
+    !optionExists;
+  const canCreate = canCreateLookup || canCreateClient;
   const canClear = allowClear && value.trim().length > 0;
 
-  const choose = (nextValue: string) => {
-    onValueChange(nextValue);
+  const choose = (nextValue: DropdownOption | null) => {
+    onValueChange(nextValue?.label ?? "");
+    onSelectionChange?.(nextValue);
     setSearch("");
     setOpen(false);
   };
 
   const createAndChoose = async (nextValue: string) => {
-    const created = await saveLookupValue(fieldName, nextValue);
-    const next = uniqueValues([...mergedOptions, created.value]);
-    lookupCache.set(fieldName, next);
-    setLookupValues(next);
-    choose(created.value);
+    if (resolvedSource === "client" && onCreateRequest) {
+      onCreateRequest(nextValue);
+      setSearch("");
+      setOpen(false);
+      return;
+    }
+
+    if (resolvedSource !== "lookup") {
+      return;
+    }
+
+    try {
+      const created = await saveLookupValue(fieldName, nextValue);
+      const nextOption: DropdownOption = {
+        id: created.id,
+        label: created.value,
+        description: null,
+        source: "lookup",
+      };
+      setLoadedOptions((current) => uniqueOptions([...current, nextOption]));
+      choose(nextOption);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create option");
+    }
   };
 
   return (
@@ -168,7 +242,7 @@ export function LookupCombobox({
               <div className="space-y-2 p-4 text-sm text-muted-foreground">
                 <div>{emptyLabel ?? "No matches found."}</div>
                 {canClear ? (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => choose("")}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => choose(null)}>
                     {clearLabel ?? `Clear ${label.toLowerCase()}`}
                   </Button>
                 ) : null}
@@ -182,20 +256,27 @@ export function LookupCombobox({
             </CommandEmpty>
             <CommandGroup heading={label}>
               {canClear ? (
-                <CommandItem value="__clear__" onSelect={() => choose("")}>
+                <CommandItem value="__clear__" onSelect={() => choose(null)}>
                   {clearLabel ?? `Clear ${label.toLowerCase()}`}
                 </CommandItem>
               ) : null}
               {filteredOptions.map((option) => (
                 <CommandItem
-                  key={option}
-                  value={option}
+                  key={option.id}
+                  value={option.label}
                   onSelect={() => choose(option)}
-                  className="flex items-center justify-between"
+                  className="flex items-center justify-between gap-3"
                 >
-                  <span className="truncate">{option}</span>
-                  {hasCurrentValue && normalize(option) === normalizedValue ? (
-                    <Check className="h-4 w-4" />
+                  <div className="min-w-0">
+                    <div className="truncate">{option.label}</div>
+                    {option.description ? (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {option.description}
+                      </div>
+                    ) : null}
+                  </div>
+                  {hasCurrentValue && normalize(option.label) === normalizedValue ? (
+                    <Check className="h-4 w-4 shrink-0" />
                   ) : null}
                 </CommandItem>
               ))}

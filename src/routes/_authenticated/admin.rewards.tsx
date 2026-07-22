@@ -290,6 +290,7 @@ function AdminRewardsPage() {
   };
 
   const rejectRedemption = async (redemption: RewardRedemptionRecord) => {
+    const reward = catalog.find((item) => item.id === redemption.reward_id) ?? null;
     setProcessingId(redemption.id);
     try {
       const { error } = await supabase

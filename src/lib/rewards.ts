@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export const DEAL_WIN_REWARD_POINTS = 500;
 
 export const REWARD_TIERS = [
@@ -10,6 +8,13 @@ export const REWARD_TIERS = [
 ] as const;
 
 export type RewardTier = (typeof REWARD_TIERS)[number]["tier"];
+
+function makeRewardId() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `reward_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  );
+}
 
 export type RewardCatalogRecord = {
   id: string;
@@ -56,22 +61,8 @@ export type RewardRedemptionRecord = {
   updated_at: string;
 };
 
-type RewardQueryResult<T> = Promise<{
-  data: T | null;
-  error: { message: string } | null;
-}>;
-
-type RewardTableQuery = {
-  select(columns: string): RewardTableQuery;
-  eq(column: string, value: string | number | null): RewardTableQuery;
-  maybeSingle(): RewardQueryResult<{ id: string }>;
-  insert(
-    values: Record<string, unknown> | Array<Record<string, unknown>>,
-  ): RewardQueryResult<unknown>;
-};
-
 type RewardDbClient = {
-  from(table: string): RewardTableQuery;
+  from(table: string): any;
 };
 
 export function rewardTierForPoints(points: number): RewardTier {
@@ -134,7 +125,7 @@ export async function awardDealWinPoints(
 
   const now = new Date().toISOString();
   const payload = {
-    id: randomUUID(),
+    id: makeRewardId(),
     user_id: input.userId,
     partner_id: input.partnerId,
     source_type: "deal_win",

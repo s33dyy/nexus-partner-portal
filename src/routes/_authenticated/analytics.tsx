@@ -5,6 +5,7 @@ import { BarChart3, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-reac
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/local/client";
+import { applyPartnerScope } from "@/lib/partner-scope";
 import {
   DEAL_STAGE_ORDER,
   type CatalogItemRecord,
@@ -38,15 +39,16 @@ function AnalyticsPage() {
         .select("*")
         .order("updated_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          dealQuery = dealQuery.eq("partner_id", profile.partner_id);
-          customerQuery = customerQuery.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          dealQuery = dealQuery.eq("user_id", profile.id);
-          customerQuery = customerQuery.eq("user_id", profile.id);
-        }
-      }
+      dealQuery = applyPartnerScope(dealQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
+      customerQuery = applyPartnerScope(customerQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const [dealRes, customerRes, catalogRes] = await Promise.all([
         dealQuery,

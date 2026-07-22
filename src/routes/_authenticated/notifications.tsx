@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateTimeLabel } from "@/lib/date-utils";
+import { applyPartnerScope } from "@/lib/partner-scope";
 
 export const Route = createFileRoute("/_authenticated/notifications")({
   component: NotificationsPage,
@@ -34,13 +35,11 @@ function NotificationsPage() {
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          query = query.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          query = query.eq("user_id", profile.id);
-        }
-      }
+      query = applyPartnerScope(query, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const { data, error } = await query;
       if (error) throw error;
@@ -69,11 +68,11 @@ function NotificationsPage() {
   const markAllAsRead = async () => {
     try {
       let query = supabase.from("notifications").update({ read: true }).eq("read", false);
-      if (!hasRole("super_admin") && profile?.partner_id) {
-        query = query.eq("partner_id", profile.partner_id);
-      } else if (!hasRole("super_admin") && profile?.id) {
-        query = query.eq("user_id", profile.id);
-      }
+      query = applyPartnerScope(query, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
       await query;
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     } catch (e) {

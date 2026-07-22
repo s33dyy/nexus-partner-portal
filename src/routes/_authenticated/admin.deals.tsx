@@ -7,6 +7,7 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/_authenticated/admin/deals")({
 });
 
 function AdminDealsPage() {
-  const { hasRole } = useAuth();
+  const { profile, hasRole } = useAuth();
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,6 +38,8 @@ function AdminDealsPage() {
   const [note, setNote] = useState("");
   const [reviewDraft, setReviewDraft] = useState<DealRecord | null>(null);
   const [saving, setSaving] = useState(false);
+  const [clientCreateOpen, setClientCreateOpen] = useState(false);
+  const [clientCreateSeed, setClientCreateSeed] = useState("");
 
   function uniqueStrings(values: Array<string | null | undefined>) {
     return [
@@ -117,9 +120,6 @@ function AdminDealsPage() {
   const editOptions = useMemo(
     () => ({
       countries: uniqueStrings(deals.map((deal) => deal.country)),
-      accounts: uniqueStrings(deals.map((deal) => deal.account_name)),
-      contacts: uniqueStrings(deals.map((deal) => deal.contact_name)),
-      owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
       products: uniqueStrings(deals.map((deal) => deal.product)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
       budgets: uniqueStrings(deals.map((deal) => deal.customer_budget ?? "")),
@@ -184,6 +184,9 @@ function AdminDealsPage() {
       const { error } = await supabase
         .from("portal_deals")
         .update({
+          partner_id: reviewDraft.partner_id,
+          customer_id: reviewDraft.customer_id,
+          poc_profile_id: reviewDraft.poc_profile_id,
           account_name: reviewDraft.account_name,
           contact_name: reviewDraft.contact_name,
           owner_name: reviewDraft.owner_name,
@@ -408,6 +411,7 @@ function AdminDealsPage() {
                         <Label>Account</Label>
                         <LookupCombobox
                           fieldName={LOOKUP_FIELDS.dealAccount}
+                          source="account"
                           label="Account"
                           value={reviewDraft.account_name}
                           onValueChange={(value) =>
@@ -415,14 +419,26 @@ function AdminDealsPage() {
                               current ? { ...current, account_name: value } : current,
                             )
                           }
+                          onSelectionChange={(selection) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    partner_id: selection?.id ?? null,
+                                    account_name: selection?.label ?? current.account_name,
+                                  }
+                                : current,
+                            )
+                          }
                           placeholder="Select or create account"
-                          options={editOptions.accounts}
+                          allowCreate={false}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label>Client</Label>
                         <LookupCombobox
                           fieldName={LOOKUP_FIELDS.dealContact}
+                          source="client"
                           label="Client"
                           value={reviewDraft.contact_name}
                           onValueChange={(value) =>
@@ -430,14 +446,29 @@ function AdminDealsPage() {
                               current ? { ...current, contact_name: value } : current,
                             )
                           }
+                          onSelectionChange={(selection) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    customer_id: selection?.id ?? null,
+                                    contact_name: selection?.label ?? current.contact_name,
+                                  }
+                                : current,
+                            )
+                          }
+                          onCreateRequest={(value) => {
+                            setClientCreateSeed(value);
+                            setClientCreateOpen(true);
+                          }}
                           placeholder="Select or create client"
-                          options={editOptions.contacts}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label>POC</Label>
                         <LookupCombobox
                           fieldName={LOOKUP_FIELDS.dealOwner}
+                          source="poc"
                           label="POC"
                           value={reviewDraft.owner_name}
                           onValueChange={(value) =>
@@ -445,8 +476,19 @@ function AdminDealsPage() {
                               current ? { ...current, owner_name: value } : current,
                             )
                           }
-                          placeholder="Select or create POC"
-                          options={editOptions.owners}
+                          onSelectionChange={(selection) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    poc_profile_id: selection?.id ?? null,
+                                    owner_name: selection?.label ?? current.owner_name,
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="Select POC"
+                          allowCreate={false}
                         />
                       </div>
                       <div className="space-y-2">
@@ -621,6 +663,32 @@ function AdminDealsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <CustomerQuickCreateDialog
+        open={clientCreateOpen}
+        onOpenChange={setClientCreateOpen}
+        initialCompanyName={clientCreateSeed}
+        initialAccountOwner={profile?.full_name ?? reviewDraft?.owner_name ?? "LIVEY Admin"}
+        initialRegion={reviewDraft?.country === "India" ? reviewDraft?.region || "India West" : reviewDraft?.region || "Global"}
+        initialSegment="Mid-market"
+        initialMrr="$0"
+        initialStatus="active"
+        initialNextStep="Intro call"
+        initialLastTouch="New"
+        userId={profile?.id ?? null}
+        partnerId={reviewDraft?.partner_id ?? null}
+        onCreated={(customer) =>
+          setReviewDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  customer_id: customer.id,
+                  contact_name: customer.company_name,
+                }
+              : current,
+          )
+        }
+      />
     </div>
   );
 }

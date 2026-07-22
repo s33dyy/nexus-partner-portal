@@ -15,7 +15,9 @@ export type DealStage = (typeof DEAL_STAGE_ORDER)[number];
 export type DealRecord = {
   id: string;
   account_name: string;
+  customer_id: string | null;
   contact_name: string;
+  poc_profile_id: string | null;
   owner_name: string;
   country: string;
   region: string;
@@ -50,6 +52,8 @@ export type CustomerRecord = {
   status: string;
   next_step: string;
   last_touch: string;
+  user_id: string | null;
+  partner_id: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;

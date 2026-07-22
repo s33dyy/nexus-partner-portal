@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/local/client";
+import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
@@ -45,6 +47,9 @@ import {
 } from "@/lib/portal-records";
 
 type DealForm = {
+  partner_id: string | null;
+  customer_id: string | null;
+  poc_profile_id: string | null;
   account_name: string;
   contact_name: string;
   owner_name: string;
@@ -64,6 +69,9 @@ type DealForm = {
 };
 
 const EMPTY_FORM: DealForm = {
+  partner_id: null,
+  customer_id: null,
+  poc_profile_id: null,
   account_name: "",
   contact_name: "",
   owner_name: "",
@@ -105,6 +113,8 @@ function DealsPage() {
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [clientCreateOpen, setClientCreateOpen] = useState(false);
+  const [clientCreateSeed, setClientCreateSeed] = useState("");
   const { profile, hasRole } = useAuth();
 
   const load = useCallback(async () => {
@@ -115,13 +125,11 @@ function DealsPage() {
         .select("*")
         .order("updated_at", { ascending: false });
 
-      if (!hasRole("super_admin")) {
-        if (hasRole("partner_admin") && profile?.partner_id) {
-          query = query.eq("partner_id", profile.partner_id);
-        } else if (profile?.id) {
-          query = query.eq("user_id", profile.id);
-        }
-      }
+      query = applyPartnerScope(query, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
       const { data, error } = await query;
       if (error) throw error;
@@ -153,9 +161,13 @@ function DealsPage() {
     setDraft((current) =>
       current.account_name.trim().length > 0
         ? current
-        : { ...current, account_name: profile.company_name ?? current.account_name },
+        : {
+            ...current,
+            partner_id: profile.partner_id ?? current.partner_id,
+            account_name: profile.company_name ?? current.account_name,
+          },
     );
-  }, [hasRole, profile?.company_name]);
+  }, [hasRole, profile?.company_name, profile?.partner_id]);
 
   useEffect(() => {
     if (!profile?.full_name) return;
@@ -163,9 +175,13 @@ function DealsPage() {
     setDraft((current) =>
       current.owner_name.trim().length > 0
         ? current
-        : { ...current, owner_name: profile.full_name ?? current.owner_name },
+        : {
+            ...current,
+            poc_profile_id: profile.id ?? current.poc_profile_id,
+            owner_name: profile.full_name ?? current.owner_name,
+          },
     );
-  }, [hasRole, profile?.full_name]);
+  }, [hasRole, profile?.full_name, profile?.id]);
 
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
@@ -218,9 +234,6 @@ function DealsPage() {
   const editOptions = useMemo(() => {
     return {
       countries: uniqueStrings(deals.map((deal) => deal.country)),
-      accounts: uniqueStrings(deals.map((deal) => deal.account_name)),
-      contacts: uniqueStrings(deals.map((deal) => deal.contact_name)),
-      owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
       regions: uniqueStrings(deals.map((deal) => deal.region)),
       products: uniqueStrings(deals.map((deal) => deal.product)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
@@ -299,7 +312,11 @@ function DealsPage() {
       const payload = {
         id: globalThis.crypto.randomUUID(),
         ...draft,
+        partner_id: draft.partner_id ?? profile?.partner_id ?? null,
+        customer_id: draft.customer_id ?? null,
+        poc_profile_id: draft.poc_profile_id ?? profile?.id ?? null,
         account_name: accountName,
+        contact_name: draft.contact_name.trim(),
         owner_name: draft.owner_name.trim() || profile?.full_name || "Unknown",
         country: draft.country || "India",
         quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
@@ -309,7 +326,6 @@ function DealsPage() {
         status: autoApproved ? "approved" : "submitted",
         probability: Number(draft.probability) || 0,
         user_id: profile?.id,
-        partner_id: profile?.partner_id,
         is_seed: false,
         created_at: now,
         updated_at: now,
@@ -626,13 +642,21 @@ function DealsPage() {
                     <Label htmlFor="account_name">Account</Label>
                     <LookupCombobox
                       fieldName={LOOKUP_FIELDS.dealAccount}
+                      source="account"
                       label="Account"
                       value={draft.account_name}
                       onValueChange={(value) =>
                         setDraft((current) => ({ ...current, account_name: value }))
                       }
+                      onSelectionChange={(selection) =>
+                        setDraft((current) => ({
+                          ...current,
+                          partner_id: selection?.id ?? null,
+                          account_name: selection?.label ?? current.account_name,
+                        }))
+                      }
                       placeholder="Select or create account"
-                      options={editOptions.accounts}
+                      allowCreate={false}
                     />
                   </div>
                 )}
@@ -640,29 +664,52 @@ function DealsPage() {
                   <Label htmlFor="contact_name">Client</Label>
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.dealContact}
+                    source="client"
                     label="Client"
                     value={draft.contact_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, contact_name: value }))
                     }
+                    onSelectionChange={(selection) =>
+                      setDraft((current) => ({
+                        ...current,
+                        customer_id: selection?.id ?? null,
+                        contact_name: selection?.label ?? current.contact_name,
+                      }))
+                    }
+                    onCreateRequest={(value) => {
+                      setClientCreateSeed(value);
+                      setClientCreateOpen(true);
+                    }}
                     placeholder="Select or create client"
-                    options={editOptions.contacts}
                   />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="owner_name">POC</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealOwner}
-                    label="POC"
-                    value={draft.owner_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, owner_name: value }))
-                    }
-                    placeholder="Select or create POC"
-                    options={editOptions.owners}
-                  />
+                  {hasRole("super_admin") ? (
+                    <LookupCombobox
+                      fieldName={LOOKUP_FIELDS.dealOwner}
+                      source="poc"
+                      label="POC"
+                      value={draft.owner_name}
+                      onValueChange={(value) =>
+                        setDraft((current) => ({ ...current, owner_name: value }))
+                      }
+                      onSelectionChange={(selection) =>
+                        setDraft((current) => ({
+                          ...current,
+                          poc_profile_id: selection?.id ?? null,
+                          owner_name: selection?.label ?? current.owner_name,
+                        }))
+                      }
+                      placeholder="Select POC"
+                      allowCreate={false}
+                    />
+                  ) : (
+                    <Input value={profile?.full_name ?? draft.owner_name} readOnly />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">Country</Label>
@@ -962,6 +1009,28 @@ function DealsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <CustomerQuickCreateDialog
+        open={clientCreateOpen}
+        onOpenChange={setClientCreateOpen}
+        initialCompanyName={clientCreateSeed}
+        initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
+        initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
+        initialSegment="Mid-market"
+        initialMrr="$0"
+        initialStatus="active"
+        initialNextStep="Intro call"
+        initialLastTouch="New"
+        userId={profile?.id ?? null}
+        partnerId={profile?.partner_id ?? null}
+        onCreated={(customer) =>
+          setDraft((current) => ({
+            ...current,
+            customer_id: customer.id,
+            contact_name: customer.company_name,
+          }))
+        }
+      />
     </div>
   );
 }
