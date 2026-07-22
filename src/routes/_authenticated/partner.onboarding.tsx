@@ -647,8 +647,9 @@ function OnboardingPage() {
                             </div>
                           </div>
                           {!readOnly && (
-                            <label className="cursor-pointer">
+                            <div className="inline-flex">
                               <input
+                                id={`upload-${t.replace(/\s+/g, '-')}`}
                                 type="file"
                                 className="hidden"
                                 accept=".pdf,image/png,image/jpeg"
@@ -658,17 +659,21 @@ function OnboardingPage() {
                                   e.currentTarget.value = "";
                                 }}
                               />
-                              <Button asChild size="sm" variant="secondary" disabled={busy}>
-                                <span>
-                                  {busy ? (
-                                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <FileUp className="mr-2 h-3.5 w-3.5" />
-                                  )}
-                                  Upload
-                                </span>
+                              <Button 
+                                type="button"
+                                size="sm" 
+                                variant="secondary" 
+                                disabled={busy}
+                                onClick={() => document.getElementById(`upload-${t.replace(/\s+/g, '-')}`)?.click()}
+                              >
+                                {busy ? (
+                                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <FileUp className="mr-2 h-3.5 w-3.5" />
+                                )}
+                                Upload
                               </Button>
-                            </label>
+                            </div>
                           )}
                         </div>
                         {list.length > 0 && (

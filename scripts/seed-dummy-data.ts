@@ -9,11 +9,17 @@ const pool = new Pool({
 
 const DUMMY_PDF_URL = "https://res.cloudinary.com/dkcrxu8cc/raw/upload/v1784706256/partner-documents/6a1b1a82-2ae9-47f3-8afc-c9a671db06c1/GST_Certificate_1784706256131.pdf";
 
-async function fetchDummyPdf() {
-  const res = await fetch(DUMMY_PDF_URL);
-  const arrayBuffer = await res.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
+// The livey backend stores Cloudinary metadata in file_data, not the raw binary
+const dummyCloudinaryData = Buffer.from(
+  JSON.stringify({
+    publicId: "partner-documents/6a1b1a82-2ae9-47f3-8afc-c9a671db06c1",
+    secureUrl: "https://res.cloudinary.com/dkcrxu8cc/raw/upload/v1784706256/partner-documents/6a1b1a82-2ae9-47f3-8afc-c9a671db06c1/GST_Certificate_1784706256131.pdf",
+    resourceType: "raw",
+    version: 1784706256,
+    format: "pdf"
+  }),
+  "utf8"
+);
 
 function randomId() {
   return crypto.randomUUID();
@@ -22,9 +28,7 @@ function randomId() {
 async function seed() {
   console.log("Starting seeder...");
 
-  // Fetch the PDF blob once to use for all documents
-  console.log("Fetching dummy PDF...");
-  const pdfBuffer = await fetchDummyPdf();
+  // Cloudinary metadata buffer ready
 
   const numPartners = 5;
   const numUsersPerPartner = 5;
@@ -90,7 +94,7 @@ async function seed() {
     await pool.query(`
       INSERT INTO document_blobs (file_path, bucket, file_name, mime_type, size_bytes, file_data, is_seed)
       VALUES ($1, 'partner-documents', 'GST_Certificate.pdf', 'application/pdf', $2, $3, true)
-    `, [filePath, pdfBuffer.length, pdfBuffer]);
+    `, [filePath, 250000, dummyCloudinaryData]);
     
     // (The partner documents logic remains unchanged above this)
 
@@ -102,7 +106,7 @@ async function seed() {
     await pool.query(`
       INSERT INTO partner_documents (partner_id, uploaded_by, doc_type, file_name, file_path, mime_type, size_bytes, is_seed)
       VALUES ($1, $2, 'Tax Document', 'GST_Certificate.pdf', $3, 'application/pdf', $4, true)
-    `, [partnerId, adminId, filePath, pdfBuffer.length]);
+    `, [partnerId, adminId, filePath, 250000]);
 
     const statusNote = isApproved ? "Approved after reviewing GST cert." : "Rejected: GST cert is invalid or expired.";
     await pool.query(`

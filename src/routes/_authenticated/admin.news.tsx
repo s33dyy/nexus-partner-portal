@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -50,6 +50,8 @@ function AdminNewsPage() {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const createFileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -375,28 +377,33 @@ function AdminNewsPage() {
                           }
                           placeholder="Paste a Cloudinary URL or upload below"
                         />
-                        <label className="inline-flex cursor-pointer">
+                        <div className="inline-flex">
                           <input
                             type="file"
                             className="hidden"
                             accept="image/*"
+                            ref={editFileInputRef}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) void uploadImage(file);
                               e.currentTarget.value = "";
                             }}
                           />
-                          <Button asChild variant="secondary" size="sm" disabled={uploadingImage}>
-                            <span>
-                              {uploadingImage ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <Upload className="mr-2 h-4 w-4" />
-                              )}
-                              Upload image
-                            </span>
+                          <Button 
+                            type="button" 
+                            variant="secondary" 
+                            size="sm" 
+                            disabled={uploadingImage}
+                            onClick={() => editFileInputRef.current?.click()}
+                          >
+                            {uploadingImage ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Upload className="mr-2 h-4 w-4" />
+                            )}
+                            Upload image
                           </Button>
-                        </label>
+                        </div>
                       </div>
                     </Field>
                     <Field label="Caption" className="md:col-span-2">
@@ -463,28 +470,33 @@ function AdminNewsPage() {
                       }
                       placeholder="Paste a Cloudinary URL or upload below"
                     />
-                    <label className="inline-flex cursor-pointer">
+                    <div className="inline-flex">
                       <input
                         type="file"
                         className="hidden"
                         accept="image/*"
+                        ref={createFileInputRef}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) void uploadImage(file);
                           e.currentTarget.value = "";
                         }}
                       />
-                      <Button asChild variant="secondary" size="sm" disabled={uploadingImage}>
-                        <span>
-                          {uploadingImage ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Upload className="mr-2 h-4 w-4" />
-                          )}
-                          Upload image
-                        </span>
+                      <Button 
+                        type="button" 
+                        variant="secondary" 
+                        size="sm" 
+                        disabled={uploadingImage}
+                        onClick={() => createFileInputRef.current?.click()}
+                      >
+                        {uploadingImage ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        Upload image
                       </Button>
-                    </label>
+                    </div>
                   </div>
                 </Field>
                 <Field label="Caption" className="md:col-span-2">
