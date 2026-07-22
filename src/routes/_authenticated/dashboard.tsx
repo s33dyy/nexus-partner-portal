@@ -24,6 +24,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
+import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -89,6 +90,10 @@ function DashboardPage() {
         .from("notifications")
         .select("*")
         .order("created_at", { ascending: false });
+      let rewardQuery = supabase
+        .from("reward_point_events")
+        .select("id, user_id, partner_id, points_delta, reason, created_at")
+        .order("created_at", { ascending: false });
 
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
@@ -96,35 +101,42 @@ function DashboardPage() {
           customerQuery = customerQuery.eq("partner_id", profile.partner_id);
           partnerQuery = partnerQuery.eq("id", profile.partner_id);
           notificationQuery = notificationQuery.eq("partner_id", profile.partner_id);
+          rewardQuery = rewardQuery.eq("partner_id", profile.partner_id);
         } else if (profile?.id) {
           dealQuery = dealQuery.eq("user_id", profile.id);
           customerQuery = customerQuery.eq("user_id", profile.id);
           partnerQuery = partnerQuery.eq("id", profile.partner_id || "");
           notificationQuery = notificationQuery.eq("partner_id", profile.partner_id || "");
+          rewardQuery = rewardQuery.eq("user_id", profile.id);
         }
       }
 
-      const [dealsRes, customersRes, partnersRes, newsRes, notifRes] = await Promise.all([
-        dealQuery,
-        customerQuery,
-        partnerQuery,
-        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
-        notificationQuery,
-      ]);
+      const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes] = await Promise.all(
+        [
+          dealQuery,
+          customerQuery,
+          partnerQuery,
+          supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+          notificationQuery,
+          rewardQuery,
+        ],
+      );
 
       if (
         dealsRes.error ||
         customersRes.error ||
         partnersRes.error ||
         newsRes.error ||
-        notifRes.error
+        notifRes.error ||
+        rewardRes.error
       ) {
         throw (
           dealsRes.error ??
           customersRes.error ??
           partnersRes.error ??
           newsRes.error ??
-          notifRes.error
+          notifRes.error ??
+          rewardRes.error
         );
       }
 
@@ -134,6 +146,18 @@ function DashboardPage() {
       const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
       const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
       const notifRows = (notifRes.data as NotificationFeedRow[] | null) ?? [];
+      const rewardRows =
+        (rewardRes.data as Array<{
+          id: string;
+          user_id: string | null;
+          partner_id: string | null;
+          points_delta: number;
+          reason: string;
+          created_at: string;
+        }> | null) ?? [];
+      const rewardPoints = sumRewardPoints(rewardRows);
+      const rewardTier = rewardTierForPoints(rewardPoints);
+      const rewardProgressState = rewardProgress(rewardPoints);
 
       const combinedNews = [
         ...newsRows,
@@ -194,11 +218,22 @@ function DashboardPage() {
           hint: `${totalFocusAreas} focus areas mapped`,
           tone: "info",
         },
+        {
+          id: "rewards",
+          label: "Reward points",
+          value: String(rewardPoints),
+          hint: `${rewardTier} tier · ${rewardProgressState.pointsToNext} to next`,
+          tone: "success",
+        },
       ]);
       setNewsPosts(combinedNews);
       setSpotlights(partnerRows.slice(0, 3));
       setSource(
-        dealRows.length || customerRows.length || partnerRows.length || combinedNews.length
+        dealRows.length ||
+          customerRows.length ||
+          partnerRows.length ||
+          combinedNews.length ||
+          rewardRows.length
           ? "database"
           : "empty",
       );
@@ -406,6 +441,7 @@ function DashboardPage() {
               <QuickAction to="/partner/onboarding" icon={Building2} label="Partner onboarding" />
               <QuickAction to="/deals" icon={Handshake} label="Register a deal" />
               <QuickAction to="/customers" icon={Users} label="Reserve a customer" />
+              <QuickAction to="/rewards" icon={Trophy} label="View rewards" />
               <QuickAction to="/documents" icon={FileText} label="Upload documents" />
               {hasRole("super_admin") && (
                 <QuickAction to="/admin/news" icon={Megaphone} label="Publish news" />
@@ -595,6 +631,8 @@ function iconForMetric(label: string) {
       return Trophy;
     case "Customers":
       return Users;
+    case "Reward points":
+      return Trophy;
     default:
       return Activity;
   }

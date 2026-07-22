@@ -28,6 +28,9 @@ const RESET_TABLES = [
   "portal_team_members",
   "portal_audit_events",
   "portal_news_posts",
+  "reward_catalog_items",
+  "reward_point_events",
+  "reward_redemptions",
 ] as const;
 
 async function resetDatabase() {

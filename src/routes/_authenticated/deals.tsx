@@ -31,6 +31,7 @@ import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
+import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import {
   DEAL_STAGE_ORDER,
@@ -388,6 +389,20 @@ function DealsPage() {
       feedCaption: `The deal for ${selectedDeal.product} progressed to ${stage}.`,
       type: "deal_stage_change",
     });
+    if (stage === "won") {
+      try {
+        await awardDealWinPoints(supabase, {
+          dealId: selectedDeal.id,
+          accountName: selectedDeal.account_name,
+          product: selectedDeal.product,
+          userId: selectedDeal.user_id,
+          partnerId: selectedDeal.partner_id,
+          actorId: profile?.id ?? null,
+        });
+      } catch (error) {
+        console.error("Failed to record reward points for deal win", error);
+      }
+    }
   };
 
   const closeAs = async (status: "won" | "lost") => {
@@ -418,6 +433,20 @@ function DealsPage() {
           : `The opportunity for ${selectedDeal.product} was marked as lost.`,
       type: `deal_${status}`,
     });
+    if (status === "won") {
+      try {
+        await awardDealWinPoints(supabase, {
+          dealId: selectedDeal.id,
+          accountName: selectedDeal.account_name,
+          product: selectedDeal.product,
+          userId: selectedDeal.user_id,
+          partnerId: selectedDeal.partner_id,
+          actorId: profile?.id ?? null,
+        });
+      } catch (error) {
+        console.error("Failed to record reward points for deal win", error);
+      }
+    }
   };
 
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);

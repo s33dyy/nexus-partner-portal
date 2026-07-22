@@ -1,0 +1,152 @@
+import { randomUUID } from "node:crypto";
+
+export const DEAL_WIN_REWARD_POINTS = 500;
+
+export const REWARD_TIERS = [
+  { tier: "Bronze", minPoints: 0 },
+  { tier: "Silver", minPoints: 500 },
+  { tier: "Gold", minPoints: 1500 },
+  { tier: "Platinum", minPoints: 3000 },
+] as const;
+
+export type RewardTier = (typeof REWARD_TIERS)[number]["tier"];
+
+export type RewardCatalogRecord = {
+  id: string;
+  title: string;
+  description: string;
+  image_path: string | null;
+  category: string;
+  points_cost: number;
+  stock: number;
+  availability: string;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RewardPointEventRecord = {
+  id: string;
+  user_id: string | null;
+  partner_id: string | null;
+  source_type: string;
+  source_id: string | null;
+  points_delta: number;
+  reason: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  is_seed: boolean;
+  created_at: string;
+};
+
+export type RewardRedemptionRecord = {
+  id: string;
+  reward_id: string;
+  user_id: string | null;
+  partner_id: string | null;
+  points_cost: number;
+  status: string;
+  shipping_name: string | null;
+  shipping_address: string | null;
+  notes: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type RewardQueryResult<T> = Promise<{
+  data: T | null;
+  error: { message: string } | null;
+}>;
+
+type RewardTableQuery = {
+  select(columns: string): RewardTableQuery;
+  eq(column: string, value: string | number | null): RewardTableQuery;
+  maybeSingle(): RewardQueryResult<{ id: string }>;
+  insert(
+    values: Record<string, unknown> | Array<Record<string, unknown>>,
+  ): RewardQueryResult<unknown>;
+};
+
+type RewardDbClient = {
+  from(table: string): RewardTableQuery;
+};
+
+export function rewardTierForPoints(points: number): RewardTier {
+  if (points >= 3000) return "Platinum";
+  if (points >= 1500) return "Gold";
+  if (points >= 500) return "Silver";
+  return "Bronze";
+}
+
+export function rewardTierIndex(points: number) {
+  return REWARD_TIERS.findIndex((entry) => points < entry.minPoints);
+}
+
+export function rewardProgress(points: number) {
+  const currentTierIndex = [...REWARD_TIERS]
+    .reverse()
+    .findIndex((entry) => points >= entry.minPoints);
+  const normalizedIndex = currentTierIndex < 0 ? 0 : REWARD_TIERS.length - 1 - currentTierIndex;
+  const currentTier = REWARD_TIERS[normalizedIndex] ?? REWARD_TIERS[0];
+  const nextTier = REWARD_TIERS[normalizedIndex + 1] ?? null;
+  const pointsInTier = Math.max(points - currentTier.minPoints, 0);
+  const nextThreshold = nextTier?.minPoints ?? currentTier.minPoints;
+  const progress =
+    nextTier === null
+      ? 100
+      : Math.min(100, Math.round((pointsInTier / (nextThreshold - currentTier.minPoints)) * 100));
+
+  return {
+    currentTier: currentTier.tier,
+    nextTier: nextTier?.tier ?? null,
+    nextThreshold: nextTier?.minPoints ?? null,
+    progress,
+    pointsToNext: nextTier ? Math.max(nextTier.minPoints - points, 0) : 0,
+  };
+}
+
+export function sumRewardPoints(events: Array<{ points_delta: number }>) {
+  return events.reduce((sum, event) => sum + Number(event.points_delta ?? 0), 0);
+}
+
+export async function awardDealWinPoints(
+  db: RewardDbClient,
+  input: {
+    dealId: string;
+    accountName: string;
+    product: string;
+    userId: string | null;
+    partnerId: string | null;
+    actorId: string | null;
+  },
+) {
+  const { data: existing, error: lookupError } = await db
+    .from("reward_point_events")
+    .select("id")
+    .eq("source_type", "deal_win")
+    .eq("source_id", input.dealId)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing) return { created: false };
+
+  const now = new Date().toISOString();
+  const payload = {
+    id: randomUUID(),
+    user_id: input.userId,
+    partner_id: input.partnerId,
+    source_type: "deal_win",
+    source_id: input.dealId,
+    points_delta: DEAL_WIN_REWARD_POINTS,
+    reason: `${input.accountName} closed won for ${input.product}`,
+    approved_by: input.actorId,
+    approved_at: now,
+    is_seed: false,
+    created_at: now,
+  };
+  const { error: insertError } = await db.from("reward_point_events").insert(payload);
+  if (insertError) throw insertError;
+  return { created: true, points: DEAL_WIN_REWARD_POINTS };
+}

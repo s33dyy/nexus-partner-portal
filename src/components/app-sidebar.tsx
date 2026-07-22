@@ -13,6 +13,7 @@ import {
   LifeBuoy,
   Image,
   Sparkles,
+  Trophy,
 } from "lucide-react";
 
 import {
@@ -47,6 +48,8 @@ const workspace: Item[] = [
   { title: "Documents", url: "/documents", icon: FileText },
 ];
 
+const shared: Item[] = [{ title: "Rewards", url: "/rewards", icon: Trophy }];
+
 const partnerAdmin: Item[] = [
   { title: "Company Profile", url: "/partner", icon: Building2, roles: ["partner_admin"] },
   { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
@@ -57,6 +60,7 @@ const admin: Item[] = [
   { title: "Deal Approvals", url: "/admin/deals", icon: Handshake, roles: ["super_admin"] },
   { title: "Users & Roles", url: "/admin/users", icon: Users, roles: ["super_admin"] },
   { title: "Tiers & Products", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
+  { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
   { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
   { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
 ];
@@ -118,6 +122,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {renderGroup("Rewards", visible(shared))}
         {!canSeeWorkspace && !hasRole("super_admin")
           ? renderGroup("Getting started", [
               { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },

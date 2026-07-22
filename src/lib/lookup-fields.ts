@@ -25,6 +25,7 @@ export const LOOKUP_FIELDS = {
   catalogPrice: "catalog.list_price",
   catalogMargin: "catalog.margin",
   catalogAvailability: "catalog.availability",
+  rewardCategory: "rewards.category",
   documentType: "documents.doc_type",
   userRole: "users.role",
   teamRole: "team.portal_role",

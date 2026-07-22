@@ -23,6 +23,7 @@ import {
   nextDealStatus,
   type DealRecord,
 } from "@/lib/portal-records";
+import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
@@ -175,6 +176,20 @@ function PipelinePage() {
         `${deal.account_name} moved to ${stage}`,
         `The deal for ${deal.product} progressed to ${stage}.`,
       );
+      if (stage === "won") {
+        try {
+          await awardDealWinPoints(supabase, {
+            dealId: deal.id,
+            accountName: deal.account_name,
+            product: deal.product,
+            userId: deal.user_id,
+            partnerId: deal.partner_id,
+            actorId: null,
+          });
+        } catch (rewardError) {
+          console.error("Failed to record reward points for deal win", rewardError);
+        }
+      }
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move deal");

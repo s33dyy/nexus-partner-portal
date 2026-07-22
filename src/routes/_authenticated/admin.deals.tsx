@@ -16,6 +16,7 @@ import { supabase } from "@/integrations/local/client";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { awardDealWinPoints } from "@/lib/rewards";
 import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -220,6 +221,20 @@ function AdminDealsPage() {
           `${selectedDeal.account_name} ${status.replace("_", " ")}`,
           `Super admin reviewed ${selectedDeal.product} and set the deal to ${status.replace("_", " ")}.`,
         );
+        if (status === "won") {
+          try {
+            await awardDealWinPoints(supabase, {
+              dealId: selectedDeal.id,
+              accountName: selectedDeal.account_name,
+              product: selectedDeal.product,
+              userId: selectedDeal.user_id,
+              partnerId: selectedDeal.partner_id,
+              actorId: (await supabase.auth.getUser()).data.user?.id ?? null,
+            });
+          } catch (rewardError) {
+            console.error("Failed to record reward points for deal win", rewardError);
+          }
+        }
         toast.success(`Deal marked ${status.replace("_", " ")}`);
       } else {
         toast.success("Deal updated");

@@ -21,6 +21,7 @@ import { Route as AuthenticatedDocumentsRouteImport } from './routes/_authentica
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as AuthenticatedPartnerRouteImport } from './routes/_authenticated/partner'
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
+import { Route as AuthenticatedRewardsRouteImport } from './routes/_authenticated/rewards'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSupportRouteImport } from './routes/_authenticated/support'
 import { Route as AuthenticatedAdminAuditRouteImport } from './routes/_authenticated/admin.audit'
@@ -28,6 +29,7 @@ import { Route as AuthenticatedAdminCatalogRouteImport } from './routes/_authent
 import { Route as AuthenticatedAdminDealsRouteImport } from './routes/_authenticated/admin.deals'
 import { Route as AuthenticatedAdminNewsRouteImport } from './routes/_authenticated/admin.news'
 import { Route as AuthenticatedAdminPartnersRouteImport } from './routes/_authenticated/admin.partners'
+import { Route as AuthenticatedAdminRewardsRouteImport } from './routes/_authenticated/admin.rewards'
 import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authenticated/admin.users'
 import { Route as AuthenticatedPartnerOnboardingRouteImport } from './routes/_authenticated/partner.onboarding'
 import { Route as AuthenticatedPartnerTeamRouteImport } from './routes/_authenticated/partner.team'
@@ -92,6 +94,11 @@ const AuthenticatedPipelineRoute = AuthenticatedPipelineRouteImport.update({
   path: '/pipeline',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedRewardsRoute = AuthenticatedRewardsRouteImport.update({
+  id: '/rewards',
+  path: '/rewards',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -129,6 +136,12 @@ const AuthenticatedAdminPartnersRoute =
     path: '/admin/partners',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminRewardsRoute =
+  AuthenticatedAdminRewardsRouteImport.update({
+    id: '/admin/rewards',
+    path: '/admin/rewards',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminUsersRoute = AuthenticatedAdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
@@ -159,6 +172,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
+  '/rewards': typeof AuthenticatedRewardsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/support': typeof AuthenticatedSupportRoute
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
@@ -166,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
+  '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/partner/team': typeof AuthenticatedPartnerTeamRoute
@@ -182,6 +197,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
+  '/rewards': typeof AuthenticatedRewardsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/support': typeof AuthenticatedSupportRoute
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
@@ -189,6 +205,7 @@ export interface FileRoutesByTo {
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
+  '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/partner/team': typeof AuthenticatedPartnerTeamRoute
@@ -207,6 +224,7 @@ export interface FileRoutesById {
   '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
   '/_authenticated/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
+  '/_authenticated/rewards': typeof AuthenticatedRewardsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/support': typeof AuthenticatedSupportRoute
   '/_authenticated/admin/audit': typeof AuthenticatedAdminAuditRoute
@@ -214,6 +232,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/deals': typeof AuthenticatedAdminDealsRoute
   '/_authenticated/admin/news': typeof AuthenticatedAdminNewsRoute
   '/_authenticated/admin/partners': typeof AuthenticatedAdminPartnersRoute
+  '/_authenticated/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/_authenticated/admin/users': typeof AuthenticatedAdminUsersRoute
   '/_authenticated/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/_authenticated/partner/team': typeof AuthenticatedPartnerTeamRoute
@@ -232,6 +251,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/partner'
     | '/pipeline'
+    | '/rewards'
     | '/settings'
     | '/support'
     | '/admin/audit'
@@ -239,6 +259,7 @@ export interface FileRouteTypes {
     | '/admin/deals'
     | '/admin/news'
     | '/admin/partners'
+    | '/admin/rewards'
     | '/admin/users'
     | '/partner/onboarding'
     | '/partner/team'
@@ -255,6 +276,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/partner'
     | '/pipeline'
+    | '/rewards'
     | '/settings'
     | '/support'
     | '/admin/audit'
@@ -262,6 +284,7 @@ export interface FileRouteTypes {
     | '/admin/deals'
     | '/admin/news'
     | '/admin/partners'
+    | '/admin/rewards'
     | '/admin/users'
     | '/partner/onboarding'
     | '/partner/team'
@@ -279,6 +302,7 @@ export interface FileRouteTypes {
     | '/_authenticated/notifications'
     | '/_authenticated/partner'
     | '/_authenticated/pipeline'
+    | '/_authenticated/rewards'
     | '/_authenticated/settings'
     | '/_authenticated/support'
     | '/_authenticated/admin/audit'
@@ -286,6 +310,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/deals'
     | '/_authenticated/admin/news'
     | '/_authenticated/admin/partners'
+    | '/_authenticated/admin/rewards'
     | '/_authenticated/admin/users'
     | '/_authenticated/partner/onboarding'
     | '/_authenticated/partner/team'
@@ -384,6 +409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPipelineRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/rewards': {
+      id: '/_authenticated/rewards'
+      path: '/rewards'
+      fullPath: '/rewards'
+      preLoaderRoute: typeof AuthenticatedRewardsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings': {
       id: '/_authenticated/settings'
       path: '/settings'
@@ -433,6 +465,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminPartnersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/rewards': {
+      id: '/_authenticated/admin/rewards'
+      path: '/admin/rewards'
+      fullPath: '/admin/rewards'
+      preLoaderRoute: typeof AuthenticatedAdminRewardsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/users': {
       id: '/_authenticated/admin/users'
       path: '/admin/users'
@@ -479,6 +518,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
   AuthenticatedPartnerRoute: typeof AuthenticatedPartnerRouteWithChildren
   AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
+  AuthenticatedRewardsRoute: typeof AuthenticatedRewardsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedSupportRoute: typeof AuthenticatedSupportRoute
   AuthenticatedAdminAuditRoute: typeof AuthenticatedAdminAuditRoute
@@ -486,6 +526,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminDealsRoute: typeof AuthenticatedAdminDealsRoute
   AuthenticatedAdminNewsRoute: typeof AuthenticatedAdminNewsRoute
   AuthenticatedAdminPartnersRoute: typeof AuthenticatedAdminPartnersRoute
+  AuthenticatedAdminRewardsRoute: typeof AuthenticatedAdminRewardsRoute
   AuthenticatedAdminUsersRoute: typeof AuthenticatedAdminUsersRoute
 }
 
@@ -498,6 +539,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
   AuthenticatedPartnerRoute: AuthenticatedPartnerRouteWithChildren,
   AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
+  AuthenticatedRewardsRoute: AuthenticatedRewardsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedSupportRoute: AuthenticatedSupportRoute,
   AuthenticatedAdminAuditRoute: AuthenticatedAdminAuditRoute,
@@ -505,6 +547,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminDealsRoute: AuthenticatedAdminDealsRoute,
   AuthenticatedAdminNewsRoute: AuthenticatedAdminNewsRoute,
   AuthenticatedAdminPartnersRoute: AuthenticatedAdminPartnersRoute,
+  AuthenticatedAdminRewardsRoute: AuthenticatedAdminRewardsRoute,
   AuthenticatedAdminUsersRoute: AuthenticatedAdminUsersRoute,
 }
 

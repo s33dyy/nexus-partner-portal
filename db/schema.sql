@@ -224,6 +224,51 @@ CREATE TABLE IF NOT EXISTS portal_news_posts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS reward_catalog_items (
+  id UUID PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  image_path TEXT,
+  category TEXT NOT NULL,
+  points_cost INTEGER NOT NULL DEFAULT 0,
+  stock INTEGER NOT NULL DEFAULT 0,
+  availability TEXT NOT NULL DEFAULT 'available',
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reward_point_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL,
+  source_id UUID,
+  points_delta INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  approved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reward_redemptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reward_id UUID NOT NULL REFERENCES reward_catalog_items(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  points_cost INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'requested',
+  shipping_name TEXT,
+  shipping_address TEXT,
+  notes TEXT,
+  approved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS lookup_values (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   field_name TEXT NOT NULL,
@@ -282,6 +327,18 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS portal_catalog_items_updated_at ON portal_catalog_items;
 CREATE TRIGGER portal_catalog_items_updated_at
 BEFORE UPDATE ON portal_catalog_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS reward_catalog_items_updated_at ON reward_catalog_items;
+CREATE TRIGGER reward_catalog_items_updated_at
+BEFORE UPDATE ON reward_catalog_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS reward_redemptions_updated_at ON reward_redemptions;
+CREATE TRIGGER reward_redemptions_updated_at
+BEFORE UPDATE ON reward_redemptions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
