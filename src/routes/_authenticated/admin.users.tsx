@@ -22,6 +22,7 @@ type Profile = {
   full_name: string;
   phone: string | null;
   company_name: string | null;
+  partner_id: string | null;
   partner_status: string;
   is_seed: boolean;
   created_at: string;
@@ -77,7 +78,9 @@ function AdminUsersPage() {
       const [profilesRes, rolesRes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, email, full_name, phone, company_name, partner_status, is_seed, created_at")
+          .select(
+            "id, email, full_name, phone, company_name, partner_id, partner_status, is_seed, created_at",
+          )
           .order("created_at", { ascending: false }),
         supabase
           .from("user_roles")
@@ -162,6 +165,34 @@ function AdminUsersPage() {
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update user");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const approveUser = async () => {
+    if (!selectedUser || selectedUser.roles.includes("super_admin")) return;
+    if (selectedUser.partner_status === "approved") return;
+    setSaving(true);
+    try {
+      const profileRes = await supabase
+        .from("profiles")
+        .update({ partner_status: "approved", updated_at: new Date().toISOString() })
+        .eq("id", selectedUser.id);
+      if (profileRes.error) throw profileRes.error;
+
+      if (selectedUser.partner_id) {
+        const partnerRes = await supabase
+          .from("partners")
+          .update({ status: "approved" })
+          .eq("id", selectedUser.partner_id);
+        if (partnerRes.error) throw partnerRes.error;
+      }
+
+      toast.success("User approved");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to approve user");
     } finally {
       setSaving(false);
     }
@@ -365,14 +396,27 @@ function AdminUsersPage() {
                       />
                     </Field>
                   </div>
-                  <Button onClick={() => void saveRoles()} disabled={saving}>
-                    {saving ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <UserRoundCog className="mr-2 h-4 w-4" />
-                    )}
-                    Save access
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => void saveRoles()} disabled={saving}>
+                      {saving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <UserRoundCog className="mr-2 h-4 w-4" />
+                      )}
+                      Save access
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void approveUser()}
+                      disabled={
+                        saving ||
+                        selectedUser.partner_status === "approved" ||
+                        selectedUser.roles.includes("super_admin")
+                      }
+                    >
+                      Approve user
+                    </Button>
+                  </div>
                 </>
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">

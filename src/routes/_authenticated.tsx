@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
+import { UnderReviewPage } from "@/components/under-review-page";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -25,10 +26,14 @@ function Gate({ children }: { children: React.ReactNode }) {
   const { loading, session, profile, hasRole } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const isUnderReview = profile?.partner_status === "under_review" && !hasRole("super_admin");
 
   useEffect(() => {
     if (!loading && !session) {
       navigate({ to: "/auth", replace: true });
+    }
+    if (!loading && session && profile && isUnderReview) {
+      return;
     }
     if (
       !loading &&
@@ -36,11 +41,12 @@ function Gate({ children }: { children: React.ReactNode }) {
       profile &&
       !hasRole("super_admin") &&
       profile.partner_status !== "approved" &&
+      profile.partner_status !== "under_review" &&
       location.pathname !== "/partner/onboarding"
     ) {
       navigate({ to: "/partner/onboarding", replace: true });
     }
-  }, [loading, session, profile, hasRole, location.pathname, navigate]);
+  }, [isUnderReview, loading, session, profile, hasRole, location.pathname, navigate]);
 
   if (loading || !session || !profile) {
     return (
@@ -52,6 +58,10 @@ function Gate({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     );
+  }
+
+  if (isUnderReview) {
+    return <UnderReviewPage />;
   }
 
   return <>{children}</>;
