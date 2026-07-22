@@ -13,6 +13,7 @@ type CloudinaryUploadResult = {
   secure_url: string;
   resource_type: CloudinaryResourceType;
   bytes: number;
+  version?: number;
   format?: string;
 };
 
@@ -69,6 +70,23 @@ function buildUploadParams(input: {
   };
 }
 
+function buildSignedDeliveryPath(input: {
+  publicId: string;
+  format?: string | null;
+  version?: number | null;
+}) {
+  const versionPart = input.version ? `v${input.version}` : "";
+  const filePart = input.format ? `${input.publicId}.${input.format}` : input.publicId;
+  const parts = [versionPart, filePart].filter(Boolean);
+  const { apiSecret } = getConfig();
+  const signatureSource = `${parts.join("/")}${apiSecret}`;
+  const digest = createHash("sha1").update(signatureSource).digest("base64url").slice(0, 8);
+  return {
+    signature: `s--${digest}--`,
+    path: parts.join("/"),
+  };
+}
+
 export async function uploadToCloudinary(input: {
   file: File;
   publicId: string;
@@ -112,6 +130,23 @@ export async function uploadToCloudinary(input: {
   }
 
   return json as CloudinaryUploadResult;
+}
+
+export function buildSignedCloudinaryDeliveryUrl(input: {
+  publicId: string;
+  resourceType: CloudinaryResourceType;
+  format?: string | null;
+  version?: number | null;
+  deliveryType?: "upload" | "private" | "authenticated";
+}) {
+  const config = getConfig();
+  const { signature, path } = buildSignedDeliveryPath({
+    publicId: input.publicId,
+    format: input.format ?? null,
+    version: input.version ?? null,
+  });
+  const deliveryType = input.deliveryType ?? "upload";
+  return `https://res.cloudinary.com/${config.cloudName}/${input.resourceType}/${deliveryType}/${signature}/${path}`;
 }
 
 export async function deleteFromCloudinary(input: {

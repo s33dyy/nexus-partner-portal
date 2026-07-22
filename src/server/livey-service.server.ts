@@ -1,12 +1,12 @@
 import "dotenv/config";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 
 import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 
 import { pool } from "@/server/postgres.server";
 import {
-  buildCloudinaryMediaUrl,
   deleteFromCloudinary,
   hasCloudinaryConfig,
   uploadToCloudinary,
@@ -256,6 +256,125 @@ function createToken(): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function signCloudinaryArchiveRequest(input: {
+  apiSecret: string;
+  mode: "download";
+  publicIds: string;
+  targetFormat: "zip";
+  timestamp: number;
+  type: "upload" | "private" | "authenticated";
+}) {
+  const serialized = Object.entries({
+    mode: input.mode,
+    public_ids: input.publicIds,
+    target_format: input.targetFormat,
+    timestamp: input.timestamp,
+    type: input.type,
+  })
+    .filter(([, value]) => value !== undefined && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .sort()
+    .join("&");
+  return createHash("sha1").update(`${serialized}${input.apiSecret}`).digest("hex");
+}
+
+function extractSingleZipEntry(zipBuffer: Buffer) {
+  const eocdSignature = 0x06054b50;
+  const centralDirectorySignature = 0x02014b50;
+
+  let eocdOffset = -1;
+  for (
+    let index = zipBuffer.length - 22;
+    index >= 0 && index >= zipBuffer.length - 65557;
+    index -= 1
+  ) {
+    if (zipBuffer.readUInt32LE(index) === eocdSignature) {
+      eocdOffset = index;
+      break;
+    }
+  }
+
+  if (eocdOffset < 0) {
+    throw new Error("Cloudinary archive is missing an end-of-central-directory record");
+  }
+
+  const centralDirectoryOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+  if (zipBuffer.readUInt32LE(centralDirectoryOffset) !== centralDirectorySignature) {
+    throw new Error("Cloudinary archive is missing a central directory entry");
+  }
+
+  const compressedSize = zipBuffer.readUInt32LE(centralDirectoryOffset + 20);
+  const localHeaderOffset = zipBuffer.readUInt32LE(centralDirectoryOffset + 42);
+  const method = zipBuffer.readUInt16LE(localHeaderOffset + 8);
+  const fileNameLength = zipBuffer.readUInt16LE(localHeaderOffset + 26);
+  const extraLength = zipBuffer.readUInt16LE(localHeaderOffset + 28);
+  const fileName = zipBuffer
+    .subarray(localHeaderOffset + 30, localHeaderOffset + 30 + fileNameLength)
+    .toString("utf8");
+  const compressedStart = localHeaderOffset + 30 + fileNameLength + extraLength;
+  const compressedEnd = compressedStart + compressedSize;
+  const compressed = zipBuffer.subarray(compressedStart, compressedEnd);
+
+  if (method === 0) {
+    return { fileName, bytes: Buffer.from(compressed) };
+  }
+
+  if (method === 8) {
+    return { fileName, bytes: Buffer.from(inflateRawSync(compressed)) };
+  }
+
+  throw new Error(`Unsupported archive compression method: ${method}`);
+}
+
+async function downloadCloudinaryDocumentBytes(publicId: string) {
+  const config =
+    process.env.CLOUDINARY_CLOUD_NAME &&
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET
+      ? {
+          cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+          apiKey: process.env.CLOUDINARY_API_KEY,
+          apiSecret: process.env.CLOUDINARY_API_SECRET,
+        }
+      : null;
+
+  if (!config) {
+    throw new Error("Missing Cloudinary environment variables");
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = signCloudinaryArchiveRequest({
+    apiSecret: config.apiSecret,
+    mode: "download",
+    publicIds: publicId,
+    targetFormat: "zip",
+    timestamp,
+    type: "upload",
+  });
+  const form = new FormData();
+  form.append("api_key", config.apiKey);
+  form.append("timestamp", String(timestamp));
+  form.append("mode", "download");
+  form.append("public_ids", publicId);
+  form.append("type", "upload");
+  form.append("target_format", "zip");
+  form.append("signature", signature);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${config.cloudName}/raw/generate_archive`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Cloudinary archive download failed (${response.status})`);
+  }
+
+  const zipBuffer = Buffer.from(await response.arrayBuffer());
+  return extractSingleZipEntry(zipBuffer);
 }
 
 function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOffset = 0) {
@@ -871,6 +990,7 @@ export async function uploadDocumentBlob(input: {
             publicId: upload.public_id,
             secureUrl: upload.secure_url,
             resourceType: upload.resource_type,
+            version: upload.version ?? null,
             format: upload.format ?? null,
           }),
           "utf8",
@@ -910,22 +1030,15 @@ export async function createDocumentDataUrl(filePath: string) {
           publicId?: string;
           secureUrl?: string;
           resourceType?: "image" | "raw";
+          version?: number | null;
           format?: string | null;
         }
       | undefined;
-    if (parsed?.secureUrl) {
-      return {
-        signedUrl: parsed.secureUrl,
-        fileName: blob.file_name,
-      };
-    }
     if (parsed?.publicId && parsed?.resourceType) {
+      const archiveEntry = await downloadCloudinaryDocumentBytes(parsed.publicId);
+      const mimeType = blob.mime_type || "application/octet-stream";
       return {
-        signedUrl: buildCloudinaryMediaUrl({
-          publicId: parsed.publicId,
-          resourceType: parsed.resourceType,
-          format: parsed.format ?? null,
-        }),
+        signedUrl: `data:${mimeType};base64,${archiveEntry.bytes.toString("base64")}`,
         fileName: blob.file_name,
       };
     }
