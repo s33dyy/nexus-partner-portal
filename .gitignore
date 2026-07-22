@@ -18,6 +18,7 @@ dist-ssr
 .nitro
 *.local
 docs/superpowers/plans/
+.superpowers/
 
 # Wrangler / Cloudflare
 .wrangler/
