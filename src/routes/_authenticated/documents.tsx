@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { useAuth } from "@/hooks/use-auth";
 
 type Partner = {
   id: string;
@@ -46,6 +47,7 @@ function DocumentsPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { profile, hasRole } = useAuth();
 
   function uniqueStrings(values: Array<string | null | undefined>) {
     return [
@@ -56,13 +58,23 @@ function DocumentsPage() {
   const load = async () => {
     setLoading(true);
     try {
+      let docQuery = supabase
+        .from("partner_documents")
+        .select(
+          "id, partner_id, uploaded_by, doc_type, file_name, file_path, mime_type, size_bytes, created_at",
+        )
+        .order("created_at", { ascending: false });
+
+      if (!hasRole("super_admin")) {
+        if (hasRole("partner_admin") && profile?.partner_id) {
+          docQuery = docQuery.eq("partner_id", profile.partner_id);
+        } else if (profile?.id) {
+          docQuery = docQuery.eq("uploaded_by", profile.id);
+        }
+      }
+
       const [docsRes, partnersRes] = await Promise.all([
-        supabase
-          .from("partner_documents")
-          .select(
-            "id, partner_id, uploaded_by, doc_type, file_name, file_path, mime_type, size_bytes, created_at",
-          )
-          .order("created_at", { ascending: false }),
+        docQuery,
         supabase
           .from("partners")
           .select("id, company_name")

@@ -10,6 +10,7 @@ import {
   type CustomerRecord,
   type DealRecord,
 } from "@/lib/portal-records";
+import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   component: AnalyticsPage,
@@ -22,13 +23,27 @@ function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
+  const { profile, hasRole } = useAuth();
 
   const load = async () => {
     setLoading(true);
     try {
+      let dealQuery = supabase.from("portal_deals").select("*").order("updated_at", { ascending: false });
+      let customerQuery = supabase.from("portal_customers").select("*").order("updated_at", { ascending: false });
+      
+      if (!hasRole("super_admin")) {
+        if (hasRole("partner_admin") && profile?.partner_id) {
+          dealQuery = dealQuery.eq("partner_id", profile.partner_id);
+          customerQuery = customerQuery.eq("partner_id", profile.partner_id);
+        } else if (profile?.id) {
+          dealQuery = dealQuery.eq("user_id", profile.id);
+          customerQuery = customerQuery.eq("user_id", profile.id);
+        }
+      }
+
       const [dealRes, customerRes, catalogRes] = await Promise.all([
-        supabase.from("portal_deals").select("*").order("updated_at", { ascending: false }),
-        supabase.from("portal_customers").select("*").order("updated_at", { ascending: false }),
+        dealQuery,
+        customerQuery,
         supabase.from("portal_catalog_items").select("*").order("updated_at", { ascending: false }),
       ]);
       if (dealRes.error || customerRes.error || catalogRes.error) {

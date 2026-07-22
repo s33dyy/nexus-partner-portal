@@ -69,27 +69,58 @@ function DashboardPage() {
   const loadDashboard = async () => {
     setLoading(true);
     try {
-      const [dealsRes, customersRes, partnersRes, newsRes] = await Promise.all([
-        supabase
-          .from("portal_deals")
-          .select("id, amount, stage, status")
-          .order("updated_at", { ascending: false }),
-        supabase.from("portal_customers").select("id"),
-        supabase
-          .from("partners")
-          .select("id, company_name, tier, status, annual_turnover, business_focus, created_at")
-          .order("created_at", { ascending: false }),
+      let dealQuery = supabase.from("portal_deals").select("id, amount, stage, status").order("updated_at", { ascending: false });
+      let customerQuery = supabase.from("portal_customers").select("id");
+      let partnerQuery = supabase.from("partners").select("id, company_name, tier, status, annual_turnover, business_focus, created_at").order("created_at", { ascending: false });
+      let notificationQuery = supabase.from("notifications").select("*").order("created_at", { ascending: false });
+
+      if (!hasRole("super_admin")) {
+        if (hasRole("partner_admin") && profile?.partner_id) {
+          dealQuery = dealQuery.eq("partner_id", profile.partner_id);
+          customerQuery = customerQuery.eq("partner_id", profile.partner_id);
+          partnerQuery = partnerQuery.eq("id", profile.partner_id);
+          notificationQuery = notificationQuery.eq("partner_id", profile.partner_id);
+        } else if (profile?.id) {
+          dealQuery = dealQuery.eq("user_id", profile.id);
+          customerQuery = customerQuery.eq("user_id", profile.id);
+          partnerQuery = partnerQuery.eq("id", profile.partner_id || "");
+          notificationQuery = notificationQuery.eq("partner_id", profile.partner_id || "");
+        }
+      }
+
+      const [dealsRes, customersRes, partnersRes, newsRes, notifRes] = await Promise.all([
+        dealQuery,
+        customerQuery,
+        partnerQuery,
         supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+        notificationQuery,
       ]);
 
-      if (dealsRes.error || customersRes.error || partnersRes.error || newsRes.error) {
-        throw dealsRes.error ?? customersRes.error ?? partnersRes.error ?? newsRes.error;
+      if (dealsRes.error || customersRes.error || partnersRes.error || newsRes.error || notifRes.error) {
+        throw dealsRes.error ?? customersRes.error ?? partnersRes.error ?? newsRes.error ?? notifRes.error;
       }
 
       const dealRows = (dealsRes.data as Array<{ amount: string; stage: string; status: string }> | null) ?? [];
       const customerRows = (customersRes.data as Array<{ id: string }> | null) ?? [];
       const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
       const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
+      const notifRows = (notifRes.data as Array<any> | null) ?? [];
+      
+      const combinedNews = [
+        ...newsRows,
+        ...notifRows.map(n => ({
+          id: n.id,
+          title: n.title,
+          caption: n.message,
+          image_path: "",
+          image_alt: "",
+          posted_by_name: "System",
+          posted_by_role: "Notification",
+          created_at: n.created_at,
+          updated_at: n.created_at,
+          is_seed: false
+        }))
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const pipeline = dealRows.reduce((sum, deal) => {
         const value = Number.parseFloat(String(deal.amount).replace(/[^0-9.]/g, ""));
@@ -133,9 +164,9 @@ function DashboardPage() {
           tone: "info",
         },
       ]);
-      setNewsPosts(newsRows);
+      setNewsPosts(combinedNews);
       setSpotlights(partnerRows.slice(0, 3));
-      setSource(dealRows.length || customerRows.length || partnerRows.length || newsRows.length ? "database" : "empty");
+      setSource(dealRows.length || customerRows.length || partnerRows.length || combinedNews.length ? "database" : "empty");
     } catch {
       setMetrics([]);
       setNewsPosts([]);

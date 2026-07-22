@@ -14,6 +14,7 @@ import {
   nextDealStatus,
   type DealRecord,
 } from "@/lib/portal-records";
+import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -25,14 +26,22 @@ function PipelinePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
+  const { profile, hasRole } = useAuth();
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("portal_deals")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      let queryBuilder = supabase.from("portal_deals").select("*").order("updated_at", { ascending: false });
+
+      if (!hasRole("super_admin")) {
+        if (hasRole("partner_admin") && profile?.partner_id) {
+          queryBuilder = queryBuilder.eq("partner_id", profile.partner_id);
+        } else if (profile?.id) {
+          queryBuilder = queryBuilder.eq("user_id", profile.id);
+        }
+      }
+
+      const { data, error } = await queryBuilder;
       if (error) throw error;
       const rows = (data as DealRecord[] | null) ?? [];
       setDeals(rows);

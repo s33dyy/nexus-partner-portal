@@ -132,6 +132,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "source",
     "last_touch",
     "notes",
+    "user_id",
+    "partner_id",
     "is_seed",
     "created_at",
     "updated_at",
@@ -148,6 +150,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "status",
     "next_step",
     "last_touch",
+    "user_id",
+    "partner_id",
     "is_seed",
     "created_at",
     "updated_at",
@@ -230,6 +234,16 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "updated_at",
   ],
   password_reset_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_at"],
+  notifications: [
+    "id",
+    "user_id",
+    "partner_id",
+    "title",
+    "message",
+    "type",
+    "read",
+    "created_at",
+  ],
 };
 
 const SESSION_COOKIE = "livey_session";

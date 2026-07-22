@@ -168,6 +168,13 @@ function AdminPartners() {
           note: noteDraft.trim() || `Status set to ${decision}`,
           status_change: decision,
         });
+        
+        await supabase.from("notifications").insert({
+          partner_id: selected.id,
+          title: `Partner ${decision.replace("_", " ")}`,
+          message: noteDraft.trim() || `Your partner application status was updated to ${decision.replace("_", " ")}.`,
+          type: "status_change",
+        });
       }
       toast.success(`Partner ${decision.replace("_", " ")}`);
       setNoteDraft("");

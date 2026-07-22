@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { toDateInputValue } from "@/lib/date-utils";
 import { type CustomerRecord } from "@/lib/portal-records";
+import { useAuth } from "@/hooks/use-auth";
 
 type CustomerForm = {
   company_name: string;
@@ -72,14 +73,22 @@ function CustomersPage() {
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { profile, hasRole } = useAuth();
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("portal_customers")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      let query = supabase.from("portal_customers").select("*").order("updated_at", { ascending: false });
+
+      if (!hasRole("super_admin")) {
+        if (hasRole("partner_admin") && profile?.partner_id) {
+          query = query.eq("partner_id", profile.partner_id);
+        } else if (profile?.id) {
+          query = query.eq("user_id", profile.id);
+        }
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       const rows = ((data as CustomerRecord[] | null) ?? []).map((customer) => ({
         ...customer,
@@ -156,8 +165,11 @@ function CustomersPage() {
     setAdding(true);
     try {
       const payload = {
+        id: globalThis.crypto.randomUUID(),
         ...draft,
-        id: crypto.randomUUID(),
+        health_score: Number(draft.health_score) || 0,
+        user_id: profile?.id,
+        partner_id: profile?.partner_id,
         is_seed: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
