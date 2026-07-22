@@ -207,9 +207,7 @@ function AdminNewsPage() {
         throw error ?? new Error("Image upload failed");
       }
       
-      const { data: urlData } = supabase.storage.from("news-media").getPublicUrl(path);
-      
-      setDraft((current) => ({ ...current, image_path: urlData.publicUrl }));
+      setDraft((current) => ({ ...current, image_path: data.signedUrl }));
       toast.success("Image uploaded successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Image upload failed");

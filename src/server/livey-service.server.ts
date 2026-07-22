@@ -328,7 +328,7 @@ function extractSingleZipEntry(zipBuffer: Buffer) {
   throw new Error(`Unsupported archive compression method: ${method}`);
 }
 
-async function downloadCloudinaryDocumentBytes(publicId: string) {
+async function downloadCloudinaryDocumentBytes(publicId: string, resourceType: "image" | "raw" | "video" | "auto" = "raw") {
   const config =
     process.env.CLOUDINARY_CLOUD_NAME &&
     process.env.CLOUDINARY_API_KEY &&
@@ -363,7 +363,7 @@ async function downloadCloudinaryDocumentBytes(publicId: string) {
   form.append("signature", signature);
 
   const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${config.cloudName}/raw/generate_archive`,
+    `https://api.cloudinary.com/v1_1/${config.cloudName}/${resourceType}/generate_archive`,
     {
       method: "POST",
       body: form,
@@ -1035,7 +1035,13 @@ export async function createDocumentDataUrl(filePath: string) {
         }
       | undefined;
     if (parsed?.publicId && parsed?.resourceType) {
-      const archiveEntry = await downloadCloudinaryDocumentBytes(parsed.publicId);
+      if (parsed.secureUrl) {
+         return {
+           signedUrl: parsed.secureUrl,
+           fileName: blob.file_name,
+         };
+      }
+      const archiveEntry = await downloadCloudinaryDocumentBytes(parsed.publicId, parsed.resourceType);
       const mimeType = blob.mime_type || "application/octet-stream";
       return {
         signedUrl: `data:${mimeType};base64,${archiveEntry.bytes.toString("base64")}`,
