@@ -42,7 +42,6 @@ type DealForm = {
   region: string;
   product: string;
   stage: DealStage;
-  status: string;
   amount: string;
   probability: number;
   close_date: string;
@@ -58,7 +57,6 @@ const EMPTY_FORM: DealForm = {
   region: "India West",
   product: "LIVEY WC350 QHD Webcam",
   stage: "sourced",
-  status: "draft",
   amount: "",
   probability: 25,
   close_date: "",
@@ -175,15 +173,17 @@ function DealsPage() {
       owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
       regions: uniqueStrings(deals.map((deal) => deal.region)),
       products: uniqueStrings(deals.map((deal) => deal.product)),
-      statuses: uniqueStrings(deals.map((deal) => deal.status)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
       touches: uniqueStrings(deals.map((deal) => deal.last_touch)),
     };
   }, [deals]);
 
   const createDeal = async () => {
+    const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
+    const accountName = isPartnerUser ? profile?.company_name || "Partner Account" : draft.account_name;
+
     if (
-      !draft.account_name.trim() ||
+      !accountName.trim() ||
       !draft.contact_name.trim() ||
       !draft.amount.trim() ||
       !draft.close_date
@@ -196,6 +196,9 @@ function DealsPage() {
       const payload = {
         id: globalThis.crypto.randomUUID(),
         ...draft,
+        account_name: accountName,
+        owner_name: profile?.full_name || "Unknown",
+        status: "active",
         probability: Number(draft.probability) || 0,
         user_id: profile?.id,
         partner_id: profile?.partner_id,
@@ -205,6 +208,21 @@ function DealsPage() {
       };
       const { error } = await supabase.from("portal_deals").insert(payload);
       if (error) throw error;
+      
+      // Post to news feed
+      await supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: `New Deal Sourced by ${profile?.company_name || profile?.full_name || "Partner"}`,
+        caption: `A new opportunity for ${draft.product} has entered the pipeline!`,
+        image_path: "",
+        image_alt: "Deal",
+        posted_by_name: profile?.company_name || profile?.full_name || "Partner",
+        posted_by_role: "Partner",
+        is_seed: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      
       toast.success("Deal created");
       setDraft(EMPTY_FORM);
       await load();
@@ -253,6 +271,21 @@ function DealsPage() {
       notes: note.trim() || selectedDeal.notes,
       updated_at: new Date().toISOString(),
     });
+
+    if (status === "won") {
+      await supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: `Goal Reached by ${profile?.company_name || profile?.full_name || "Partner"}!`,
+        caption: `A deal for ${selectedDeal.product} was successfully closed won. Outstanding work!`,
+        image_path: "",
+        image_alt: "Deal won",
+        posted_by_name: profile?.company_name || profile?.full_name || "Partner",
+        posted_by_role: "Partner",
+        is_seed: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
   };
 
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);
@@ -395,19 +428,21 @@ function DealsPage() {
             </CardHeader>
             <CardContent className="grid gap-3">
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="account_name">Account</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealAccount}
-                    label="Account"
-                    value={draft.account_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, account_name: value }))
-                    }
-                    placeholder="Select or create account"
-                    options={editOptions.accounts}
-                  />
-                </div>
+                {(hasRole("super_admin") || hasRole("partner_admin")) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="account_name">Account</Label>
+                    <LookupCombobox
+                      fieldName={LOOKUP_FIELDS.dealAccount}
+                      label="Account"
+                      value={draft.account_name}
+                      onValueChange={(value) =>
+                        setDraft((current) => ({ ...current, account_name: value }))
+                      }
+                      placeholder="Select or create account"
+                      options={editOptions.accounts}
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="contact_name">Contact</Label>
                   <LookupCombobox
@@ -423,19 +458,7 @@ function DealsPage() {
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="owner_name">Owner</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealOwner}
-                    label="Owner"
-                    value={draft.owner_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, owner_name: value }))
-                    }
-                    placeholder="Select or create owner"
-                    options={editOptions.owners}
-                  />
-                </div>
+                {/* Removed Owner dropdown */}
                 <div className="space-y-2">
                   <Label htmlFor="region">Region</Label>
                   <LookupCombobox
@@ -488,19 +511,7 @@ function DealsPage() {
                     options={DEAL_STAGE_ORDER.map((stage) => stage)}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealStatus}
-                    label="Status"
-                    value={draft.status}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, status: value }))
-                    }
-                    placeholder="Select or create status"
-                    options={editOptions.statuses}
-                  />
-                </div>
+                {/* Removed Status dropdown */}
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
@@ -590,7 +601,6 @@ function DealsPage() {
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge>{selectedDeal.stage}</Badge>
-                    <Badge variant="outline">{selectedDeal.status}</Badge>
                     <Badge variant="secondary">{selectedDeal.amount}</Badge>
                   </div>
                   <div className="grid gap-3 text-sm md:grid-cols-2">
