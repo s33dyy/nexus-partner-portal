@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel } from "@/lib/date-utils";
-import { type NewsPostRecord } from "@/lib/portal-news-data";
+import { hasNewsImage, type NewsPostRecord } from "@/lib/portal-news-data";
 import { useAuth } from "@/hooks/use-auth";
 
 type NewsForm = {
@@ -27,8 +27,8 @@ type NewsForm = {
 const EMPTY_FORM: NewsForm = {
   title: "",
   caption: "",
-  image_path: "/news/livey-wc350-qhd.png",
-  image_alt: "LIVEY product launch banner",
+  image_path: "",
+  image_alt: "",
   posted_by_name: "LIVEY Admin",
   posted_by_role: "super_admin",
 };
@@ -102,8 +102,8 @@ function AdminNewsPage() {
     setDraft({
       title: selectedPost.title,
       caption: selectedPost.caption,
-      image_path: selectedPost.image_path,
-      image_alt: selectedPost.image_alt,
+      image_path: selectedPost.image_path ?? "",
+      image_alt: selectedPost.image_alt ?? "",
       posted_by_name: selectedPost.posted_by_name,
       posted_by_role: selectedPost.posted_by_role,
     });
@@ -122,8 +122,8 @@ function AdminNewsPage() {
   }
 
   const createPost = async () => {
-    if (!draft.title.trim() || !draft.caption.trim() || !draft.image_path.trim()) {
-      toast.error("Title, caption, and image are required");
+    if (!draft.title.trim() || !draft.caption.trim()) {
+      toast.error("Title and caption are required");
       return;
     }
     setCreating(true);
@@ -228,7 +228,7 @@ function AdminNewsPage() {
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">News feed</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Publish Instagram-style product updates with a visual, caption-first format.
+            Publish updates with optional images. Text-only posts render like a social feed card.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -297,11 +297,25 @@ function AdminNewsPage() {
                       onClick={() => setSelectedId(post.id)}
                       className="overflow-hidden rounded-xl border bg-background text-left"
                     >
-                      <img
-                        src={post.image_path}
-                        alt={post.image_alt}
-                        className="h-40 w-full object-cover"
-                      />
+                      {hasNewsImage(post.image_path) ? (
+                        <img
+                          src={post.image_path ?? ""}
+                          alt={post.image_alt ?? post.title}
+                          className="h-40 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-40 w-full flex-col justify-between bg-gradient-to-br from-primary/5 via-background to-background p-4 text-left">
+                          <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                              Text update
+                            </div>
+                            <div className="mt-2 max-h-14 overflow-hidden text-sm font-medium">
+                              {post.title}
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">{post.posted_by_name}</div>
+                        </div>
+                      )}
                     </button>
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
@@ -315,7 +329,7 @@ function AdminNewsPage() {
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{post.posted_by_name}</span>
                         <span>•</span>
-                        <span>{post.image_path}</span>
+                        <span>{hasNewsImage(post.image_path) ? "Image attached" : "No image attached"}</span>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button size="sm" variant="outline" onClick={() => setSelectedId(post.id)}>
@@ -355,11 +369,28 @@ function AdminNewsPage() {
               {selectedPost ? (
                 <>
                   <div className="overflow-hidden rounded-xl border">
-                    <img
-                      src={draft.image_path}
-                      alt={draft.image_alt}
-                      className="h-56 w-full object-cover"
-                    />
+                    {hasNewsImage(draft.image_path) ? (
+                      <img
+                        src={draft.image_path}
+                        alt={draft.image_alt || draft.title || "LIVEY update"}
+                        className="h-56 w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-56 w-full flex-col justify-between bg-gradient-to-br from-primary/5 via-background to-background p-5">
+                        <div className="space-y-2">
+                          <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                            Text-only preview
+                          </div>
+                          <div className="text-lg font-semibold">{draft.title || "Untitled post"}</div>
+                          <div className="whitespace-pre-line text-sm text-muted-foreground">
+                            {draft.caption || "This post will render without an image."}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {draft.posted_by_name || "LIVEY Admin"}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label="Title">
@@ -449,7 +480,7 @@ function AdminNewsPage() {
             <CardHeader className="border-b">
               <CardTitle className="text-base">Publish post</CardTitle>
               <CardDescription>
-                Create a new photo-first news item for partners and admins.
+                Create a new update with an optional image attachment.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">

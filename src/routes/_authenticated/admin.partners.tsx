@@ -198,7 +198,7 @@ function AdminPartners() {
             noteDraft.trim() ||
             `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`,
           image_path: "",
-          image_alt: "Partner update",
+          image_alt: "",
           posted_by_name: "Super Admin",
           posted_by_role: "System",
           is_seed: false,

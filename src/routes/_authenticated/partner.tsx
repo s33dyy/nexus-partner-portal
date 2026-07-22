@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { NewsFeedCard } from "@/components/news-feed-card";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateLabel } from "@/lib/date-utils";
@@ -475,31 +476,13 @@ function PartnerPage() {
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-base">News feed</CardTitle>
-            <CardDescription>Photo-first updates from LIVEY admins.</CardDescription>
+            <CardDescription>
+              LIVEY updates with images when available and text-only cards when not.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
             {newsPosts.length > 0 ? (
-              newsPosts.map((post) => (
-                <div key={post.id} className="overflow-hidden rounded-2xl border bg-card">
-                  <img
-                    src={post.image_path}
-                    alt={post.image_alt}
-                    className="aspect-[4/3] w-full object-cover"
-                  />
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{post.title}</div>
-                        <div className="text-xs text-muted-foreground">{post.posted_by_name}</div>
-                      </div>
-                      <Badge variant="outline">{formatDateLabel(post.created_at)}</Badge>
-                    </div>
-                    <div className="whitespace-pre-line text-sm text-muted-foreground">
-                      {post.caption}
-                    </div>
-                  </div>
-                </div>
-              ))
+              newsPosts.map((post) => <NewsFeedCard key={post.id} post={post} />)
             ) : (
               <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
                 No news posts yet.

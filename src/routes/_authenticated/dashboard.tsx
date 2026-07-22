@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { NewsFeedCard } from "@/components/news-feed-card";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
@@ -165,8 +166,8 @@ function DashboardPage() {
           id: n.id,
           title: n.title,
           caption: n.message,
-          image_path: "/news/livey-wc350-qhd.png",
-          image_alt: "LIVEY update banner",
+          image_path: "",
+          image_alt: "",
           posted_by_name: "System",
           posted_by_role: "Notification",
           created_at: n.created_at,
@@ -360,8 +361,8 @@ function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <div>
                 <CardTitle className="text-base">News feed</CardTitle>
-                <CardDescription>
-                  Photo-first updates from LIVEY that partner teams can actually consume.
+              <CardDescription>
+                  LIVEY updates, with images when they exist and text-only cards when they do not.
                 </CardDescription>
               </div>
               <Badge variant="secondary" className="gap-1">
@@ -378,7 +379,7 @@ function DashboardPage() {
               ) : (
                 newsPosts.map((post, index) => (
                   <div key={post.id}>
-                    <NewsCard post={post} />
+                    <NewsFeedCard post={post} />
                     {index < newsPosts.length - 1 && <Separator className="my-4" />}
                   </div>
                 ))
@@ -513,30 +514,6 @@ function Kpi({
         <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function NewsCard({ post }: { post: NewsPostRecord }) {
-  return (
-    <div className="overflow-hidden rounded-2xl border bg-card">
-      <img
-        src={post.image_path || "/news/livey-wc350-qhd.png"}
-        alt={post.image_alt || "LIVEY update"}
-        className="aspect-[4/3] w-full object-cover"
-      />
-      <div className="space-y-3 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-medium">{post.title}</div>
-            <div className="text-xs text-muted-foreground">
-              {post.posted_by_name} · {post.posted_by_role.replace(/_/g, " ")}
-            </div>
-          </div>
-          <Badge variant="outline">{formatDateLabel(post.created_at)}</Badge>
-        </div>
-        <div className="text-sm text-muted-foreground whitespace-pre-line">{post.caption}</div>
-      </div>
-    </div>
   );
 }
 
