@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BarChart3, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/local/client";
 import {
+  DEAL_STAGE_ORDER,
   type CatalogItemRecord,
   type CustomerRecord,
   type DealRecord,
@@ -25,12 +26,18 @@ function AnalyticsPage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const { profile, hasRole } = useAuth();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      let dealQuery = supabase.from("portal_deals").select("*").order("updated_at", { ascending: false });
-      let customerQuery = supabase.from("portal_customers").select("*").order("updated_at", { ascending: false });
-      
+      let dealQuery = supabase
+        .from("portal_deals")
+        .select("*")
+        .order("updated_at", { ascending: false });
+      let customerQuery = supabase
+        .from("portal_customers")
+        .select("*")
+        .order("updated_at", { ascending: false });
+
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
           dealQuery = dealQuery.eq("partner_id", profile.partner_id);
@@ -67,11 +74,11 @@ function AnalyticsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const totals = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
@@ -89,8 +96,7 @@ function AnalyticsPage() {
   }, [customers, deals]);
 
   const stageData = useMemo(() => {
-    const stages = ["sourced", "qualified", "proposal", "negotiation", "approved", "won", "lost"];
-    return stages.map((stage) => ({
+    return DEAL_STAGE_ORDER.map((stage) => ({
       stage,
       count: deals.filter((deal) => deal.stage === stage).length,
     }));
@@ -136,8 +142,8 @@ function AnalyticsPage() {
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Analytics</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Review revenue, health, and catalog trends using the live records that power the rest
-            of the portal.
+            Review revenue, health, and catalog trends using the live records that power the rest of
+            the portal.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

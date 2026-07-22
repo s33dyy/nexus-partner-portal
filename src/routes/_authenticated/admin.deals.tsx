@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
@@ -32,6 +33,7 @@ function AdminDealsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [reviewDraft, setReviewDraft] = useState<DealRecord | null>(null);
   const [saving, setSaving] = useState(false);
 
   function uniqueStrings(values: Array<string | null | undefined>) {
@@ -50,6 +52,7 @@ function AdminDealsPage() {
       if (error) throw error;
       const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
+        possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
       }));
       setDeals(rows);
@@ -89,6 +92,16 @@ function AdminDealsPage() {
     [deals, selectedId],
   );
 
+  useEffect(() => {
+    if (!selectedDeal) {
+      setReviewDraft(null);
+      setNote("");
+      return;
+    }
+    setReviewDraft(selectedDeal);
+    setNote(selectedDeal.notes);
+  }, [selectedDeal]);
+
   const metrics = useMemo(() => {
     const queue = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
     const reviewed = deals.filter(
@@ -99,19 +112,92 @@ function AdminDealsPage() {
 
   const statusOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.status)), [deals]);
   const stageOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.stage)), [deals]);
+  const editOptions = useMemo(
+    () => ({
+      countries: uniqueStrings(deals.map((deal) => deal.country)),
+      accounts: uniqueStrings(deals.map((deal) => deal.account_name)),
+      contacts: uniqueStrings(deals.map((deal) => deal.contact_name)),
+      owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
+      products: uniqueStrings(deals.map((deal) => deal.product)),
+      sources: uniqueStrings(deals.map((deal) => deal.source)),
+      budgets: uniqueStrings(deals.map((deal) => deal.customer_budget ?? "")),
+    }),
+    [deals],
+  );
+  const regionOptions = useMemo(
+    () =>
+      uniqueStrings(
+        deals
+          .filter((deal) => deal.country === (reviewDraft?.country ?? "India"))
+          .map((deal) => deal.region),
+      ),
+    [deals, reviewDraft?.country],
+  );
+
+  const publishDealActivity = async (
+    deal: DealRecord,
+    type: string,
+    notificationTitle: string,
+    notificationMessage: string,
+    feedTitle: string,
+    feedCaption: string,
+  ) => {
+    const now = new Date().toISOString();
+    await Promise.allSettled([
+      supabase.from("notifications").insert({
+        id: globalThis.crypto.randomUUID(),
+        user_id: deal.user_id ?? null,
+        partner_id: deal.partner_id ?? null,
+        title: notificationTitle,
+        message: notificationMessage,
+        type,
+        read: false,
+        created_at: now,
+      }),
+      supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: feedTitle,
+        caption: feedCaption,
+        image_path: "/news/livey-wc350-qhd.png",
+        image_alt: "Deal approval update",
+        posted_by_name: "LIVEY Admin",
+        posted_by_role: "super_admin",
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      }),
+    ]);
+  };
 
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Deal approvals" roleLabel="Super Admin" />;
   }
 
-  const moderate = async (status: "approved" | "need_more_info" | "rejected" | "won" | "lost") => {
-    if (!selectedDeal) return;
+  const saveReview = async (
+    status?: "approved" | "need_more_info" | "rejected" | "won" | "lost",
+  ) => {
+    if (!selectedDeal || !reviewDraft) return;
     setSaving(true);
     try {
       const { error } = await supabase
         .from("portal_deals")
         .update({
-          status,
+          account_name: reviewDraft.account_name,
+          contact_name: reviewDraft.contact_name,
+          owner_name: reviewDraft.owner_name,
+          country: reviewDraft.country,
+          region: reviewDraft.region,
+          product: reviewDraft.product,
+          quantity: Number(reviewDraft.quantity) || 1,
+          amount: reviewDraft.amount,
+          customer_budget: reviewDraft.customer_budget,
+          probability: Number(reviewDraft.probability) || 0,
+          possible_close_date: reviewDraft.possible_close_date || null,
+          close_date:
+            reviewDraft.close_date || reviewDraft.possible_close_date || selectedDeal.close_date,
+          source: reviewDraft.source,
+          notes: note.trim() || reviewDraft.notes,
+          status: status ?? reviewDraft.status,
           stage:
             status === "approved"
               ? "approved"
@@ -119,14 +205,25 @@ function AdminDealsPage() {
                 ? "won"
                 : status === "lost"
                   ? "lost"
-                  : selectedDeal.stage,
-          notes: note.trim() || selectedDeal.notes,
-          last_touch: `Admin set status to ${status}`,
+                  : reviewDraft.stage,
+          last_touch: status ? `Admin set status to ${status}` : "Admin updated the deal",
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedDeal.id);
       if (error) throw error;
-      toast.success(`Deal marked ${status.replace("_", " ")}`);
+      if (status) {
+        await publishDealActivity(
+          selectedDeal,
+          `deal_${status}`,
+          `Deal ${status.replace("_", " ")}`,
+          `${selectedDeal.account_name} was marked ${status.replace("_", " ")} by admin.`,
+          `${selectedDeal.account_name} ${status.replace("_", " ")}`,
+          `Super admin reviewed ${selectedDeal.product} and set the deal to ${status.replace("_", " ")}.`,
+        );
+        toast.success(`Deal marked ${status.replace("_", " ")}`);
+      } else {
+        toast.success("Deal updated");
+      }
       setNote("");
       await load();
     } catch (error) {
@@ -276,25 +373,212 @@ function AdminDealsPage() {
                   <Meta label="Product" value={selectedDeal.product} />
                   <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
                 </div>
+                {reviewDraft ? (
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                    <div className="text-sm font-medium">Edit review details</div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Account</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealAccount}
+                          label="Account"
+                          value={reviewDraft.account_name}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, account_name: value } : current,
+                            )
+                          }
+                          placeholder="Select or create account"
+                          options={editOptions.accounts}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Client</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealContact}
+                          label="Client"
+                          value={reviewDraft.contact_name}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, contact_name: value } : current,
+                            )
+                          }
+                          placeholder="Select or create client"
+                          options={editOptions.contacts}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>POC</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealOwner}
+                          label="POC"
+                          value={reviewDraft.owner_name}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, owner_name: value } : current,
+                            )
+                          }
+                          placeholder="Select or create POC"
+                          options={editOptions.owners}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Country</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealCountry}
+                          label="Country"
+                          value={reviewDraft.country}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, country: value, region: "" } : current,
+                            )
+                          }
+                          placeholder="Select or create country"
+                          options={editOptions.countries}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Region</Label>
+                        <LookupCombobox
+                          fieldName={dealRegionLookupField(reviewDraft.country)}
+                          label="Region"
+                          value={reviewDraft.region}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, region: value } : current,
+                            )
+                          }
+                          placeholder="Select or create region"
+                          options={regionOptions}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Product</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealProduct}
+                          label="Product"
+                          value={reviewDraft.product}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, product: value } : current,
+                            )
+                          }
+                          placeholder="Select or create product"
+                          options={editOptions.products}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Amount</Label>
+                        <Input
+                          value={reviewDraft.amount}
+                          onChange={(e) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, amount: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Customer budget</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealCustomerBudget}
+                          label="Customer budget"
+                          value={reviewDraft.customer_budget ?? ""}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, customer_budget: value } : current,
+                            )
+                          }
+                          placeholder="Select or create budget"
+                          options={editOptions.budgets}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Quantity</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={reviewDraft.quantity}
+                          onChange={(e) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? { ...current, quantity: Number(e.target.value) || 1 }
+                                : current,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Probability</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={reviewDraft.probability}
+                          onChange={(e) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? { ...current, probability: Number(e.target.value) || 0 }
+                                : current,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Possible close date</Label>
+                        <Input
+                          type="date"
+                          value={reviewDraft.possible_close_date ?? ""}
+                          onChange={(e) =>
+                            setReviewDraft((current) =>
+                              current
+                                ? { ...current, possible_close_date: e.target.value }
+                                : current,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Source</Label>
+                        <LookupCombobox
+                          fieldName={LOOKUP_FIELDS.dealSource}
+                          label="Source"
+                          value={reviewDraft.source}
+                          onValueChange={(value) =>
+                            setReviewDraft((current) =>
+                              current ? { ...current, source: value } : current,
+                            )
+                          }
+                          placeholder="Select or create source"
+                          options={editOptions.sources}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <Field label="Admin note">
                   <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
                 </Field>
                 <Separator />
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void moderate("approved")} disabled={saving}>
+                  <Button onClick={() => void saveReview()} disabled={saving}>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Save changes
+                  </Button>
+                  <Button onClick={() => void saveReview("approved")} disabled={saving}>
                     <CheckCircle2 className="mr-2 h-4 w-4" />
                     Approve
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => void moderate("need_more_info")}
+                    onClick={() => void saveReview("need_more_info")}
                     disabled={saving}
                   >
                     Request changes
                   </Button>
                   <Button
                     variant="destructive"
-                    onClick={() => void moderate("rejected")}
+                    onClick={() => void saveReview("rejected")}
                     disabled={saving}
                   >
                     <XCircle className="mr-2 h-4 w-4" />

@@ -1,12 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, MoveRight, Search, Target } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import {
   DEAL_STAGE_ORDER,
@@ -26,12 +35,18 @@ function PipelinePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
   const { profile, hasRole } = useAuth();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      let queryBuilder = supabase.from("portal_deals").select("*").order("updated_at", { ascending: false });
+      let queryBuilder = supabase
+        .from("portal_deals")
+        .select("*")
+        .order("updated_at", { ascending: false });
 
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
@@ -53,11 +68,51 @@ function PipelinePage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  const publishDealActivity = async (
+    type: string,
+    notificationTitle: string,
+    notificationMessage: string,
+    feedTitle: string,
+    feedCaption: string,
+  ) => {
+    const now = new Date().toISOString();
+    const postedByName = profile?.company_name || profile?.full_name || "LIVEY";
+    const postedByRole = hasRole("super_admin")
+      ? "super_admin"
+      : hasRole("partner_admin")
+        ? "partner_admin"
+        : "partner_user";
+    await Promise.allSettled([
+      supabase.from("notifications").insert({
+        id: globalThis.crypto.randomUUID(),
+        user_id: profile?.id ?? null,
+        partner_id: profile?.partner_id ?? null,
+        title: notificationTitle,
+        message: notificationMessage,
+        type,
+        read: false,
+        created_at: now,
+      }),
+      supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: feedTitle,
+        caption: feedCaption,
+        image_path: "/news/livey-wc350-qhd.png",
+        image_alt: "Deal update",
+        posted_by_name: postedByName,
+        posted_by_role: postedByRole,
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      }),
+    ]);
+  };
 
   const visibleDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -93,6 +148,10 @@ function PipelinePage() {
 
   const moveDeal = async (deal: DealRecord) => {
     const stage = nextDealStage(deal.stage);
+    if (stage === "qualified" && !deal.customer_budget?.trim()) {
+      toast.error("Add a customer budget before moving this deal to qualified");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("portal_deals")
@@ -100,14 +159,60 @@ function PipelinePage() {
           stage,
           status: nextDealStatus(deal.status, stage),
           last_touch: `Moved to ${stage}`,
+          close_date:
+            stage === "won" || stage === "lost"
+              ? new Date().toISOString().slice(0, 10)
+              : deal.close_date,
           updated_at: new Date().toISOString(),
         })
         .eq("id", deal.id);
       if (error) throw error;
       toast.success(`${deal.account_name} moved to ${stage}`);
+      await publishDealActivity(
+        "deal_stage_change",
+        `${deal.account_name} moved to ${stage}`,
+        `${deal.account_name} advanced to ${stage}.`,
+        `${deal.account_name} moved to ${stage}`,
+        `The deal for ${deal.product} progressed to ${stage}.`,
+      );
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move deal");
+    }
+  };
+
+  const openNote = (deal: DealRecord) => {
+    setNoteDeal(deal);
+    setNoteDraft(deal.notes);
+    setNoteOpen(true);
+  };
+
+  const saveNote = async () => {
+    if (!noteDeal) return;
+    try {
+      const { error } = await supabase
+        .from("portal_deals")
+        .update({
+          notes: noteDraft.trim() || noteDeal.notes,
+          last_touch: "Note updated",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", noteDeal.id);
+      if (error) throw error;
+      await publishDealActivity(
+        "deal_note",
+        `Note updated for ${noteDeal.account_name}`,
+        noteDraft.trim() || `A note was updated for ${noteDeal.account_name}.`,
+        `${noteDeal.account_name} note updated`,
+        noteDraft.trim() || `A new note was added for ${noteDeal.product}.`,
+      );
+      toast.success("Note saved");
+      setNoteOpen(false);
+      setNoteDeal(null);
+      setNoteDraft("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save note");
     }
   };
 
@@ -221,15 +326,25 @@ function PipelinePage() {
                             <div>{deal.product}</div>
                             <div>{deal.probability}% probability</div>
                           </div>
-                          <Button
-                            className="mt-3 w-full"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void moveDeal(deal)}
-                          >
-                            Move forward
-                            <MoveRight className="ml-2 h-4 w-4" />
-                          </Button>
+                          <div className="mt-3 grid gap-2">
+                            <Button
+                              className="w-full"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void moveDeal(deal)}
+                            >
+                              Move forward
+                              <MoveRight className="ml-2 h-4 w-4" />
+                            </Button>
+                            <Button
+                              className="w-full"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openNote(deal)}
+                            >
+                              Notes
+                            </Button>
+                          </div>
                         </div>
                       ))
                     )}
@@ -240,6 +355,41 @@ function PipelinePage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Deal notes</DialogTitle>
+            <DialogDescription>
+              Capture a stage update or next step without leaving the pipeline board.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 text-sm">
+              <div className="font-medium">{noteDeal?.account_name ?? "Selected deal"}</div>
+              <div className="text-muted-foreground">
+                {noteDeal?.product ?? "Deal"} · {noteDeal?.stage ?? "stage"}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pipeline-note">Note</Label>
+              <Textarea
+                id="pipeline-note"
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="Add context, blockers, or next steps..."
+                rows={6}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setNoteOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void saveNote()}>Save note</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

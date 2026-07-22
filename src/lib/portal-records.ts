@@ -1,5 +1,7 @@
 export const DEAL_STAGE_ORDER = [
   "sourced",
+  "demo",
+  "testing",
   "qualified",
   "proposal",
   "negotiation",
@@ -15,16 +17,22 @@ export type DealRecord = {
   account_name: string;
   contact_name: string;
   owner_name: string;
+  country: string;
   region: string;
   product: string;
   stage: DealStage;
   status: string;
+  quantity: number;
   amount: string;
+  customer_budget: string | null;
   probability: number;
+  possible_close_date: string | null;
   close_date: string;
   source: string;
   last_touch: string;
   notes: string;
+  user_id: string | null;
+  partner_id: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;
@@ -104,4 +112,14 @@ export function nextDealStatus(currentStatus: string, stage: DealStage): string 
     return stage;
   }
   return currentStatus;
+}
+
+export function parseDealAmount(amount: string | number): number {
+  const numeric =
+    typeof amount === "number" ? amount : Number.parseFloat(String(amount).replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+export function requiresSuperAdminApproval(amount: string | number): boolean {
+  return parseDealAmount(amount) >= 5000;
 }

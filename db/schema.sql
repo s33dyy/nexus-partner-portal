@@ -128,12 +128,16 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   account_name TEXT NOT NULL,
   contact_name TEXT NOT NULL,
   owner_name TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT 'India',
   region TEXT NOT NULL,
   product TEXT NOT NULL,
   stage TEXT NOT NULL,
   status TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
   amount TEXT NOT NULL,
+  customer_budget TEXT,
   probability INTEGER NOT NULL DEFAULT 0,
+  possible_close_date DATE,
   close_date DATE NOT NULL,
   source TEXT NOT NULL,
   last_touch TEXT NOT NULL,
@@ -295,6 +299,10 @@ EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'India';
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_budget TEXT;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS possible_close_date DATE;
 
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;

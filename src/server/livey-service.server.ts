@@ -122,12 +122,16 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "account_name",
     "contact_name",
     "owner_name",
+    "country",
     "region",
     "product",
     "stage",
     "status",
+    "quantity",
     "amount",
+    "customer_budget",
     "probability",
+    "possible_close_date",
     "close_date",
     "source",
     "last_touch",
@@ -234,16 +238,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "updated_at",
   ],
   password_reset_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_at"],
-  notifications: [
-    "id",
-    "user_id",
-    "partner_id",
-    "title",
-    "message",
-    "type",
-    "read",
-    "created_at",
-  ],
+  notifications: ["id", "user_id", "partner_id", "title", "message", "type", "read", "created_at"],
 };
 
 const SESSION_COOKIE = "livey_session";
@@ -342,7 +337,10 @@ function extractSingleZipEntry(zipBuffer: Buffer) {
   throw new Error(`Unsupported archive compression method: ${method}`);
 }
 
-async function downloadCloudinaryDocumentBytes(publicId: string, resourceType: "image" | "raw" | "video" | "auto" = "raw") {
+async function downloadCloudinaryDocumentBytes(
+  publicId: string,
+  resourceType: "image" | "raw" | "video" | "auto" = "raw",
+) {
   const config =
     process.env.CLOUDINARY_CLOUD_NAME &&
     process.env.CLOUDINARY_API_KEY &&
@@ -1052,12 +1050,15 @@ export async function createDocumentDataUrl(filePath: string) {
       | undefined;
     if (parsed?.publicId && parsed?.resourceType) {
       if (parsed.secureUrl && parsed.resourceType === "image") {
-         return {
-           signedUrl: parsed.secureUrl,
-           fileName: blob.file_name,
-         };
+        return {
+          signedUrl: parsed.secureUrl,
+          fileName: blob.file_name,
+        };
       }
-      const archiveEntry = await downloadCloudinaryDocumentBytes(parsed.publicId, parsed.resourceType);
+      const archiveEntry = await downloadCloudinaryDocumentBytes(
+        parsed.publicId,
+        parsed.resourceType,
+      );
       const mimeType = blob.mime_type || "application/octet-stream";
       return {
         signedUrl: `data:${mimeType};base64,${archiveEntry.bytes.toString("base64")}`,

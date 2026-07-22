@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   ArrowRight,
@@ -37,6 +37,13 @@ type PartnerSpotlight = {
   created_at: string;
 };
 
+type NotificationFeedRow = {
+  id: string;
+  title: string;
+  message: string;
+  created_at: string;
+};
+
 type DashboardMetric = {
   id: string;
   label: string;
@@ -66,13 +73,22 @@ function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      let dealQuery = supabase.from("portal_deals").select("id, amount, stage, status").order("updated_at", { ascending: false });
+      let dealQuery = supabase
+        .from("portal_deals")
+        .select("id, amount, stage, status")
+        .order("updated_at", { ascending: false });
       let customerQuery = supabase.from("portal_customers").select("id");
-      let partnerQuery = supabase.from("partners").select("id, company_name, tier, status, annual_turnover, business_focus, created_at").order("created_at", { ascending: false });
-      let notificationQuery = supabase.from("notifications").select("*").order("created_at", { ascending: false });
+      let partnerQuery = supabase
+        .from("partners")
+        .select("id, company_name, tier, status, annual_turnover, business_focus, created_at")
+        .order("created_at", { ascending: false });
+      let notificationQuery = supabase
+        .from("notifications")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
@@ -96,30 +112,43 @@ function DashboardPage() {
         notificationQuery,
       ]);
 
-      if (dealsRes.error || customersRes.error || partnersRes.error || newsRes.error || notifRes.error) {
-        throw dealsRes.error ?? customersRes.error ?? partnersRes.error ?? newsRes.error ?? notifRes.error;
+      if (
+        dealsRes.error ||
+        customersRes.error ||
+        partnersRes.error ||
+        newsRes.error ||
+        notifRes.error
+      ) {
+        throw (
+          dealsRes.error ??
+          customersRes.error ??
+          partnersRes.error ??
+          newsRes.error ??
+          notifRes.error
+        );
       }
 
-      const dealRows = (dealsRes.data as Array<{ amount: string; stage: string; status: string }> | null) ?? [];
+      const dealRows =
+        (dealsRes.data as Array<{ amount: string; stage: string; status: string }> | null) ?? [];
       const customerRows = (customersRes.data as Array<{ id: string }> | null) ?? [];
       const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
       const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
-      const notifRows = (notifRes.data as Array<any> | null) ?? [];
-      
+      const notifRows = (notifRes.data as NotificationFeedRow[] | null) ?? [];
+
       const combinedNews = [
         ...newsRows,
-        ...notifRows.map(n => ({
+        ...notifRows.map((n) => ({
           id: n.id,
           title: n.title,
           caption: n.message,
-          image_path: "",
-          image_alt: "",
+          image_path: "/news/livey-wc350-qhd.png",
+          image_alt: "LIVEY update banner",
           posted_by_name: "System",
           posted_by_role: "Notification",
           created_at: n.created_at,
           updated_at: n.created_at,
-          is_seed: false
-        }))
+          is_seed: false,
+        })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const pipeline = dealRows.reduce((sum, deal) => {
@@ -128,7 +157,9 @@ function DashboardPage() {
       }, 0);
       const openDeals = dealRows.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
       const wonDeals = dealRows.filter((deal) => deal.stage === "won").length;
-      const approvedPartners = partnerRows.filter((partner) => partner.status === "approved").length;
+      const approvedPartners = partnerRows.filter(
+        (partner) => partner.status === "approved",
+      ).length;
       const totalFocusAreas = partnerRows.reduce(
         (sum, partner) => sum + (partner.business_focus?.length ?? 0),
         0,
@@ -166,7 +197,11 @@ function DashboardPage() {
       ]);
       setNewsPosts(combinedNews);
       setSpotlights(partnerRows.slice(0, 3));
-      setSource(dealRows.length || customerRows.length || partnerRows.length || combinedNews.length ? "database" : "empty");
+      setSource(
+        dealRows.length || customerRows.length || partnerRows.length || combinedNews.length
+          ? "database"
+          : "empty",
+      );
     } catch {
       setMetrics([]);
       setNewsPosts([]);
@@ -176,11 +211,11 @@ function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void loadDashboard();
-  }, []);
+  }, [loadDashboard]);
 
   const feedEmpty = newsPosts.length === 0;
 
@@ -323,9 +358,7 @@ function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {spotlights.length > 0 ? (
-                spotlights.map((partner) => (
-                  <SpotlightRow key={partner.id} partner={partner} />
-                ))
+                spotlights.map((partner) => <SpotlightRow key={partner.id} partner={partner} />)
               ) : (
                 <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
                   No partner spotlight rows yet.
@@ -450,7 +483,11 @@ function Kpi({
 function NewsCard({ post }: { post: NewsPostRecord }) {
   return (
     <div className="overflow-hidden rounded-2xl border bg-card">
-      <img src={post.image_path} alt={post.image_alt} className="aspect-[4/3] w-full object-cover" />
+      <img
+        src={post.image_path || "/news/livey-wc350-qhd.png"}
+        alt={post.image_alt || "LIVEY update"}
+        className="aspect-[4/3] w-full object-cover"
+      />
       <div className="space-y-3 p-4">
         <div className="flex items-center justify-between gap-3">
           <div>

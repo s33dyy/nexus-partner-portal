@@ -1,16 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
-  Clock3,
-  Filter,
   Loader2,
   Plus,
   RefreshCw,
   Search,
   Target,
-  TrendingUp,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,14 +20,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
+import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { useAuth } from "@/hooks/use-auth";
 import {
   DEAL_STAGE_ORDER,
   nextDealStage,
   nextDealStatus,
+  parseDealAmount,
+  requiresSuperAdminApproval,
   type DealRecord,
   type DealStage,
 } from "@/lib/portal-records";
@@ -39,10 +46,14 @@ type DealForm = {
   account_name: string;
   contact_name: string;
   owner_name: string;
+  country: string;
   region: string;
   product: string;
   stage: DealStage;
+  quantity: number;
   amount: string;
+  customer_budget: string;
+  possible_close_date: string;
   probability: number;
   close_date: string;
   source: string;
@@ -54,10 +65,14 @@ const EMPTY_FORM: DealForm = {
   account_name: "",
   contact_name: "",
   owner_name: "",
+  country: "India",
   region: "India West",
   product: "LIVEY WC350 QHD Webcam",
   stage: "sourced",
+  quantity: 1,
   amount: "",
+  customer_budget: "",
+  possible_close_date: "",
   probability: 25,
   close_date: "",
   source: "Partner referral",
@@ -87,13 +102,17 @@ function DealsPage() {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
   const { profile, hasRole } = useAuth();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase.from("portal_deals").select("*").order("updated_at", { ascending: false });
-      
+      let query = supabase
+        .from("portal_deals")
+        .select("*")
+        .order("updated_at", { ascending: false });
+
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
           query = query.eq("partner_id", profile.partner_id);
@@ -106,6 +125,7 @@ function DealsPage() {
       if (error) throw error;
       const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
+        possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
       }));
       setDeals(rows);
@@ -119,11 +139,31 @@ function DealsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    if (!profile?.company_name) return;
+    if (hasRole("super_admin") || hasRole("partner_admin")) return;
+    setDraft((current) =>
+      current.account_name.trim().length > 0
+        ? current
+        : { ...current, account_name: profile.company_name ?? current.account_name },
+    );
+  }, [hasRole, profile?.company_name]);
+
+  useEffect(() => {
+    if (!profile?.full_name) return;
+    if (hasRole("super_admin")) return;
+    setDraft((current) =>
+      current.owner_name.trim().length > 0
+        ? current
+        : { ...current, owner_name: profile.full_name ?? current.owner_name },
+    );
+  }, [hasRole, profile?.full_name]);
 
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
@@ -136,7 +176,14 @@ function DealsPage() {
       const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
       const matchesQuery =
         !term ||
-        [deal.account_name, deal.contact_name, deal.owner_name, deal.product, deal.region]
+        [
+          deal.account_name,
+          deal.contact_name,
+          deal.owner_name,
+          deal.product,
+          deal.country,
+          deal.region,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(term);
@@ -168,61 +215,120 @@ function DealsPage() {
 
   const editOptions = useMemo(() => {
     return {
+      countries: uniqueStrings(deals.map((deal) => deal.country)),
       accounts: uniqueStrings(deals.map((deal) => deal.account_name)),
       contacts: uniqueStrings(deals.map((deal) => deal.contact_name)),
       owners: uniqueStrings(deals.map((deal) => deal.owner_name)),
       regions: uniqueStrings(deals.map((deal) => deal.region)),
       products: uniqueStrings(deals.map((deal) => deal.product)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
-      touches: uniqueStrings(deals.map((deal) => deal.last_touch)),
+      budgets: uniqueStrings(deals.map((deal) => deal.customer_budget ?? "")),
     };
   }, [deals]);
+  const regionOptions = useMemo(
+    () =>
+      uniqueStrings(
+        deals.filter((deal) => deal.country === draft.country).map((deal) => deal.region),
+      ),
+    [deals, draft.country],
+  );
+
+  const publishDealActivity = async ({
+    notificationTitle,
+    notificationMessage,
+    feedTitle,
+    feedCaption,
+    type,
+  }: {
+    notificationTitle: string;
+    notificationMessage: string;
+    feedTitle: string;
+    feedCaption: string;
+    type: string;
+  }) => {
+    const now = new Date().toISOString();
+    const postedByName = profile?.company_name || profile?.full_name || "LIVEY";
+    const postedByRole = hasRole("super_admin")
+      ? "super_admin"
+      : hasRole("partner_admin")
+        ? "partner_admin"
+        : "partner_user";
+    await Promise.allSettled([
+      supabase.from("notifications").insert({
+        id: globalThis.crypto.randomUUID(),
+        user_id: profile?.id ?? null,
+        partner_id: profile?.partner_id ?? null,
+        title: notificationTitle,
+        message: notificationMessage,
+        type,
+        read: false,
+        created_at: now,
+      }),
+      supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: feedTitle,
+        caption: feedCaption,
+        image_path: "/news/livey-wc350-qhd.png",
+        image_alt: "LIVEY deal update banner",
+        posted_by_name: postedByName,
+        posted_by_role: postedByRole,
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      }),
+    ]);
+  };
 
   const createDeal = async () => {
     const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
-    const accountName = isPartnerUser ? profile?.company_name || "Partner Account" : draft.account_name;
+    const accountName = isPartnerUser
+      ? profile?.company_name || "Partner Account"
+      : draft.account_name;
+    const amountValue = parseDealAmount(draft.amount);
+    const autoApproved = !requiresSuperAdminApproval(amountValue);
 
-    if (
-      !accountName.trim() ||
-      !draft.contact_name.trim() ||
-      !draft.amount.trim() ||
-      !draft.close_date
-    ) {
-      toast.error("Fill in the account, contact, amount, and close date");
+    if (!accountName.trim() || !draft.contact_name.trim() || !draft.amount.trim()) {
+      toast.error("Fill in the account, client, and amount");
       return;
     }
     setCreating(true);
     try {
+      const now = new Date().toISOString();
       const payload = {
         id: globalThis.crypto.randomUUID(),
         ...draft,
         account_name: accountName,
-        owner_name: profile?.full_name || "Unknown",
-        status: "active",
+        owner_name: draft.owner_name.trim() || profile?.full_name || "Unknown",
+        country: draft.country || "India",
+        quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
+        customer_budget: draft.customer_budget.trim() || null,
+        possible_close_date: draft.possible_close_date || null,
+        close_date: draft.possible_close_date || draft.close_date || now.slice(0, 10),
+        status: autoApproved ? "approved" : "submitted",
         probability: Number(draft.probability) || 0,
         user_id: profile?.id,
         partner_id: profile?.partner_id,
         is_seed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at: now,
+        updated_at: now,
       };
       const { error } = await supabase.from("portal_deals").insert(payload);
       if (error) throw error;
-      
-      // Post to news feed
-      await supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: `New Deal Sourced by ${profile?.company_name || profile?.full_name || "Partner"}`,
-        caption: `A new opportunity for ${draft.product} has entered the pipeline!`,
-        image_path: "",
-        image_alt: "Deal",
-        posted_by_name: profile?.company_name || profile?.full_name || "Partner",
-        posted_by_role: "Partner",
-        is_seed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+
+      await publishDealActivity({
+        notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
+        notificationMessage: autoApproved
+          ? `${accountName} was auto-approved because the deal amount is under the threshold.`
+          : `${accountName} is waiting for super admin approval.`,
+        feedTitle: autoApproved
+          ? `${accountName} was auto-approved`
+          : `${accountName} submitted for review`,
+        feedCaption: autoApproved
+          ? `Deal value ${draft.amount} cleared the approval threshold and is now active.`
+          : `Deal value ${draft.amount} needs super admin approval before it can move forward.`,
+        type: "deal_created",
       });
-      
+
       toast.success("Deal created");
       setDraft(EMPTY_FORM);
       await load();
@@ -249,15 +355,38 @@ function DealsPage() {
     }
   };
 
+  const saveNote = async () => {
+    if (!selectedDeal) return;
+    await updateDeal({
+      notes: note.trim() || selectedDeal.notes,
+      last_touch: "Note updated",
+      updated_at: new Date().toISOString(),
+    });
+    setNoteOpen(false);
+  };
+
   const advance = async () => {
     if (!selectedDeal) return;
     const stage = nextDealStage(selectedDeal.stage);
+    if (stage === "qualified" && !selectedDeal.customer_budget?.trim()) {
+      toast.error("Add a customer budget before moving this deal to qualified");
+      return;
+    }
     await updateDeal({
       stage,
       status: nextDealStatus(selectedDeal.status, stage),
       last_touch: "Advanced in pipeline",
+      close_date: selectedDeal.close_date || new Date().toISOString().slice(0, 10),
       notes: note.trim() || selectedDeal.notes,
       updated_at: new Date().toISOString(),
+    });
+
+    await publishDealActivity({
+      notificationTitle: `${selectedDeal.account_name} moved to ${stage}`,
+      notificationMessage: `${selectedDeal.account_name} advanced to ${stage}.`,
+      feedTitle: `${selectedDeal.account_name} moved to ${stage}`,
+      feedCaption: `The deal for ${selectedDeal.product} progressed to ${stage}.`,
+      type: "deal_stage_change",
     });
   };
 
@@ -268,24 +397,27 @@ function DealsPage() {
       status,
       probability: status === "won" ? 100 : Math.min(selectedDeal.probability, 10),
       last_touch: status === "won" ? "Closed won" : "Closed lost",
+      close_date: new Date().toISOString().slice(0, 10),
       notes: note.trim() || selectedDeal.notes,
       updated_at: new Date().toISOString(),
     });
 
-    if (status === "won") {
-      await supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: `Goal Reached by ${profile?.company_name || profile?.full_name || "Partner"}!`,
-        caption: `A deal for ${selectedDeal.product} was successfully closed won. Outstanding work!`,
-        image_path: "",
-        image_alt: "Deal won",
-        posted_by_name: profile?.company_name || profile?.full_name || "Partner",
-        posted_by_role: "Partner",
-        is_seed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    }
+    await publishDealActivity({
+      notificationTitle: status === "won" ? "Deal won" : "Deal lost",
+      notificationMessage:
+        status === "won"
+          ? `${selectedDeal.account_name} closed won and is ready for PO submission.`
+          : `${selectedDeal.account_name} was closed as lost.`,
+      feedTitle:
+        status === "won"
+          ? `${selectedDeal.account_name} closed won`
+          : `${selectedDeal.account_name} closed lost`,
+      feedCaption:
+        status === "won"
+          ? `A deal for ${selectedDeal.product} was successfully closed won.`
+          : `The opportunity for ${selectedDeal.product} was marked as lost.`,
+      type: `deal_${status}`,
+    });
   };
 
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);
@@ -444,32 +576,83 @@ function DealsPage() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="contact_name">Contact</Label>
+                  <Label htmlFor="contact_name">Client</Label>
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.dealContact}
-                    label="Contact"
+                    label="Client"
                     value={draft.contact_name}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, contact_name: value }))
                     }
-                    placeholder="Select or create contact"
+                    placeholder="Select or create client"
                     options={editOptions.contacts}
                   />
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                {/* Removed Owner dropdown */}
+                <div className="space-y-2">
+                  <Label htmlFor="owner_name">POC</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealOwner}
+                    label="POC"
+                    value={draft.owner_name}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, owner_name: value }))
+                    }
+                    placeholder="Select or create POC"
+                    options={editOptions.owners}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="country">Country</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealCountry}
+                    label="Country"
+                    value={draft.country}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        country: value,
+                        region: current.country === value ? current.region : "",
+                      }))
+                    }
+                    placeholder="Select or create country"
+                    options={editOptions.countries}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="region">Region</Label>
                   <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealRegion}
+                    fieldName={dealRegionLookupField(draft.country)}
                     label="Region"
                     value={draft.region}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, region: value }))
                     }
-                    placeholder="Select or create region"
-                    options={editOptions.regions}
+                    placeholder={
+                      draft.country === "India"
+                        ? "Select an Indian region"
+                        : "Select or create region"
+                    }
+                    options={regionOptions}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="quantity">Quantity</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    min={1}
+                    value={draft.quantity}
+                    onChange={(e) =>
+                      setDraft((current) => ({
+                        ...current,
+                        quantity: Number(e.target.value) || 1,
+                      }))
+                    }
+                    placeholder="1"
                   />
                 </div>
               </div>
@@ -485,6 +668,7 @@ function DealsPage() {
                     }
                     placeholder="Select or create product"
                     options={editOptions.products}
+                    allowCreate={hasRole("super_admin")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -493,7 +677,7 @@ function DealsPage() {
                     id="amount"
                     value={draft.amount}
                     onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
-                    placeholder="$9,200"
+                    placeholder={draft.country === "India" ? "₹9,20,000" : "$9,200"}
                   />
                 </div>
               </div>
@@ -509,11 +693,9 @@ function DealsPage() {
                     }
                     placeholder="Select or create stage"
                     options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                    allowCreate={false}
                   />
                 </div>
-                {/* Removed Status dropdown */}
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="probability">Probability</Label>
                   <Input
@@ -527,6 +709,35 @@ function DealsPage() {
                     }
                   />
                 </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="customer_budget">Customer budget</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealCustomerBudget}
+                    label="Customer budget"
+                    value={draft.customer_budget}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, customer_budget: value }))
+                    }
+                    placeholder="Select or create budget"
+                    options={editOptions.budgets}
+                    allowCreate={hasRole("super_admin")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="possible_close_date">Possible close date</Label>
+                  <Input
+                    id="possible_close_date"
+                    type="date"
+                    value={draft.possible_close_date}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, possible_close_date: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="source">Source</Label>
                   <LookupCombobox
@@ -538,32 +749,16 @@ function DealsPage() {
                     }
                     placeholder="Select or create source"
                     options={editOptions.sources}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="last_touch">Last touch</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealLastTouch}
-                    label="Last touch"
-                    value={draft.last_touch}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, last_touch: value }))
-                    }
-                    placeholder="Select or create last touch"
-                    options={editOptions.touches}
+                    allowCreate={hasRole("super_admin")}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="close_date">Close date</Label>
                   <Input
                     id="close_date"
-                    type="date"
                     value={draft.close_date}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, close_date: e.target.value }))
-                    }
+                    disabled
+                    placeholder="Auto-set on closure"
                   />
                 </div>
               </div>
@@ -602,26 +797,41 @@ function DealsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge>{selectedDeal.stage}</Badge>
                     <Badge variant="secondary">{selectedDeal.amount}</Badge>
+                    {selectedDeal.customer_budget ? (
+                      <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
+                    ) : null}
                   </div>
                   <div className="grid gap-3 text-sm md:grid-cols-2">
+                    <Meta label="Country" value={selectedDeal.country} />
+                    <Meta label="Region" value={selectedDeal.region} />
                     <Meta label="Contact" value={selectedDeal.contact_name} />
                     <Meta label="Owner" value={selectedDeal.owner_name} />
-                    <Meta label="Region" value={selectedDeal.region} />
+                    <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
+                    <Meta
+                      label="Possible close date"
+                      value={formatDateLabel(selectedDeal.possible_close_date)}
+                    />
                     <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
                     <Meta label="Source" value={selectedDeal.source} />
                     <Meta label="Probability" value={`${selectedDeal.probability}%`} />
                   </div>
                   <Separator />
                   <div className="space-y-2">
-                    <Label htmlFor="deal_note">Quick note</Label>
-                    <Textarea
-                      id="deal_note"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Capture the latest status"
-                    />
+                    <Label>Quick note</Label>
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                      {selectedDeal.notes || "Capture the latest status, blockers, or next steps."}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setNote(selectedDeal.notes);
+                        setNoteOpen(true);
+                      }}
+                    >
+                      Edit note
+                    </Button>
                     <Button onClick={() => void advance()} disabled={saving}>
                       {saving ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -656,6 +866,41 @@ function DealsPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Deal note</DialogTitle>
+            <DialogDescription>
+              Keep the selected deal up to date without leaving the record view.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 text-sm">
+              <div className="font-medium">{selectedDeal?.account_name ?? "Selected deal"}</div>
+              <div className="text-muted-foreground">
+                {selectedDeal?.product ?? "Deal"} · {selectedDeal?.stage ?? "stage"}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="deal_note">Note</Label>
+              <Textarea
+                id="deal_note"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Capture the latest status"
+                rows={6}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setNoteOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void saveNote()}>Save note</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
