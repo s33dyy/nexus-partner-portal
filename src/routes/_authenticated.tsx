@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
@@ -22,16 +22,27 @@ function AuthenticatedLayout() {
 }
 
 function Gate({ children }: { children: React.ReactNode }) {
-  const { loading, session } = useAuth();
+  const { loading, session, profile, hasRole } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!loading && !session) {
       navigate({ to: "/auth", replace: true });
     }
-  }, [loading, session, navigate]);
+    if (
+      !loading &&
+      session &&
+      profile &&
+      !hasRole("super_admin") &&
+      profile.partner_status !== "approved" &&
+      location.pathname !== "/partner/onboarding"
+    ) {
+      navigate({ to: "/partner/onboarding", replace: true });
+    }
+  }, [loading, session, profile, hasRole, location.pathname, navigate]);
 
-  if (loading || !session) {
+  if (loading || !session || !profile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="w-full max-w-md space-y-3 p-6">

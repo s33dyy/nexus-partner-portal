@@ -77,7 +77,9 @@ function PartnerPage() {
   const [partner, setPartner] = useState<Partner | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [metrics, setMetrics] = useState<{ id: string; label: string; value: string; hint: string }[]>([]);
+  const [metrics, setMetrics] = useState<
+    { id: string; label: string; value: string; hint: string }[]
+  >([]);
   const [newsPosts, setNewsPosts] = useState<NewsPostRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,8 +115,16 @@ function PartnerPage() {
         supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
       ]);
 
-      if (profileRes.error || partnerRes.error || docsRes.error || notesRes.error || newsRes.error) {
-        throw profileRes.error ?? partnerRes.error ?? docsRes.error ?? notesRes.error ?? newsRes.error;
+      if (
+        profileRes.error ||
+        partnerRes.error ||
+        docsRes.error ||
+        notesRes.error ||
+        newsRes.error
+      ) {
+        throw (
+          profileRes.error ?? partnerRes.error ?? docsRes.error ?? notesRes.error ?? newsRes.error
+        );
       }
 
       const profileRow = (profileRes.data as Profile | null) ?? null;
@@ -132,7 +142,10 @@ function PartnerPage() {
         {
           id: "status",
           label: "Status",
-          value: statusLabel[profileRow?.partner_status ?? partnerRow?.status ?? "pending_partner_registration"],
+          value:
+            statusLabel[
+              profileRow?.partner_status ?? partnerRow?.status ?? "pending_partner_registration"
+            ],
           hint: "Current registration state",
         },
         {
@@ -155,11 +168,7 @@ function PartnerPage() {
         },
       ]);
       setSource(
-        profileRow ||
-          partnerRow ||
-          docRows.length > 0 ||
-          noteRows.length > 0 ||
-          newsRows.length > 0
+        profileRow || partnerRow || docRows.length > 0 || noteRows.length > 0 || newsRows.length > 0
           ? "database"
           : "empty",
       );
@@ -205,7 +214,7 @@ function PartnerPage() {
     }
   };
 
-  if (!hasRole("partner_user") && !hasRole("partner_admin") && !hasRole("super_admin") && !isOnboardingChild) {
+  if (!hasRole("partner_admin") && !hasRole("super_admin") && !isOnboardingChild) {
     return (
       <AccessDeniedPage
         title="Company profile"
@@ -312,7 +321,10 @@ function PartnerPage() {
                   <Meta label="Website" value={partner.website ?? "Not set"} />
                   <Meta label="GST" value={partner.gst_number ?? "Not set"} />
                   <Meta label="PAN" value={partner.pan ?? "Not set"} />
-                  <Meta label="Region" value={[partner.state, partner.country].filter(Boolean).join(", ")} />
+                  <Meta
+                    label="Region"
+                    value={[partner.state, partner.country].filter(Boolean).join(", ")}
+                  />
                   <Meta label="Turnover" value={partner.annual_turnover ?? "Not set"} />
                 </div>
                 <Separator />

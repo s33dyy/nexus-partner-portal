@@ -65,10 +65,12 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { roles, hasRole } = useAuth();
+  const { roles, hasRole, profile } = useAuth();
 
   const visible = (items: Item[]) =>
     items.filter((i) => !i.roles || i.roles.some((r) => roles.includes(r)));
+  const isApprovedPartner = profile?.partner_status === "approved";
+  const canSeeWorkspace = hasRole("super_admin") || isApprovedPartner;
 
   const renderGroup = (label: string, items: Item[]) => {
     const list = visible(items);
@@ -106,10 +108,7 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="flex flex-col leading-tight">
-              <BrandLogo
-                variant="wordmark"
-                className="h-5 w-auto max-w-[140px] object-contain"
-              />
+              <BrandLogo variant="wordmark" className="h-5 w-auto max-w-[140px] object-contain" />
               <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
                 Partner Portal
               </span>
@@ -119,8 +118,13 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {renderGroup("Workspace", workspace)}
-        {hasRole("partner_admin") && renderGroup("Company", partnerAdmin)}
+        {!canSeeWorkspace && !hasRole("super_admin")
+          ? renderGroup("Getting started", [
+              { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },
+            ])
+          : null}
+        {canSeeWorkspace ? renderGroup("Workspace", workspace) : null}
+        {canSeeWorkspace && hasRole("partner_admin") ? renderGroup("Company", partnerAdmin) : null}
         {hasRole("super_admin") && renderGroup("Administration", admin)}
       </SidebarContent>
 

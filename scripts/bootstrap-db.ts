@@ -34,7 +34,9 @@ async function resetDatabase() {
   const pool = createPool();
   try {
     await pool.query("BEGIN");
-    await pool.query(`TRUNCATE TABLE ${RESET_TABLES.map((table) => `"${table}"`).join(", ")} RESTART IDENTITY CASCADE`);
+    await pool.query(
+      `TRUNCATE TABLE ${RESET_TABLES.map((table) => `"${table}"`).join(", ")} RESTART IDENTITY CASCADE`,
+    );
 
     if (!ADMIN_PASSWORD) {
       throw new Error("Missing BOOTSTRAP_SUPER_ADMIN_PASSWORD");
@@ -45,12 +47,21 @@ async function resetDatabase() {
 
     await pool.query(
       `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, is_seed)
-       VALUES ($1, $2, $3, $4, $5, $6, 'approved', false)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'approved', false)
+       ON CONFLICT (email) DO UPDATE SET
+         password_hash = EXCLUDED.password_hash,
+         full_name = EXCLUDED.full_name,
+         phone = EXCLUDED.phone,
+         company_name = EXCLUDED.company_name,
+         partner_status = 'approved',
+         is_seed = false`,
       [adminId, ADMIN_EMAIL, passwordHash, ADMIN_NAME, null, ADMIN_COMPANY],
     );
     await pool.query(
       `INSERT INTO user_roles (user_id, role, is_seed)
-       VALUES ($1, 'super_admin', false)`,
+       VALUES ($1, 'super_admin', false)
+       ON CONFLICT (user_id, role) DO UPDATE SET
+         is_seed = false`,
       [adminId],
     );
 
