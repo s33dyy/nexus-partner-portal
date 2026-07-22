@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "db:migrate": "bun scripts/apply-migrations.ts",
     "db:bootstrap": "bun scripts/bootstrap-db.ts",
+    "db:seed": "bun scripts/seed-dummy-data.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
