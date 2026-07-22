@@ -6,6 +6,6 @@
   },
   "deploy": {
     "healthcheckPath": "/",
-    "startCommand": "HOST=0.0.0.0 PORT=$PORT bun run start"
+    "startCommand": "NITRO_HOST=0.0.0.0 NITRO_PORT=$PORT node .output/server/index.mjs"
   }
 }
