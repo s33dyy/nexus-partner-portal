@@ -82,6 +82,7 @@ const createUser = createServerFn({ method: "POST" })
       password: string;
       role: AppRole;
       partner_status?: PartnerStatus;
+      partner_id?: string;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -323,6 +324,7 @@ type AuthApi = {
     password: string;
     role: AppRole;
     partner_status?: PartnerStatus;
+    partner_id?: string;
   }) => Promise<RpcResult<{
     id: string;
     email: string;

@@ -774,9 +774,10 @@ export async function createWorkspaceUser(input: {
   password: string;
   role: AppRole;
   partner_status?: PartnerStatus;
+  partner_id?: string;
 }) {
   const ctx = await getAuthContext();
-  if (!ctx.roles.includes("super_admin")) {
+  if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
     throw new Error("Unauthorized");
   }
 
@@ -790,8 +791,8 @@ export async function createWorkspaceUser(input: {
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(input.password, 10);
   await pool.query(
-    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, is_seed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
+    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, is_seed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)`,
     [
       id,
       input.email,
@@ -801,6 +802,7 @@ export async function createWorkspaceUser(input: {
       input.company_name,
       input.partner_status ??
         (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+      input.partner_id || ctx.session?.user.partner_id || null,
     ],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [

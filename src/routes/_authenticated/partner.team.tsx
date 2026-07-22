@@ -24,6 +24,7 @@ type TeamForm = {
   responsibility: string;
   phone: string;
   status: string;
+  password?: string;
 };
 
 const EMPTY_FORM: TeamForm = {
@@ -34,6 +35,7 @@ const EMPTY_FORM: TeamForm = {
   responsibility: "",
   phone: "",
   status: "invited",
+  password: "",
 };
 
 export const Route = createFileRoute("/_authenticated/partner/team")({
@@ -97,14 +99,26 @@ function PartnerTeamPage() {
   }, [members, query]);
 
   const addMember = async () => {
-    if (!draft.full_name.trim() || !draft.email.trim() || !draft.role_title.trim()) {
-      toast.error("Name, email, and role title are required");
+    if (!draft.full_name.trim() || !draft.email.trim() || !draft.role_title.trim() || !draft.password?.trim()) {
+      toast.error("Name, email, password, and role title are required");
       return;
     }
     setAdding(true);
     try {
+      const { data: userData, error: userError } = await supabase.auth.createWorkspaceUser({
+        full_name: draft.full_name.trim(),
+        email: draft.email.trim(),
+        phone: draft.phone.trim(),
+        company_name: companyName,
+        password: draft.password.trim(),
+        role: draft.portal_role as any,
+        partner_status: "active",
+      });
+      
+      if (userError) throw userError;
+
       const payload = {
-        id: crypto.randomUUID(),
+        id: userData?.id || crypto.randomUUID(),
         company_name: companyName,
         full_name: draft.full_name,
         email: draft.email,
@@ -310,6 +324,13 @@ function PartnerTeamPage() {
                   <Input
                     value={draft.email}
                     onChange={(e) => setDraft((value) => ({ ...value, email: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Password">
+                  <Input
+                    type="password"
+                    value={draft.password || ""}
+                    onChange={(e) => setDraft((value) => ({ ...value, password: e.target.value }))}
                   />
                 </Field>
                 <Field label="Role title">
