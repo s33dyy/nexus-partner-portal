@@ -15,6 +15,14 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
@@ -77,6 +85,7 @@ function PartnerPage() {
   const [partner, setPartner] = useState<Partner | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [metrics, setMetrics] = useState<
     { id: string; label: string; value: string; hint: string }[]
   >([]);
@@ -402,18 +411,59 @@ function PartnerPage() {
               <CardDescription>Recent internal comments tied to this partner.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 pt-6">
-              {notes.length > 0 ? (
-                notes.map((note) => (
-                  <div key={note.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-                    <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                      {note.status_change ?? "Note"} · {formatDateLabel(note.created_at)}
+              {status === "approved" ? (
+                notes.length > 0 ? (
+                  notes.map((note) => (
+                    <div key={note.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
+                      <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                        {note.status_change ?? "Note"} · {formatDateLabel(note.created_at)}
+                      </div>
+                      <div className="mt-2">{note.note}</div>
                     </div>
-                    <div className="mt-2">{note.note}</div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    No review notes yet.
                   </div>
-                ))
+                )
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No review notes yet.
+                  <div>Review notes stay in a popup until your partner profile is approved.</div>
+                  <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="mt-4">
+                        View review notes
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>Review notes</DialogTitle>
+                        <DialogDescription>
+                          Internal comments from the LIVEY team while your partner profile is under
+                          review.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        {notes.length > 0 ? (
+                          notes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="rounded-lg border bg-muted/20 p-3 text-sm"
+                            >
+                              <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                                {note.status_change ?? "Note"} · {formatDateLabel(note.created_at)}
+                              </div>
+                              <div className="mt-2 whitespace-pre-line">{note.note}</div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                            No review notes yet.
+                          </div>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               )}
             </CardContent>

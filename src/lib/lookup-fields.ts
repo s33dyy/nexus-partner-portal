@@ -28,6 +28,11 @@ export const LOOKUP_FIELDS = {
   teamStatus: "team.status",
   auditSeverity: "audit.severity",
   partnerStatus: "partners.status",
+  partnerCountry: "partners.onboarding.country",
+  partnerRegionPrefix: "partners.onboarding.region",
+  partnerBusinessType: "partners.onboarding.business_type",
+  partnerAnnualTurnover: "partners.onboarding.annual_turnover",
+  partnerEmployeeCount: "partners.onboarding.employee_count",
 } as const;
 
 export type LookupFieldName = (typeof LOOKUP_FIELDS)[keyof typeof LOOKUP_FIELDS];

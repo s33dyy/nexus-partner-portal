@@ -27,9 +27,14 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { LookupCombobox } from "@/components/lookup-combobox";
 
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  PARTNER_ONBOARDING_LOOKUP_FIELDS,
+  regionLookupField,
+} from "@/lib/partner-onboarding-lookups";
 
 export const Route = createFileRoute("/_authenticated/partner/onboarding")({
   component: OnboardingPage,
@@ -125,6 +130,7 @@ function OnboardingPage() {
 
   const status = profile?.partner_status ?? "pending_partner_registration";
   const readOnly = status === "submitted" || status === "under_review" || status === "approved";
+  const regionFieldName = regionLookupField(form.country);
 
   // Load existing partner if any
   useEffect(() => {
@@ -291,18 +297,26 @@ function OnboardingPage() {
     return true;
   };
 
-  const goNext = async () => {
+  const goToStep = async (targetIdx: number) => {
+    const nextIdx = Math.max(0, Math.min(targetIdx, STEPS.length - 1));
+    if (nextIdx === stepIdx) return;
     if (readOnly) {
-      setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
+      setStepIdx(nextIdx);
       return;
     }
-    if (!validateStep()) return;
-    // Persist on transitions after business + company steps or entering documents
-    if (step.key === "business" || step.key === "company" || step.key === "focus") {
+    if (
+      nextIdx > stepIdx &&
+      (step.key === "business" || step.key === "company" || step.key === "focus")
+    ) {
+      if (!validateStep()) return;
       const id = await persistDraft();
       if (!id) return;
     }
-    setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
+    setStepIdx(nextIdx);
+  };
+
+  const goNext = async () => {
+    await goToStep(stepIdx + 1);
   };
 
   const goPrev = () => setStepIdx((i) => Math.max(i - 1, 0));
@@ -448,7 +462,7 @@ function OnboardingPage() {
             return (
               <button
                 key={s.key}
-                onClick={() => setStepIdx(i)}
+                onClick={() => void goToStep(i)}
                 className={
                   "flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition " +
                   (active
@@ -549,25 +563,39 @@ function OnboardingPage() {
                     />
                   </Field>
                   <Field label="Country*">
-                    <Input
+                    <LookupCombobox
+                      fieldName={PARTNER_ONBOARDING_LOOKUP_FIELDS.country}
+                      label="Country"
                       value={form.country}
-                      onChange={(e) => setField("country", e.target.value)}
+                      onValueChange={(value) => {
+                        setField("country", value);
+                        setField("state", "");
+                      }}
+                      placeholder="Select or create country"
                       disabled={readOnly}
+                      allowClear={false}
                     />
                   </Field>
-                  <Field label="State*">
-                    <Input
+                  <Field label="Region / State*">
+                    <LookupCombobox
+                      fieldName={regionFieldName}
+                      label="Region"
                       value={form.state}
-                      onChange={(e) => setField("state", e.target.value)}
+                      onValueChange={(value) => setField("state", value)}
+                      placeholder="Select or create region"
                       disabled={readOnly}
+                      allowClear={false}
                     />
                   </Field>
                   <Field label="Business type*">
-                    <Input
+                    <LookupCombobox
+                      fieldName={PARTNER_ONBOARDING_LOOKUP_FIELDS.businessType}
+                      label="Business type"
                       value={form.business_type}
-                      onChange={(e) => setField("business_type", e.target.value)}
-                      placeholder="Private Limited"
+                      onValueChange={(value) => setField("business_type", value)}
+                      placeholder="Select or create business type"
                       disabled={readOnly}
+                      allowClear={false}
                     />
                   </Field>
                   <Field label="Years in business*">
@@ -580,19 +608,25 @@ function OnboardingPage() {
                     />
                   </Field>
                   <Field label="Annual turnover*">
-                    <Input
+                    <LookupCombobox
+                      fieldName={PARTNER_ONBOARDING_LOOKUP_FIELDS.annualTurnover}
+                      label="Annual turnover"
                       value={form.annual_turnover}
-                      onChange={(e) => setField("annual_turnover", e.target.value)}
-                      placeholder="₹10 – 50 Cr"
+                      onValueChange={(value) => setField("annual_turnover", value)}
+                      placeholder="Select or create turnover band"
                       disabled={readOnly}
+                      allowClear={false}
                     />
                   </Field>
                   <Field label="Employee count*">
-                    <Input
+                    <LookupCombobox
+                      fieldName={PARTNER_ONBOARDING_LOOKUP_FIELDS.employeeCount}
+                      label="Employee count"
                       value={form.employee_count}
-                      onChange={(e) => setField("employee_count", e.target.value)}
-                      placeholder="51 – 200"
+                      onValueChange={(value) => setField("employee_count", value)}
+                      placeholder="Select or create employee band"
                       disabled={readOnly}
+                      allowClear={false}
                     />
                   </Field>
                 </div>
@@ -649,7 +683,7 @@ function OnboardingPage() {
                           {!readOnly && (
                             <div className="inline-flex">
                               <input
-                                id={`upload-${t.replace(/\s+/g, '-')}`}
+                                id={`upload-${t.replace(/\s+/g, "-")}`}
                                 type="file"
                                 className="hidden"
                                 accept=".pdf,image/png,image/jpeg"
@@ -659,12 +693,16 @@ function OnboardingPage() {
                                   e.currentTarget.value = "";
                                 }}
                               />
-                              <Button 
+                              <Button
                                 type="button"
-                                size="sm" 
-                                variant="secondary" 
+                                size="sm"
+                                variant="secondary"
                                 disabled={busy}
-                                onClick={() => document.getElementById(`upload-${t.replace(/\s+/g, '-')}`)?.click()}
+                                onClick={() =>
+                                  document
+                                    .getElementById(`upload-${t.replace(/\s+/g, "-")}`)
+                                    ?.click()
+                                }
                               >
                                 {busy ? (
                                   <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -725,8 +763,8 @@ function OnboardingPage() {
                   <ReviewBlock title="Company Details">
                     <ReviewRow label="Address" value={form.business_address} />
                     <ReviewRow label="Country" value={form.country} />
-                    <ReviewRow label="State" value={form.state} />
-                    <ReviewRow label="Type" value={form.business_type} />
+                    <ReviewRow label="Region / State" value={form.state} />
+                    <ReviewRow label="Business type" value={form.business_type} />
                     <ReviewRow label="Years in business" value={String(form.years_in_business)} />
                     <ReviewRow label="Turnover" value={form.annual_turnover} />
                     <ReviewRow label="Employees" value={form.employee_count} />
