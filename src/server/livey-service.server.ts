@@ -1035,7 +1035,7 @@ export async function createDocumentDataUrl(filePath: string) {
         }
       | undefined;
     if (parsed?.publicId && parsed?.resourceType) {
-      if (parsed.secureUrl) {
+      if (parsed.secureUrl && parsed.resourceType === "image") {
          return {
            signedUrl: parsed.secureUrl,
            fileName: blob.file_name,
