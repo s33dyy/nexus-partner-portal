@@ -386,13 +386,15 @@ function AdminNewsPage() {
                               e.currentTarget.value = "";
                             }}
                           />
-                          <Button type="button" variant="secondary" size="sm" disabled={uploadingImage}>
-                            {uploadingImage ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            Upload image
+                          <Button asChild variant="secondary" size="sm" disabled={uploadingImage}>
+                            <span>
+                              {uploadingImage ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Upload className="mr-2 h-4 w-4" />
+                              )}
+                              Upload image
+                            </span>
                           </Button>
                         </label>
                       </div>
@@ -472,13 +474,15 @@ function AdminNewsPage() {
                           e.currentTarget.value = "";
                         }}
                       />
-                      <Button type="button" variant="secondary" size="sm" disabled={uploadingImage}>
-                        {uploadingImage ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Upload className="mr-2 h-4 w-4" />
-                        )}
-                        Upload image
+                      <Button asChild variant="secondary" size="sm" disabled={uploadingImage}>
+                        <span>
+                          {uploadingImage ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                          )}
+                          Upload image
+                        </span>
                       </Button>
                     </label>
                   </div>
