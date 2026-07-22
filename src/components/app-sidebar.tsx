@@ -29,6 +29,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth, type AppRole } from "@/hooks/use-auth";
+import { BrandLogo } from "@/components/brand-logo";
 
 type Item = {
   title: string;
@@ -100,12 +101,15 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground font-bold">
-            L
+          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-primary/10 ring-1 ring-sidebar-border/70">
+            <BrandLogo variant="icon" className="h-7 w-7 rounded-md object-cover" />
           </div>
           {!collapsed && (
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-sidebar-foreground">LIVEY</span>
+              <BrandLogo
+                variant="wordmark"
+                className="h-5 w-auto max-w-[140px] object-contain"
+              />
               <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
                 Partner Portal
               </span>

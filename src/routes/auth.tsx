@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
+import { BrandLogo } from "@/components/brand-logo";
 
 const authSearchSchema = z.object({
   mode: z.enum(["signin", "signup", "forgot"]).optional(),
@@ -38,12 +39,11 @@ function AuthPage() {
       {/* Brand panel */}
       <div className="relative hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground">
         <div className="absolute inset-0 opacity-40 [background:radial-gradient(1200px_600px_at_10%_-20%,color-mix(in_oklab,var(--sidebar-primary)_30%,transparent),transparent),radial-gradient(800px_400px_at_100%_100%,color-mix(in_oklab,var(--sidebar-primary)_20%,transparent),transparent)]" />
-        <div className="relative flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground font-bold">
-            L
+        <div className="relative flex items-center gap-3">
+          <div className="flex h-12 items-center justify-center rounded-xl bg-sidebar-primary/10 px-3 py-2 ring-1 ring-sidebar-border/50">
+            <BrandLogo variant="wordmark" className="h-7 w-auto object-contain" />
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="text-base font-semibold">LIVEY</span>
             <span className="text-[11px] uppercase tracking-widest text-sidebar-foreground/60">
               Partner Portal
             </span>
@@ -88,10 +88,10 @@ function AuthPage() {
       <div className="flex items-center justify-center p-6 md:p-10 bg-background">
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">
-              L
+            <div className="flex h-10 items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 ring-1 ring-border">
+              <BrandLogo variant="wordmark" className="h-6 w-auto object-contain" />
             </div>
-            <span className="text-sm font-semibold">LIVEY Partner Portal</span>
+            <span className="text-sm font-semibold">Partner Portal</span>
           </div>
           <Tabs value={tab} onValueChange={setTab} className="w-full">
             <TabsList className="grid w-full grid-cols-3">
