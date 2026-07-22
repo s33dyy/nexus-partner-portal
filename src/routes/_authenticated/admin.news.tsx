@@ -206,8 +206,11 @@ function AdminNewsPage() {
       if (error || !data) {
         throw error ?? new Error("Image upload failed");
       }
-      setDraft((current) => ({ ...current, image_path: data.signedUrl }));
-      toast.success("Image uploaded to Cloudinary");
+      
+      const { data: urlData } = supabase.storage.from("news-media").getPublicUrl(path);
+      
+      setDraft((current) => ({ ...current, image_path: urlData.publicUrl }));
+      toast.success("Image uploaded successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Image upload failed");
     } finally {
