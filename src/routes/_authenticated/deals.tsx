@@ -33,6 +33,7 @@ import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent } from "@/lib/workflow-events";
 import {
   DEAL_STAGE_ORDER,
   nextDealStage,
@@ -389,6 +390,20 @@ function DealsPage() {
       feedCaption: `The deal for ${selectedDeal.product} progressed to ${stage}.`,
       type: "deal_stage_change",
     });
+    await recordAuditEvent(supabase, {
+      actorName: profile?.full_name ?? "LIVEY",
+      actorRole: hasRole("super_admin")
+        ? "super_admin"
+        : hasRole("partner_admin")
+          ? "partner_admin"
+          : "partner_user",
+      action: "deal_stage_advance",
+      targetType: "deal",
+      targetName: selectedDeal.account_name,
+      outcome: stage,
+      details: `${selectedDeal.product} moved to ${stage}`,
+      severity: "low",
+    });
     if (stage === "won") {
       try {
         await awardDealWinPoints(supabase, {
@@ -432,6 +447,23 @@ function DealsPage() {
           ? `A deal for ${selectedDeal.product} was successfully closed won.`
           : `The opportunity for ${selectedDeal.product} was marked as lost.`,
       type: `deal_${status}`,
+    });
+    await recordAuditEvent(supabase, {
+      actorName: profile?.full_name ?? "LIVEY",
+      actorRole: hasRole("super_admin")
+        ? "super_admin"
+        : hasRole("partner_admin")
+          ? "partner_admin"
+          : "partner_user",
+      action: `deal_${status}`,
+      targetType: "deal",
+      targetName: selectedDeal.account_name,
+      outcome: status,
+      details:
+        status === "won"
+          ? `${selectedDeal.product} closed won and prepared for PO submission`
+          : `${selectedDeal.product} closed lost`,
+      severity: status === "won" ? "medium" : "low",
     });
     if (status === "won") {
       try {

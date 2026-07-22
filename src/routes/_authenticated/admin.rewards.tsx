@@ -17,6 +17,7 @@ import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type RewardCatalogRecord, type RewardRedemptionRecord } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
 type RewardForm = {
   title: string;
@@ -144,6 +145,16 @@ function AdminRewardsPage() {
         .eq("id", selectedItem.id);
       if (error) throw error;
       toast.success("Reward updated");
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY Admin",
+        actorRole: "super_admin",
+        action: "reward_update",
+        targetType: "reward",
+        targetName: selectedItem.title,
+        outcome: "updated",
+        details: `Updated ${selectedItem.title} in the reward catalog`,
+        severity: "low",
+      });
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save reward");
@@ -174,6 +185,16 @@ function AdminRewardsPage() {
       });
       if (error) throw error;
       toast.success("Reward added");
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY Admin",
+        actorRole: "super_admin",
+        action: "reward_create",
+        targetType: "reward",
+        targetName: draft.title.trim(),
+        outcome: "created",
+        details: `Created reward catalog item ${draft.title.trim()}`,
+        severity: "low",
+      });
       setDraft(EMPTY_FORM);
       await load();
     } catch (error) {
@@ -189,6 +210,16 @@ function AdminRewardsPage() {
       const { error } = await supabase.from("reward_catalog_items").delete().eq("id", item.id);
       if (error) throw error;
       toast.success("Reward deleted");
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY Admin",
+        actorRole: "super_admin",
+        action: "reward_delete",
+        targetType: "reward",
+        targetName: item.title,
+        outcome: "deleted",
+        details: `Deleted reward catalog item ${item.title}`,
+        severity: "medium",
+      });
       if (selectedId === item.id) {
         setSelectedId(null);
         setDraft(EMPTY_FORM);
@@ -231,6 +262,23 @@ function AdminRewardsPage() {
         created_at: now,
       });
       if (pointsRes.error) throw pointsRes.error;
+      await recordNotification(supabase, {
+        userId: redemption.user_id,
+        partnerId: redemption.partner_id,
+        title: "Reward redemption approved",
+        message: `${reward?.title ?? "Your reward"} was approved by LIVEY.`,
+        type: "reward_redemption",
+      });
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY Admin",
+        actorRole: "super_admin",
+        action: "reward_redemption_approved",
+        targetType: "redemption",
+        targetName: reward?.title ?? redemption.id,
+        outcome: "approved",
+        details: `Approved redemption request for ${reward?.title ?? "reward"}`,
+        severity: "medium",
+      });
 
       toast.success("Redemption approved");
       await load();
@@ -254,6 +302,23 @@ function AdminRewardsPage() {
         })
         .eq("id", redemption.id);
       if (error) throw error;
+      await recordNotification(supabase, {
+        userId: redemption.user_id,
+        partnerId: redemption.partner_id,
+        title: "Reward redemption rejected",
+        message: `Your redemption request for ${reward?.title ?? "a reward"} was rejected.`,
+        type: "reward_redemption",
+      });
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY Admin",
+        actorRole: "super_admin",
+        action: "reward_redemption_rejected",
+        targetType: "redemption",
+        targetName: reward?.title ?? redemption.id,
+        outcome: "rejected",
+        details: `Rejected redemption request for ${reward?.title ?? "reward"}`,
+        severity: "medium",
+      });
       toast.success("Redemption rejected");
       await load();
     } catch (error) {

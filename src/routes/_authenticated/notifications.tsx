@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bell, Loader2, CheckCircle2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,16 +26,19 @@ function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase.from("notifications").select("*").order("created_at", { ascending: false });
+      let query = supabase
+        .from("notifications")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (!hasRole("super_admin")) {
         if (hasRole("partner_admin") && profile?.partner_id) {
           query = query.eq("partner_id", profile.partner_id);
         } else if (profile?.id) {
-          query = query.eq("partner_id", profile.partner_id || "");
+          query = query.eq("user_id", profile.id);
         }
       }
 
@@ -48,11 +51,11 @@ function NotificationsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
-  }, [profile]);
+  }, [load]);
 
   const markAsRead = async (id: string) => {
     try {
@@ -68,6 +71,8 @@ function NotificationsPage() {
       let query = supabase.from("notifications").update({ read: true }).eq("read", false);
       if (!hasRole("super_admin") && profile?.partner_id) {
         query = query.eq("partner_id", profile.partner_id);
+      } else if (!hasRole("super_admin") && profile?.id) {
+        query = query.eq("user_id", profile.id);
       }
       await query;
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -128,7 +133,9 @@ function NotificationsPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm">{n.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground break-words">{n.message}</div>
+                      <div className="mt-1 text-xs text-muted-foreground break-words">
+                        {n.message}
+                      </div>
                       <div className="mt-2 text-[11px] text-muted-foreground">
                         {formatDateTimeLabel(n.created_at)}
                       </div>

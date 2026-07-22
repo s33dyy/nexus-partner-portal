@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Bell, LogOut, Search, User } from "lucide-react";
 
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 
 const statusLabel: Record<string, string> = {
@@ -39,6 +40,7 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
 export function AppShell({ children }: { children: ReactNode }) {
   const { profile, user, roles, signOut } = useAuth();
   const navigate = useNavigate();
+  const [unreadCount, setUnreadCount] = useState(0);
   const initials =
     profile?.full_name
       ?.split(" ")
@@ -48,6 +50,30 @@ export function AppShell({ children }: { children: ReactNode }) {
       .toUpperCase() ?? "U";
 
   const status = profile?.partner_status ?? "pending_partner_registration";
+
+  useEffect(() => {
+    let active = true;
+    const loadUnreadCount = async () => {
+      let query = supabase.from("notifications").select("id, read").eq("read", false);
+      if (profile?.partner_id) {
+        query = query.eq("partner_id", profile.partner_id);
+      }
+      if (profile?.id && !profile?.partner_id) {
+        query = query.eq("user_id", profile.id);
+      }
+      if (roles.includes("super_admin")) {
+        query = supabase.from("notifications").select("id, read").eq("read", false);
+      }
+      const { data } = await query;
+      if (active) {
+        setUnreadCount((data ?? []).length);
+      }
+    };
+    void loadUnreadCount();
+    return () => {
+      active = false;
+    };
+  }, [profile?.id, profile?.partner_id, roles]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -71,8 +97,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
               {statusLabel[status]}
             </Badge>
-            <Button variant="ghost" size="icon" aria-label="Notifications">
-              <Bell className="h-4 w-4" />
+            <Button asChild variant="ghost" size="icon" aria-label="Notifications">
+              <Link to="/notifications" className="relative">
+                <Bell className="h-4 w-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Link>
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

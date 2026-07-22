@@ -31,6 +31,7 @@ import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/admin/partners")({
   component: AdminPartners,
@@ -168,19 +169,34 @@ function AdminPartners() {
           note: noteDraft.trim() || `Status set to ${decision}`,
           status_change: decision,
         });
-        
-        await supabase.from("notifications").insert({
-          partner_id: selected.id,
+        await recordNotification(supabase, {
+          partnerId: selected.id,
           title: `Partner ${decision.replace("_", " ")}`,
-          message: noteDraft.trim() || `Your partner application status was updated to ${decision.replace("_", " ")}.`,
+          message:
+            noteDraft.trim() ||
+            `Your partner application status was updated to ${decision.replace("_", " ")}.`,
           type: "status_change",
+        });
+        await recordAuditEvent(supabase, {
+          actorName: (await supabase.auth.getUser()).data.user?.email ?? "Super Admin",
+          actorRole: "super_admin",
+          action: `partner_${decision}`,
+          targetType: "partner",
+          targetName: selected.company_name,
+          outcome: decision,
+          details:
+            noteDraft.trim() ||
+            `Partner application status updated to ${decision.replace("_", " ")}`,
+          severity: decision === "approved" ? "medium" : "low",
         });
 
         // Add to news feed
         await supabase.from("portal_news_posts").insert({
           id: globalThis.crypto.randomUUID(),
           title: `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`,
-          caption: noteDraft.trim() || `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`,
+          caption:
+            noteDraft.trim() ||
+            `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`,
           image_path: "",
           image_alt: "Partner update",
           posted_by_name: "Super Admin",

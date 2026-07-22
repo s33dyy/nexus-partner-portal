@@ -19,6 +19,7 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
   component: AdminDealsPage,
@@ -221,6 +222,17 @@ function AdminDealsPage() {
           `${selectedDeal.account_name} ${status.replace("_", " ")}`,
           `Super admin reviewed ${selectedDeal.product} and set the deal to ${status.replace("_", " ")}.`,
         );
+        const reviewer = (await supabase.auth.getUser()).data.user;
+        await recordAuditEvent(supabase, {
+          actorName: reviewer?.email ?? "LIVEY Admin",
+          actorRole: "super_admin",
+          action: `deal_${status}`,
+          targetType: "deal",
+          targetName: selectedDeal.account_name,
+          outcome: status,
+          details: `Admin reviewed ${selectedDeal.product} and set status to ${status.replace("_", " ")}`,
+          severity: status === "won" ? "medium" : "low",
+        });
         if (status === "won") {
           try {
             await awardDealWinPoints(supabase, {

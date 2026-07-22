@@ -106,7 +106,7 @@ function DashboardPage() {
           dealQuery = dealQuery.eq("user_id", profile.id);
           customerQuery = customerQuery.eq("user_id", profile.id);
           partnerQuery = partnerQuery.eq("id", profile.partner_id || "");
-          notificationQuery = notificationQuery.eq("partner_id", profile.partner_id || "");
+          notificationQuery = notificationQuery.eq("user_id", profile.id);
           rewardQuery = rewardQuery.eq("user_id", profile.id);
         }
       }

@@ -37,6 +37,7 @@ import {
   type RewardRedemptionRecord,
 } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/rewards")({
   component: RewardsPage,
@@ -188,6 +189,20 @@ function RewardsPage() {
         updated_at: new Date().toISOString(),
       });
       if (error) throw error;
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY User",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: "reward_redemption_request",
+        targetType: "reward",
+        targetName: selectedReward.title,
+        outcome: "requested",
+        details: `Requested redemption for ${selectedReward.title}`,
+        severity: "low",
+      });
       toast.success("Redemption requested");
       setRequestOpen(false);
       setSelectedReward(null);

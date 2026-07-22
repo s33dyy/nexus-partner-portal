@@ -25,6 +25,7 @@ import {
 } from "@/lib/portal-records";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { recordAuditEvent } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -176,6 +177,20 @@ function PipelinePage() {
         `${deal.account_name} moved to ${stage}`,
         `The deal for ${deal.product} progressed to ${stage}.`,
       );
+      await recordAuditEvent(supabase, {
+        actorName: "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: "pipeline_stage_move",
+        targetType: "deal",
+        targetName: deal.account_name,
+        outcome: stage,
+        details: `${deal.product} moved to ${stage} in the pipeline`,
+        severity: "low",
+      });
       if (stage === "won") {
         try {
           await awardDealWinPoints(supabase, {
@@ -221,6 +236,20 @@ function PipelinePage() {
         `${noteDeal.account_name} note updated`,
         noteDraft.trim() || `A new note was added for ${noteDeal.product}.`,
       );
+      await recordAuditEvent(supabase, {
+        actorName: "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: "pipeline_note_update",
+        targetType: "deal",
+        targetName: noteDeal.account_name,
+        outcome: "updated",
+        details: `Updated notes for ${noteDeal.product}`,
+        severity: "low",
+      });
       toast.success("Note saved");
       setNoteOpen(false);
       setNoteDeal(null);
