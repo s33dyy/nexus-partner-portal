@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +37,7 @@ import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import {
   DEAL_STAGE_ORDER,
   nextDealStage,
@@ -95,6 +97,25 @@ function uniqueStrings(values: Array<string | null | undefined>) {
     ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
   ];
 }
+
+const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "account_name", header: "Account" },
+  { key: "contact_name", header: "Client" },
+  { key: "owner_name", header: "Owner" },
+  { key: "country", header: "Country" },
+  { key: "region", header: "Region" },
+  { key: "product", header: "Product" },
+  { key: "stage", header: "Stage" },
+  { key: "status", header: "Status" },
+  { key: "quantity", header: "Quantity" },
+  { key: "amount", header: "Amount" },
+  { key: "customer_budget", header: "Customer Budget" },
+  { key: "possible_close_date", header: "Possible Close Date" },
+  { key: "close_date", header: "Close Date" },
+  { key: "source", header: "Source" },
+  { key: "last_touch", header: "Last Touch" },
+  { key: "notes", header: "Notes" },
+];
 
 export const Route = createFileRoute("/_authenticated/deals")({
   component: DealsPage,
@@ -532,6 +553,32 @@ function DealsPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-deals-${formatCsvDate()}.csv`}
+            columns={DEAL_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredDeals.map((deal) => ({
+                account_name: deal.account_name,
+                contact_name: deal.contact_name,
+                owner_name: deal.owner_name,
+                country: deal.country,
+                region: deal.region,
+                product: deal.product,
+                stage: deal.stage,
+                status: deal.status,
+                quantity: deal.quantity,
+                amount: deal.amount,
+                customer_budget: deal.customer_budget,
+                possible_close_date: deal.possible_close_date,
+                close_date: deal.close_date,
+                source: deal.source,
+                last_touch: deal.last_touch,
+                notes: deal.notes,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

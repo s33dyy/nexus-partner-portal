@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,7 @@ import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { toDateInputValue } from "@/lib/date-utils";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { type CustomerRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -52,6 +54,19 @@ const LAST_TOUCH_OPTIONS = [
   "30+ days ago",
   "Needs follow up",
 ] as const;
+
+const CUSTOMER_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "company_name", header: "Company" },
+  { key: "account_owner", header: "Account Owner" },
+  { key: "region", header: "Region" },
+  { key: "segment", header: "Segment" },
+  { key: "health_score", header: "Health Score" },
+  { key: "mrr", header: "MRR" },
+  { key: "renewal_date", header: "Renewal Date" },
+  { key: "status", header: "Status" },
+  { key: "next_step", header: "Next Step" },
+  { key: "last_touch", header: "Last Touch" },
+];
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [
@@ -262,6 +277,26 @@ function CustomersPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-customers-${formatCsvDate()}.csv`}
+            columns={CUSTOMER_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredCustomers.map((customer) => ({
+                company_name: customer.company_name,
+                account_owner: customer.account_owner,
+                region: customer.region,
+                segment: customer.segment,
+                health_score: customer.health_score,
+                mrr: customer.mrr,
+                renewal_date: customer.renewal_date,
+                status: customer.status,
+                next_step: customer.next_step,
+                last_touch: customer.last_touch,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

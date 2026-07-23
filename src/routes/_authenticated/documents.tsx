@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 
 type Partner = {
   id: string;
@@ -31,6 +33,16 @@ type DocRow = {
   size_bytes: number | null;
   created_at: string;
 };
+
+const DOC_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "partner_name", header: "Partner" },
+  { key: "doc_type", header: "Document Type" },
+  { key: "file_name", header: "File Name" },
+  { key: "file_path", header: "File Path" },
+  { key: "mime_type", header: "MIME Type" },
+  { key: "size_bytes", header: "Size (bytes)" },
+  { key: "created_at", header: "Created At" },
+];
 
 export const Route = createFileRoute("/_authenticated/documents")({
   component: DocumentsPage,
@@ -207,6 +219,23 @@ function DocumentsPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-documents-${formatCsvDate()}.csv`}
+            columns={DOC_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredDocs.map((doc) => ({
+                partner_name: partnerById.get(doc.partner_id) ?? doc.partner_id,
+                doc_type: doc.doc_type,
+                file_name: doc.file_name,
+                file_path: doc.file_path,
+                mime_type: doc.mime_type,
+                size_bytes: doc.size_bytes,
+                created_at: doc.created_at,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

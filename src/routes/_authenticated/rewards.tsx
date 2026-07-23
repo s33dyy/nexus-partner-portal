@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import {
   rewardProgress,
@@ -43,6 +45,24 @@ import { recordAuditEvent } from "@/lib/workflow-events";
 export const Route = createFileRoute("/_authenticated/rewards")({
   component: RewardsPage,
 });
+
+const REWARD_CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "title", header: "Title" },
+  { key: "description", header: "Description" },
+  { key: "category", header: "Category" },
+  { key: "points_cost", header: "Points Cost" },
+  { key: "stock", header: "Stock" },
+  { key: "availability", header: "Availability" },
+];
+
+const REWARD_REDEMPTION_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "reward_title", header: "Reward" },
+  { key: "status", header: "Status" },
+  { key: "shipping_name", header: "Shipping Name" },
+  { key: "points_cost", header: "Points Cost" },
+  { key: "approved_at", header: "Approved At" },
+  { key: "created_at", header: "Created At" },
+];
 
 function RewardsPage() {
   const { profile, hasRole } = useAuth();
@@ -157,6 +177,10 @@ function RewardsPage() {
   }, [categoryFilter, catalog, query]);
 
   const recentEvents = useMemo(() => events.slice(0, 6), [events]);
+  const rewardById = useMemo(
+    () => new Map(catalog.map((item) => [item.id, item])),
+    [catalog],
+  );
 
   const openRequestDialog = (reward: RewardCatalogRecord) => {
     setSelectedReward(reward);
@@ -243,22 +267,40 @@ function RewardsPage() {
               </Link>
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export store CSV"
+              filename={`livey-rewards-catalog-${formatCsvDate()}.csv`}
+              columns={REWARD_CATALOG_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredCatalog.map((item) => ({
+                  title: item.title,
+                  description: item.description,
+                  category: item.category,
+                  points_cost: item.points_cost,
+                  stock: item.stock,
+                  availability: item.availability,
+                }))
+              }
+              variant="outline"
+            />
+          </div>
         </div>
       </div>
 
@@ -437,8 +479,28 @@ function RewardsPage() {
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">My redemptions</CardTitle>
-              <CardDescription>Track the rewards you have requested.</CardDescription>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="text-base">My redemptions</CardTitle>
+                  <CardDescription>Track the rewards you have requested.</CardDescription>
+                </div>
+                <CsvExportButton
+                  label="Export redemptions"
+                  filename={`livey-rewards-redemptions-${formatCsvDate()}.csv`}
+                  columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
+                  loadRows={async () =>
+                    redemptions.map((redemption) => ({
+                      reward_title: rewardById.get(redemption.reward_id)?.title ?? redemption.reward_id,
+                      status: redemption.status,
+                      shipping_name: redemption.shipping_name,
+                      points_cost: redemption.points_cost,
+                      approved_at: redemption.approved_at,
+                      created_at: redemption.created_at,
+                    }))
+                  }
+                  variant="outline"
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               {redemptions.length === 0 ? (

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, MoveRight, Search, Target } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,10 +28,30 @@ import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
 });
+
+const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "account_name", header: "Account" },
+  { key: "contact_name", header: "Client" },
+  { key: "owner_name", header: "Owner" },
+  { key: "country", header: "Country" },
+  { key: "region", header: "Region" },
+  { key: "product", header: "Product" },
+  { key: "stage", header: "Stage" },
+  { key: "status", header: "Status" },
+  { key: "quantity", header: "Quantity" },
+  { key: "amount", header: "Amount" },
+  { key: "customer_budget", header: "Customer Budget" },
+  { key: "probability", header: "Probability" },
+  { key: "possible_close_date", header: "Possible Close Date" },
+  { key: "close_date", header: "Close Date" },
+  { key: "source", header: "Source" },
+  { key: "last_touch", header: "Last Touch" },
+];
 
 function PipelinePage() {
   const [deals, setDeals] = useState<DealRecord[]>([]);
@@ -291,6 +312,32 @@ function PipelinePage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-pipeline-${formatCsvDate()}.csv`}
+            columns={PIPELINE_EXPORT_COLUMNS}
+            loadRows={async () =>
+              visibleDeals.map((deal) => ({
+                account_name: deal.account_name,
+                contact_name: deal.contact_name,
+                owner_name: deal.owner_name,
+                country: deal.country,
+                region: deal.region,
+                product: deal.product,
+                stage: deal.stage,
+                status: deal.status,
+                quantity: deal.quantity,
+                amount: deal.amount,
+                customer_budget: deal.customer_budget,
+                probability: deal.probability,
+                possible_close_date: deal.possible_close_date,
+                close_date: deal.close_date,
+                source: deal.source,
+                last_touch: deal.last_touch,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

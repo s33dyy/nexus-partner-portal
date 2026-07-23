@@ -2,10 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { Bell, Loader2, CheckCircle2 } from "lucide-react";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { formatDateTimeLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
 
@@ -21,6 +23,14 @@ type NotificationRecord = {
   read: boolean;
   created_at: string;
 };
+
+const NOTIFICATION_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "title", header: "Title" },
+  { key: "message", header: "Message" },
+  { key: "type", header: "Type" },
+  { key: "read", header: "Read" },
+  { key: "created_at", header: "Created At" },
+];
 
 function NotificationsPage() {
   const { profile, hasRole } = useAuth();
@@ -94,11 +104,28 @@ function NotificationsPage() {
             Stay updated on partner approvals and important alerts.
           </p>
         </div>
-        {unreadCount > 0 && (
-          <Button variant="outline" size="sm" onClick={markAllAsRead}>
-            Mark all as read
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {unreadCount > 0 && (
+            <Button variant="outline" size="sm" onClick={markAllAsRead}>
+              Mark all as read
+            </Button>
+          )}
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-notifications-${formatCsvDate()}.csv`}
+            columns={NOTIFICATION_EXPORT_COLUMNS}
+            loadRows={async () =>
+              notifications.map((notification) => ({
+                title: notification.title,
+                message: notification.message,
+                type: notification.type,
+                read: notification.read,
+                created_at: notification.created_at,
+              }))
+            }
+            variant="outline"
+          />
+        </div>
       </div>
 
       <Card>
