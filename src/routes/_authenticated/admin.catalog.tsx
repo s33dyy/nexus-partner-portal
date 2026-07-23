@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { type CatalogItemRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -44,6 +46,18 @@ const EMPTY_FORM: CatalogForm = {
 function uniqueStrings(values: Array<string | number | null | undefined>) {
   return [...new Set(values.map((value) => String(value ?? "").trim()).filter((value) => !!value))];
 }
+
+const CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "sku", header: "SKU" },
+  { key: "product_name", header: "Product" },
+  { key: "category", header: "Category" },
+  { key: "partner_tier", header: "Partner Tier" },
+  { key: "list_price", header: "List Price" },
+  { key: "margin", header: "Margin" },
+  { key: "stock", header: "Stock" },
+  { key: "availability", header: "Availability" },
+  { key: "benefits", header: "Benefits" },
+];
 
 export const Route = createFileRoute("/_authenticated/admin/catalog")({
   component: AdminCatalogPage,
@@ -230,6 +244,25 @@ function AdminCatalogPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-catalog-${formatCsvDate()}.csv`}
+            columns={CATALOG_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredItems.map((item) => ({
+                sku: item.sku,
+                product_name: item.product_name,
+                category: item.category,
+                partner_tier: item.partner_tier,
+                list_price: item.list_price,
+                margin: item.margin,
+                stock: item.stock,
+                availability: item.availability,
+                benefits: item.benefits,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

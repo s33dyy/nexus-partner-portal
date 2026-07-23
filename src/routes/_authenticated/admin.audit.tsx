@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { Loader2, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -11,12 +12,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { type AuditEventRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/admin/audit")({
   component: AdminAuditPage,
 });
+
+const AUDIT_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "created_at", header: "Created At" },
+  { key: "actor_name", header: "Actor" },
+  { key: "actor_role", header: "Actor Role" },
+  { key: "action", header: "Action" },
+  { key: "target_type", header: "Target Type" },
+  { key: "target_name", header: "Target" },
+  { key: "outcome", header: "Outcome" },
+  { key: "severity", header: "Severity" },
+  { key: "details", header: "Details" },
+];
 
 function AdminAuditPage() {
   const { hasRole } = useAuth();
@@ -65,43 +79,6 @@ function AdminAuditPage() {
     });
   }, [events, query, severityFilter]);
 
-  const exportCsv = () => {
-    const rows = [
-      [
-        "created_at",
-        "actor_name",
-        "actor_role",
-        "action",
-        "target_type",
-        "target_name",
-        "outcome",
-        "severity",
-        "details",
-      ],
-      ...filteredEvents.map((event) => [
-        event.created_at,
-        event.actor_name,
-        event.actor_role,
-        event.action,
-        event.target_type,
-        event.target_name,
-        event.outcome,
-        event.severity,
-        event.details,
-      ]),
-    ];
-    const csv = rows
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "audit-log.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Audit logs" roleLabel="Super Admin" />;
   }
@@ -144,10 +121,25 @@ function AdminAuditPage() {
             )}
             Refresh
           </Button>
-          <Button variant="outline" onClick={exportCsv} disabled={filteredEvents.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-audit-events-${formatCsvDate()}.csv`}
+            columns={AUDIT_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredEvents.map((event) => ({
+                created_at: event.created_at,
+                actor_name: event.actor_name,
+                actor_role: event.actor_role,
+                action: event.action,
+                target_type: event.target_type,
+                target_name: event.target_name,
+                outcome: event.outcome,
+                severity: event.severity,
+                details: event.details,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowRight,
   Building2,
+  BarChart3,
   CheckCircle2,
   Clock,
   FileText,

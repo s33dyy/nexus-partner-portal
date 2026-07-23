@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/admin/partners")({
@@ -84,6 +86,27 @@ const STATUS_FILTERS = [
 ] as const;
 
 const TIERS = ["registered", "silver", "gold", "platinum"] as const;
+
+const PARTNER_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "company_name", header: "Company Name" },
+  { key: "legal_name", header: "Legal Name" },
+  { key: "gst_number", header: "GST Number" },
+  { key: "pan", header: "PAN" },
+  { key: "cin", header: "CIN" },
+  { key: "website", header: "Website" },
+  { key: "business_address", header: "Business Address" },
+  { key: "country", header: "Country" },
+  { key: "state", header: "State" },
+  { key: "business_type", header: "Business Type" },
+  { key: "years_in_business", header: "Years In Business" },
+  { key: "annual_turnover", header: "Annual Turnover" },
+  { key: "employee_count", header: "Employee Count" },
+  { key: "business_focus", header: "Business Focus" },
+  { key: "status", header: "Status" },
+  { key: "tier", header: "Tier" },
+  { key: "owner_user_id", header: "Owner User ID" },
+  { key: "created_at", header: "Created At" },
+];
 
 function tierForTurnover(band: string | null): (typeof TIERS)[number] {
   if (!band) return "registered";
@@ -246,6 +269,36 @@ function AdminPartners() {
           <p className="mt-1 text-sm text-muted-foreground">
             Review incoming partner registrations, verify documents, and assign tiers.
           </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-partner-applications-${formatCsvDate()}.csv`}
+            columns={PARTNER_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filtered.map((partner) => ({
+                company_name: partner.company_name,
+                legal_name: partner.legal_name,
+                gst_number: partner.gst_number,
+                pan: partner.pan,
+                cin: partner.cin,
+                website: partner.website,
+                business_address: partner.business_address,
+                country: partner.country,
+                state: partner.state,
+                business_type: partner.business_type,
+                years_in_business: partner.years_in_business,
+                annual_turnover: partner.annual_turnover,
+                employee_count: partner.employee_count,
+                business_focus: partner.business_focus,
+                status: partner.status,
+                tier: partner.tier,
+                owner_user_id: partner.owner_user_id,
+                created_at: partner.created_at,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 

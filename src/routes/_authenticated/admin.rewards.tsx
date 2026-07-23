@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type RewardCatalogRecord, type RewardRedemptionRecord } from "@/lib/rewards";
@@ -38,6 +40,35 @@ const EMPTY_FORM: RewardForm = {
   stock: "1",
   availability: "available",
 };
+
+const REWARD_CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "title", header: "Title" },
+  { key: "description", header: "Description" },
+  { key: "image_path", header: "Image Path" },
+  { key: "category", header: "Category" },
+  { key: "points_cost", header: "Points Cost" },
+  { key: "stock", header: "Stock" },
+  { key: "availability", header: "Availability" },
+  { key: "is_seed", header: "Is Seed" },
+  { key: "created_at", header: "Created At" },
+  { key: "updated_at", header: "Updated At" },
+];
+
+const REWARD_REDEMPTION_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "reward_title", header: "Reward" },
+  { key: "reward_category", header: "Category" },
+  { key: "user_id", header: "User ID" },
+  { key: "partner_id", header: "Partner ID" },
+  { key: "shipping_name", header: "Shipping Name" },
+  { key: "shipping_address", header: "Shipping Address" },
+  { key: "notes", header: "Notes" },
+  { key: "points_cost", header: "Points Cost" },
+  { key: "status", header: "Status" },
+  { key: "approved_by", header: "Approved By" },
+  { key: "approved_at", header: "Approved At" },
+  { key: "created_at", header: "Created At" },
+  { key: "updated_at", header: "Updated At" },
+];
 
 export const Route = createFileRoute("/_authenticated/admin/rewards")({
   component: AdminRewardsPage,
@@ -401,6 +432,26 @@ function AdminRewardsPage() {
                     className="pl-8"
                   />
                 </div>
+                <CsvExportButton
+                  label="Export catalog"
+                  filename={`livey-reward-catalog-${formatCsvDate()}.csv`}
+                  columns={REWARD_CATALOG_EXPORT_COLUMNS}
+                  loadRows={async () =>
+                    catalog.map((item) => ({
+                      title: item.title,
+                      description: item.description,
+                      image_path: item.image_path,
+                      category: item.category,
+                      points_cost: item.points_cost,
+                      stock: item.stock,
+                      availability: item.availability,
+                      is_seed: item.is_seed,
+                      created_at: item.created_at,
+                      updated_at: item.updated_at,
+                    }))
+                  }
+                  variant="outline"
+                />
               </div>
             </div>
           </CardHeader>
@@ -587,10 +638,40 @@ function AdminRewardsPage() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Redemption requests</CardTitle>
-            <CardDescription>
-              Approve or reject requests from the rewards storefront.
-            </CardDescription>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-base">Redemption requests</CardTitle>
+                <CardDescription>
+                  Approve or reject requests from the rewards storefront.
+                </CardDescription>
+              </div>
+              <CsvExportButton
+                label="Export redemptions"
+                filename={`livey-reward-redemptions-${formatCsvDate()}.csv`}
+                columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
+                loadRows={async () =>
+                  filteredRedemptions.map((redemption) => {
+                    const reward = catalog.find((item) => item.id === redemption.reward_id) ?? null;
+                    return {
+                      reward_title: reward?.title ?? "",
+                      reward_category: reward?.category ?? "",
+                      user_id: redemption.user_id,
+                      partner_id: redemption.partner_id,
+                      shipping_name: redemption.shipping_name,
+                      shipping_address: redemption.shipping_address,
+                      notes: redemption.notes,
+                      points_cost: redemption.points_cost,
+                      status: redemption.status,
+                      approved_by: redemption.approved_by,
+                      approved_at: redemption.approved_at,
+                      created_at: redemption.created_at,
+                      updated_at: redemption.updated_at,
+                    };
+                  })
+                }
+                variant="outline"
+              />
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             {filteredRedemptions.length === 0 ? (

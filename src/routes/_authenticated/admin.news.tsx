@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel } from "@/lib/date-utils";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { hasNewsImage, type NewsPostRecord } from "@/lib/portal-news-data";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -32,6 +34,17 @@ const EMPTY_FORM: NewsForm = {
   posted_by_name: "LIVEY Admin",
   posted_by_role: "super_admin",
 };
+
+const NEWS_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "title", header: "Title" },
+  { key: "caption", header: "Caption" },
+  { key: "image_path", header: "Image Path" },
+  { key: "image_alt", header: "Image Alt" },
+  { key: "posted_by_name", header: "Posted By" },
+  { key: "posted_by_role", header: "Posted By Role" },
+  { key: "created_at", header: "Created At" },
+  { key: "updated_at", header: "Updated At" },
+];
 
 export const Route = createFileRoute("/_authenticated/admin/news")({
   component: AdminNewsPage,
@@ -250,6 +263,24 @@ function AdminNewsPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-news-${formatCsvDate()}.csv`}
+            columns={NEWS_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredPosts.map((post) => ({
+                title: post.title,
+                caption: post.caption,
+                image_path: post.image_path,
+                image_alt: post.image_alt,
+                posted_by_name: post.posted_by_name,
+                posted_by_role: post.posted_by_role,
+                created_at: post.created_at,
+                updated_at: post.updated_at,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 
