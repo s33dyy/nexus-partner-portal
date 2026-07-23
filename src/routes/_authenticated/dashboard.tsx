@@ -63,6 +63,7 @@ function DashboardPage() {
   const { profile, roles, hasRole } = useAuth();
   const status = profile?.partner_status ?? "pending_partner_registration";
   const isPending = status === "pending_partner_registration";
+  const showPartnerOnboarding = hasRole("partner_admin") && isPending;
   const roleLabel = roles.includes("super_admin")
     ? "Super Admin"
     : roles.includes("partner_admin")
@@ -312,7 +313,7 @@ function DashboardPage() {
         </div>
       </div>
 
-      {isPending && (
+      {showPartnerOnboarding && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -450,11 +451,15 @@ function DashboardPage() {
               <CardTitle className="text-base">Quick actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <QuickAction to="/partner/onboarding" icon={Building2} label="Partner onboarding" />
               <QuickAction to="/deals" icon={Handshake} label="Register a deal" />
+              <QuickAction to="/pipeline" icon={Sparkles} label="Open pipeline" />
               <QuickAction to="/customers" icon={Users} label="Reserve a customer" />
+              <QuickAction to="/analytics" icon={BarChart3} label="View analytics" />
               <QuickAction to="/rewards" icon={Trophy} label="View rewards" />
               <QuickAction to="/documents" icon={FileText} label="Upload documents" />
+              {hasRole("partner_admin") && (
+                <QuickAction to="/partner/onboarding" icon={Building2} label="Partner onboarding" />
+              )}
               {hasRole("super_admin") && (
                 <QuickAction to="/admin/news" icon={Megaphone} label="Publish news" />
               )}
@@ -469,8 +474,17 @@ function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Step done label="Create your account" />
-              <Step label="Submit partner registration" />
-              <Step label="LIVEY approval" />
+              {hasRole("partner_admin") ? (
+                <>
+                  <Step label="Submit partner registration" />
+                  <Step label="LIVEY approval" />
+                </>
+              ) : (
+                <>
+                  <Step done label="Partner admin setup" />
+                  <Step done label="Workspace access granted" />
+                </>
+              )}
               <Step label="Register your first deal" />
             </CardContent>
           </Card>

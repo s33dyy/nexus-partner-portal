@@ -26,7 +26,8 @@ function Gate({ children }: { children: React.ReactNode }) {
   const { loading, session, profile, hasRole } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const isUnderReview = profile?.partner_status === "under_review" && !hasRole("super_admin");
+  const isUnderReview =
+    hasRole("partner_admin") && profile?.partner_status === "under_review" && !hasRole("super_admin");
   const needsAdminOnboarding =
     hasRole("partner_admin") &&
     profile?.partner_status !== "approved" &&

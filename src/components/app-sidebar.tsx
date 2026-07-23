@@ -123,7 +123,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         {renderGroup("Rewards", visible(shared))}
-        {!canSeeWorkspace && !hasRole("super_admin")
+        {!canSeeWorkspace && hasRole("partner_admin")
           ? renderGroup("Getting started", [
               { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },
             ])

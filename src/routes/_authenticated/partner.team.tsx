@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -37,6 +39,21 @@ const EMPTY_FORM: TeamForm = {
   status: "invited",
   password: "",
 };
+
+const TEAM_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "company_name", header: "Company" },
+  { key: "full_name", header: "Full Name" },
+  { key: "email", header: "Email" },
+  { key: "role_title", header: "Role Title" },
+  { key: "portal_role", header: "Portal Role" },
+  { key: "responsibility", header: "Responsibility" },
+  { key: "status", header: "Status" },
+  { key: "last_active", header: "Last Active" },
+  { key: "phone", header: "Phone" },
+  { key: "permissions", header: "Permissions" },
+  { key: "created_at", header: "Created At" },
+  { key: "updated_at", header: "Updated At" },
+];
 
 export const Route = createFileRoute("/_authenticated/partner/team")({
   component: PartnerTeamPage,
@@ -125,11 +142,13 @@ function PartnerTeamPage() {
         role_title: draft.role_title,
         portal_role: draft.portal_role,
         responsibility: draft.responsibility,
-        status: draft.status,
+        status: draft.portal_role === "partner_user" ? "active" : draft.status,
         last_active: "Just added",
         phone: draft.phone,
         permissions:
-          draft.portal_role === "partner_admin" ? ["deals", "documents", "team"] : ["documents"],
+          draft.portal_role === "partner_admin"
+            ? ["deals", "documents", "team"]
+            : ["dashboard", "deals", "pipeline", "customers", "analytics", "documents", "rewards"],
         is_seed: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -217,6 +236,28 @@ function PartnerTeamPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-team-members-${formatCsvDate()}.csv`}
+            columns={TEAM_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredMembers.map((member) => ({
+                company_name: member.company_name,
+                full_name: member.full_name,
+                email: member.email,
+                role_title: member.role_title,
+                portal_role: member.portal_role,
+                responsibility: member.responsibility,
+                status: member.status,
+                last_active: member.last_active,
+                phone: member.phone,
+                permissions: member.permissions,
+                created_at: member.created_at,
+                updated_at: member.updated_at,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 
@@ -310,7 +351,7 @@ function PartnerTeamPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Invite teammate</CardTitle>
-              <CardDescription>Add a live record for a new partner user.</CardDescription>
+              <CardDescription>Add a live record for a new partner user or partner admin.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
@@ -396,8 +437,8 @@ function PartnerTeamPage() {
               <CardDescription>What the partner roster is set up to cover.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
-              <div>Partner admins can manage deals, team, and document workflows.</div>
-              <div>Partner users can handle onboarding and document tasks.</div>
+              <div>Partner admins can manage onboarding, deals, team, and document workflows.</div>
+              <div>Partner users can handle deals, customers, analytics, and documents.</div>
               <Separator />
               <div>
                 The roster is deletable, so you can reset the workspace cleanly when needed.

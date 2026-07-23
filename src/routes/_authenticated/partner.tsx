@@ -497,8 +497,8 @@ function PartnerPage() {
             <CardDescription>Partner access depends on registration status.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
-            <div>Partner admins can manage deals, team, and document workflows.</div>
-            <div>Partner users can handle onboarding and document tasks.</div>
+            <div>Partner admins can manage onboarding, deals, team, and document workflows.</div>
+            <div>Partner users can handle deals, customers, analytics, and documents.</div>
             <Separator />
             <div>
               {status === "approved"

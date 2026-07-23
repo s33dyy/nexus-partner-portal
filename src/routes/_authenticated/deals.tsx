@@ -136,6 +136,8 @@ function DealsPage() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
   const [clientCreateSeed, setClientCreateSeed] = useState("");
+  const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
+  const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
 
   const load = useCallback(async () => {
@@ -191,8 +193,102 @@ function DealsPage() {
   }, [hasRole, profile?.company_name, profile?.partner_id]);
 
   useEffect(() => {
+    if (hasRole("super_admin")) {
+      setPartnerAdminProfileId(null);
+      setPartnerAdminName(null);
+      return;
+    }
+    if (hasRole("partner_admin")) {
+      setPartnerAdminProfileId(profile?.id ?? null);
+      setPartnerAdminName(profile?.full_name ?? null);
+      return;
+    }
+    if (!profile?.partner_id) {
+      setPartnerAdminProfileId(null);
+      setPartnerAdminName(profile?.full_name ?? null);
+      return;
+    }
+
+    let active = true;
+    void (async () => {
+      const { data: partnerRow, error: partnerError } = await supabase
+        .from("partners")
+        .select("owner_user_id")
+        .eq("id", profile.partner_id)
+        .maybeSingle();
+      if (partnerError) {
+        if (active) {
+          setPartnerAdminProfileId(null);
+          setPartnerAdminName(profile?.full_name ?? null);
+        }
+        return;
+      }
+
+      const ownerId = (partnerRow as { owner_user_id?: string | null } | null)?.owner_user_id ?? null;
+      if (!ownerId) {
+        if (active) {
+          setPartnerAdminProfileId(null);
+          setPartnerAdminName(profile?.full_name ?? null);
+        }
+        return;
+      }
+
+      const { data: ownerProfile, error: ownerError } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("id", ownerId)
+        .maybeSingle();
+      if (!active) return;
+      if (ownerError) {
+        setPartnerAdminProfileId(ownerId);
+        setPartnerAdminName(profile?.full_name ?? null);
+        return;
+      }
+
+      setPartnerAdminProfileId(ownerId);
+      setPartnerAdminName(
+        (ownerProfile as { id: string; full_name: string } | null)?.full_name ??
+          profile?.full_name ??
+          null,
+      );
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasRole, profile?.full_name, profile?.id, profile?.partner_id]);
+
+  useEffect(() => {
+    if (hasRole("super_admin") || hasRole("partner_admin")) return;
     if (!profile?.full_name) return;
-    if (hasRole("super_admin")) return;
+    setDraft((current) =>
+      current.account_name.trim().length > 0
+        ? current
+        : {
+            ...current,
+            partner_id: profile.partner_id ?? current.partner_id,
+            account_name: profile.full_name ?? current.account_name,
+          },
+    );
+  }, [hasRole, profile?.full_name, profile?.partner_id]);
+
+  useEffect(() => {
+    if (hasRole("super_admin") || hasRole("partner_admin")) return;
+    if (!partnerAdminName) return;
+    setDraft((current) =>
+      current.owner_name.trim().length > 0
+        ? current
+        : {
+            ...current,
+            poc_profile_id: partnerAdminProfileId ?? current.poc_profile_id,
+            owner_name: partnerAdminName,
+        },
+    );
+  }, [hasRole, partnerAdminName, partnerAdminProfileId]);
+
+  useEffect(() => {
+    if (!hasRole("partner_admin")) return;
+    if (!profile?.full_name) return;
     setDraft((current) =>
       current.owner_name.trim().length > 0
         ? current
@@ -318,12 +414,17 @@ function DealsPage() {
   const createDeal = async () => {
     const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
     const accountName = isPartnerUser
-      ? profile?.company_name || "Partner Account"
+      ? profile?.full_name || profile?.company_name || "Partner User"
       : draft.account_name;
+    const ownerName = hasRole("partner_admin")
+      ? profile?.full_name || draft.owner_name || "Partner Admin"
+      : isPartnerUser
+        ? partnerAdminName || profile?.full_name || draft.owner_name || "Partner Admin"
+        : draft.owner_name;
     const amountValue = parseDealAmount(draft.amount);
     const autoApproved = !requiresSuperAdminApproval(amountValue);
 
-    if (!accountName.trim() || !draft.contact_name.trim() || !draft.amount.trim()) {
+    if (!accountName.trim() || !ownerName.trim() || !draft.contact_name.trim() || !draft.amount.trim()) {
       toast.error("Fill in the account, client, and amount");
       return;
     }
@@ -335,10 +436,14 @@ function DealsPage() {
         ...draft,
         partner_id: draft.partner_id ?? profile?.partner_id ?? null,
         customer_id: draft.customer_id ?? null,
-        poc_profile_id: draft.poc_profile_id ?? profile?.id ?? null,
+        poc_profile_id: hasRole("partner_admin")
+          ? profile?.id ?? null
+          : isPartnerUser
+            ? partnerAdminProfileId ?? profile?.id ?? null
+            : draft.poc_profile_id ?? profile?.id ?? null,
         account_name: accountName,
         contact_name: draft.contact_name.trim(),
-        owner_name: draft.owner_name.trim() || profile?.full_name || "Unknown",
+        owner_name: ownerName,
         country: draft.country || "India",
         quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
         customer_budget: draft.customer_budget.trim() || null,
@@ -682,14 +787,14 @@ function DealsPage() {
               <CardTitle className="text-base">Create deal</CardTitle>
               <CardDescription>Add a new live opportunity to the portal.</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-3">
-              <div className="grid gap-3 md:grid-cols-2">
+              <CardContent className="grid gap-3">
+                <div className="grid gap-3 md:grid-cols-2">
                 {(hasRole("super_admin") || hasRole("partner_admin")) && (
-                  <div className="space-y-2">
-                    <Label htmlFor="account_name">Account</Label>
-                    <LookupCombobox
-                      fieldName={LOOKUP_FIELDS.dealAccount}
-                      source="account"
+                    <div className="space-y-2">
+                      <Label htmlFor="account_name">Account</Label>
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.dealAccount}
+                        source="account"
                       label="Account"
                       value={draft.account_name}
                       onValueChange={(value) =>
@@ -702,15 +807,25 @@ function DealsPage() {
                           account_name: selection?.label ?? current.account_name,
                         }))
                       }
-                      placeholder="Select or create account"
-                      allowCreate={false}
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="contact_name">Client</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealContact}
+                        placeholder="Select or create account"
+                        allowCreate={false}
+                      />
+                    </div>
+                  )}
+                  {hasRole("partner_user") && (
+                    <div className="space-y-2">
+                      <Label htmlFor="account_name">Account</Label>
+                      <Input
+                        value={profile?.full_name ?? draft.account_name}
+                        readOnly
+                        placeholder="Auto-selected account"
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="contact_name">Client</Label>
+                    <LookupCombobox
+                      fieldName={LOOKUP_FIELDS.dealContact}
                     source="client"
                     label="Client"
                     value={draft.contact_name}
@@ -754,8 +869,14 @@ function DealsPage() {
                       placeholder="Select POC"
                       allowCreate={false}
                     />
-                  ) : (
+                  ) : hasRole("partner_admin") ? (
                     <Input value={profile?.full_name ?? draft.owner_name} readOnly />
+                  ) : (
+                    <Input
+                      value={partnerAdminName ?? draft.owner_name}
+                      readOnly
+                      placeholder="Auto-selected POC"
+                    />
                   )}
                 </div>
                 <div className="space-y-2">
@@ -811,6 +932,11 @@ function DealsPage() {
                   />
                 </div>
               </div>
+              {hasRole("partner_user") && (
+                <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Account and POC are assigned automatically for partner users.
+                </div>
+              )}
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="product">Product</Label>
@@ -1057,14 +1183,14 @@ function DealsPage() {
         </DialogContent>
       </Dialog>
 
-      <CustomerQuickCreateDialog
-        open={clientCreateOpen}
-        onOpenChange={setClientCreateOpen}
-        initialCompanyName={clientCreateSeed}
-        initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
-        initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
-        initialSegment="Mid-market"
-        initialMrr="$0"
+        <CustomerQuickCreateDialog
+          open={clientCreateOpen}
+          onOpenChange={setClientCreateOpen}
+          initialCompanyName={clientCreateSeed}
+          initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
+          initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
+          initialSegment="Mid-market"
+          initialMrr="$0"
         initialStatus="active"
         initialNextStep="Intro call"
         initialLastTouch="New"

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, Search, ShieldCheck, UserRoundCog } from "lucide-react";
 import { toast } from "sonner";
 
+import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { cn } from "@/lib/utils";
 import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
@@ -46,6 +48,17 @@ const PARTNER_STATUS_OPTIONS = [
   "approved",
   "rejected",
 ] as const;
+
+const USER_EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "full_name", header: "Full Name" },
+  { key: "email", header: "Email" },
+  { key: "phone", header: "Phone" },
+  { key: "company_name", header: "Company" },
+  { key: "partner_id", header: "Partner ID" },
+  { key: "partner_status", header: "Partner Status" },
+  { key: "roles", header: "Roles" },
+  { key: "created_at", header: "Created At" },
+];
 
 export const Route = createFileRoute("/_authenticated/admin/users")({
   component: AdminUsersPage,
@@ -156,9 +169,10 @@ function AdminUsersPage() {
         is_seed: selectedUser.is_seed,
       });
       if (insertRes.error) throw insertRes.error;
+      const nextStatus = draftRole === "partner_user" ? "approved" : draftStatus;
       const profileRes = await supabase
         .from("profiles")
-        .update({ partner_status: draftStatus, updated_at: new Date().toISOString() })
+        .update({ partner_status: nextStatus, updated_at: new Date().toISOString() })
         .eq("id", selectedUser.id);
       if (profileRes.error) throw profileRes.error;
       toast.success("User roles updated");
@@ -212,7 +226,7 @@ function AdminUsersPage() {
         company_name: newUser.company_name.trim() || null,
         password: newUser.password,
         role: newUser.role,
-        partner_status: "pending_partner_registration",
+        partner_status: newUser.role === "partner_user" ? "approved" : "pending_partner_registration",
       });
       if (error) throw error;
       toast.success("User created");
@@ -262,6 +276,24 @@ function AdminUsersPage() {
             )}
             Refresh
           </Button>
+          <CsvExportButton
+            label="Export CSV"
+            filename={`livey-users-${formatCsvDate()}.csv`}
+            columns={USER_EXPORT_COLUMNS}
+            loadRows={async () =>
+              filteredUsers.map((user) => ({
+                full_name: user.full_name,
+                email: user.email,
+                phone: user.phone,
+                company_name: user.company_name,
+                partner_id: user.partner_id,
+                partner_status: user.partner_status,
+                roles: user.roles.join(", "),
+                created_at: user.created_at,
+              }))
+            }
+            variant="outline"
+          />
         </div>
       </div>
 
@@ -430,7 +462,7 @@ function AdminUsersPage() {
             <CardHeader className="border-b">
               <CardTitle className="text-base">Create user</CardTitle>
               <CardDescription>
-                Create partner admins or partner users from the super-admin account.
+                Create partner admins or active partner users from the super-admin account.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
