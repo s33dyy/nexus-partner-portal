@@ -787,7 +787,7 @@ export async function signUpLocal(input: {
      VALUES ($1, $2, $3, $4, $5, $6, 'pending_partner_registration')`,
     [id, input.email, passwordHash, input.full_name, input.phone || null, input.company_name],
   );
-  await pool.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'partner_user')`, [id]);
+  await pool.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'partner_admin')`, [id]);
 
   const token = createToken();
   const expiresAt = sessionExpiresAt();

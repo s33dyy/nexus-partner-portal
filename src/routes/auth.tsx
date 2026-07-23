@@ -259,16 +259,16 @@ function SignUpForm() {
       toast.error(error.message);
       return;
     }
-    toast.success("Account created — continuing to onboarding.");
+    toast.success("Partner admin account created — continuing to onboarding.");
     navigate({ to: "/partner/onboarding", replace: true });
   };
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-1.5">
-        <h2 className="text-2xl font-semibold tracking-tight">Register a partner account</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Register a partner admin account</h2>
         <p className="text-sm text-muted-foreground">
-          Step 1 of 2. We'll ask for your company documents in the onboarding form after sign-in.
+          Step 1 of 2. Partner admins complete company verification in the onboarding form after sign-in.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">

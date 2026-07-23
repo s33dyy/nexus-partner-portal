@@ -27,6 +27,10 @@ function Gate({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isUnderReview = profile?.partner_status === "under_review" && !hasRole("super_admin");
+  const needsAdminOnboarding =
+    hasRole("partner_admin") &&
+    profile?.partner_status !== "approved" &&
+    profile?.partner_status !== "under_review";
 
   useEffect(() => {
     if (!loading && !session) {
@@ -39,14 +43,12 @@ function Gate({ children }: { children: React.ReactNode }) {
       !loading &&
       session &&
       profile &&
-      !hasRole("super_admin") &&
-      profile.partner_status !== "approved" &&
-      profile.partner_status !== "under_review" &&
+      needsAdminOnboarding &&
       location.pathname !== "/partner/onboarding"
     ) {
       navigate({ to: "/partner/onboarding", replace: true });
     }
-  }, [isUnderReview, loading, session, profile, hasRole, location.pathname, navigate]);
+  }, [isUnderReview, loading, session, profile, needsAdminOnboarding, location.pathname, navigate]);
 
   if (loading || !session || !profile) {
     return (

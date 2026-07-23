@@ -103,7 +103,7 @@ function isDocRow(doc: DocRow | null | undefined): doc is DocRow {
 }
 
 function OnboardingPage() {
-  const { user, profile, refresh } = useAuth();
+  const { user, profile, refresh, hasRole, loading } = useAuth();
   const navigate = useNavigate();
   const [stepIdx, setStepIdx] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -127,6 +127,12 @@ function OnboardingPage() {
     employee_count: "",
     business_focus: [],
   });
+
+  useEffect(() => {
+    if (loading) return;
+    if (hasRole("super_admin") || hasRole("partner_admin")) return;
+    navigate({ to: "/dashboard", replace: true });
+  }, [hasRole, loading, navigate]);
 
   const status = profile?.partner_status ?? "pending_partner_registration";
   const readOnly = status === "submitted" || status === "under_review" || status === "approved";
