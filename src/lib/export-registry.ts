@@ -62,6 +62,23 @@ async function loadTableRows(
   return (data ?? []) as Array<Record<string, unknown>>;
 }
 
+async function loadTableCount(
+  table: string,
+  scope: ExportScope,
+  scopeMode: ScopeMode,
+  fallbackUserColumn = "user_id",
+) {
+  let query = supabase.from(table).count();
+
+  for (const filter of resolveScopeFilters(scope, scopeMode, fallbackUserColumn)) {
+    query = query.eq(filter.column, filter.value);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return typeof data === "number" ? data : 0;
+}
+
 export function resolveScopeFilters(
   scope: ExportScope,
   scopeMode: ScopeMode,
@@ -122,7 +139,7 @@ function dataset(config: DatasetConfig): ExportDatasetDescriptor {
   return {
     ...descriptor,
     loadRows,
-    loadCount: async (scope) => (await loadRows(scope)).length,
+    loadCount: (scope) => loadTableCount(table, scope, scopeMode, fallbackUserColumn),
   };
 }
 

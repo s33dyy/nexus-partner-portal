@@ -50,7 +50,7 @@ type QueryOrder = {
 
 export type TableQuery = {
   table: string;
-  operation: "select" | "insert" | "update" | "delete";
+  operation: "select" | "insert" | "update" | "delete" | "count";
   filters?: QueryFilter[];
   order?: QueryOrder;
   values?: Record<string, unknown> | Array<Record<string, unknown>>;
@@ -531,6 +531,19 @@ export async function queryTable(query: TableQuery) {
           : query.single === "maybeSingle"
             ? (data[0] ?? null)
             : data,
+      error: null,
+    };
+  }
+
+  if (query.operation === "count") {
+    const { whereSql, whereParams } = buildWhereClause(filters, columns);
+    const result = await pool.query(
+      `SELECT count(*)::int AS count FROM ${quoteIdent(query.table)}${whereSql}`,
+      whereParams,
+    );
+    const count = Number(result.rows[0]?.count ?? 0);
+    return {
+      data: Number.isFinite(count) ? count : 0,
       error: null,
     };
   }

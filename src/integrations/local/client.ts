@@ -188,6 +188,11 @@ class QueryBuilder {
     return this;
   }
 
+  count() {
+    this.state.operation = "count";
+    return this;
+  }
+
   update(values: Record<string, unknown>) {
     this.state.operation = "update";
     this.state.values = values;
