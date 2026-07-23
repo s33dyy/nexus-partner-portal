@@ -70,6 +70,22 @@ type DealForm = {
   notes: string;
 };
 
+type DealEditForm = {
+  account_name: string;
+  contact_name: string;
+  owner_name: string;
+  country: string;
+  region: string;
+  product: string;
+  quantity: number;
+  amount: string;
+  customer_budget: string;
+  possible_close_date: string;
+  probability: number;
+  source: string;
+  notes: string;
+};
+
 const EMPTY_FORM: DealForm = {
   partner_id: null,
   customer_id: null,
@@ -91,6 +107,24 @@ const EMPTY_FORM: DealForm = {
   last_touch: "New",
   notes: "",
 };
+
+function dealToEditForm(deal: DealRecord): DealEditForm {
+  return {
+    account_name: deal.account_name,
+    contact_name: deal.contact_name,
+    owner_name: deal.owner_name,
+    country: deal.country,
+    region: deal.region,
+    product: deal.product,
+    quantity: deal.quantity,
+    amount: deal.amount,
+    customer_budget: deal.customer_budget ?? "",
+    possible_close_date: toDateInputValue(deal.possible_close_date),
+    probability: deal.probability,
+    source: deal.source,
+    notes: deal.notes,
+  };
+}
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [
@@ -134,11 +168,14 @@ function DealsPage() {
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [selectedDealEditing, setSelectedDealEditing] = useState(false);
+  const [selectedDealDraft, setSelectedDealDraft] = useState<DealEditForm | null>(null);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
   const [clientCreateSeed, setClientCreateSeed] = useState("");
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
+  const canEditSelectedDeal = hasRole("super_admin") || hasRole("partner_admin");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -224,7 +261,8 @@ function DealsPage() {
         return;
       }
 
-      const ownerId = (partnerRow as { owner_user_id?: string | null } | null)?.owner_user_id ?? null;
+      const ownerId =
+        (partnerRow as { owner_user_id?: string | null } | null)?.owner_user_id ?? null;
       if (!ownerId) {
         if (active) {
           setPartnerAdminProfileId(null);
@@ -282,7 +320,7 @@ function DealsPage() {
             ...current,
             poc_profile_id: partnerAdminProfileId ?? current.poc_profile_id,
             owner_name: partnerAdminName,
-        },
+          },
     );
   }, [hasRole, partnerAdminName, partnerAdminProfileId]);
 
@@ -304,6 +342,17 @@ function DealsPage() {
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
   );
+
+  useEffect(() => {
+    if (!selectedDeal) {
+      setSelectedDealDraft(null);
+      setSelectedDealEditing(false);
+      return;
+    }
+
+    setSelectedDealDraft(dealToEditForm(selectedDeal));
+    setSelectedDealEditing(false);
+  }, [selectedDeal]);
 
   const filteredDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -424,7 +473,12 @@ function DealsPage() {
     const amountValue = parseDealAmount(draft.amount);
     const autoApproved = !requiresSuperAdminApproval(amountValue);
 
-    if (!accountName.trim() || !ownerName.trim() || !draft.contact_name.trim() || !draft.amount.trim()) {
+    if (
+      !accountName.trim() ||
+      !ownerName.trim() ||
+      !draft.contact_name.trim() ||
+      !draft.amount.trim()
+    ) {
       toast.error("Fill in the account, client, and amount");
       return;
     }
@@ -437,10 +491,10 @@ function DealsPage() {
         partner_id: draft.partner_id ?? profile?.partner_id ?? null,
         customer_id: draft.customer_id ?? null,
         poc_profile_id: hasRole("partner_admin")
-          ? profile?.id ?? null
+          ? (profile?.id ?? null)
           : isPartnerUser
-            ? partnerAdminProfileId ?? profile?.id ?? null
-            : draft.poc_profile_id ?? profile?.id ?? null,
+            ? (partnerAdminProfileId ?? profile?.id ?? null)
+            : (draft.poc_profile_id ?? profile?.id ?? null),
         account_name: accountName,
         contact_name: draft.contact_name.trim(),
         owner_name: ownerName,
@@ -490,7 +544,57 @@ function DealsPage() {
       const { error } = await supabase.from("portal_deals").update(patch).eq("id", selectedDeal.id);
       if (error) throw error;
       toast.success("Deal updated");
-      setNote("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update deal");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSelectedDeal = async () => {
+    if (!selectedDeal || !selectedDealDraft) return;
+
+    const accountName = selectedDealDraft.account_name.trim();
+    const contactName = selectedDealDraft.contact_name.trim();
+    const ownerName = selectedDealDraft.owner_name.trim();
+    const country = selectedDealDraft.country.trim() || "India";
+    const region = selectedDealDraft.region.trim();
+    const product = selectedDealDraft.product.trim();
+    const amount = selectedDealDraft.amount.trim();
+    const source = selectedDealDraft.source.trim();
+    const notes = selectedDealDraft.notes.trim();
+
+    if (!accountName || !contactName || !ownerName || !region || !product || !amount || !source) {
+      toast.error("Fill in account, client, owner, region, product, amount, and source");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("portal_deals")
+        .update({
+          account_name: accountName,
+          contact_name: contactName,
+          owner_name: ownerName,
+          country,
+          region,
+          product,
+          quantity: Number(selectedDealDraft.quantity) > 0 ? Number(selectedDealDraft.quantity) : 1,
+          amount,
+          customer_budget: selectedDealDraft.customer_budget.trim() || null,
+          possible_close_date: selectedDealDraft.possible_close_date || null,
+          probability: Math.min(100, Math.max(0, Number(selectedDealDraft.probability) || 0)),
+          source,
+          notes,
+          last_touch: "Deal details updated",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", selectedDeal.id);
+      if (error) throw error;
+      toast.success("Deal details updated");
+      setSelectedDealEditing(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update deal");
@@ -787,14 +891,14 @@ function DealsPage() {
               <CardTitle className="text-base">Create deal</CardTitle>
               <CardDescription>Add a new live opportunity to the portal.</CardDescription>
             </CardHeader>
-              <CardContent className="grid gap-3">
-                <div className="grid gap-3 md:grid-cols-2">
+            <CardContent className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 {(hasRole("super_admin") || hasRole("partner_admin")) && (
-                    <div className="space-y-2">
-                      <Label htmlFor="account_name">Account</Label>
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.dealAccount}
-                        source="account"
+                  <div className="space-y-2">
+                    <Label htmlFor="account_name">Account</Label>
+                    <LookupCombobox
+                      fieldName={LOOKUP_FIELDS.dealAccount}
+                      source="account"
                       label="Account"
                       value={draft.account_name}
                       onValueChange={(value) =>
@@ -807,25 +911,25 @@ function DealsPage() {
                           account_name: selection?.label ?? current.account_name,
                         }))
                       }
-                        placeholder="Select or create account"
-                        allowCreate={false}
-                      />
-                    </div>
-                  )}
-                  {hasRole("partner_user") && (
-                    <div className="space-y-2">
-                      <Label htmlFor="account_name">Account</Label>
-                      <Input
-                        value={profile?.full_name ?? draft.account_name}
-                        readOnly
-                        placeholder="Auto-selected account"
-                      />
-                    </div>
-                  )}
+                      placeholder="Select or create account"
+                      allowCreate={false}
+                    />
+                  </div>
+                )}
+                {hasRole("partner_user") && (
                   <div className="space-y-2">
-                    <Label htmlFor="contact_name">Client</Label>
-                    <LookupCombobox
-                      fieldName={LOOKUP_FIELDS.dealContact}
+                    <Label htmlFor="account_name">Account</Label>
+                    <Input
+                      value={profile?.full_name ?? draft.account_name}
+                      readOnly
+                      placeholder="Auto-selected account"
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="contact_name">Client</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealContact}
                     source="client"
                     label="Client"
                     value={draft.contact_name}
@@ -1065,12 +1169,33 @@ function DealsPage() {
 
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base">Selected deal</CardTitle>
-              <CardDescription>
-                {selectedDeal
-                  ? `Focused on ${selectedDeal.account_name}`
-                  : "Choose a deal to inspect and advance it."}
-              </CardDescription>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <CardTitle className="text-base">Selected deal</CardTitle>
+                  <CardDescription>
+                    {selectedDeal
+                      ? `Focused on ${selectedDeal.account_name}`
+                      : "Choose a deal to inspect and advance it."}
+                  </CardDescription>
+                </div>
+                {selectedDeal && canEditSelectedDeal ? (
+                  <Button
+                    variant={selectedDealEditing ? "outline" : "secondary"}
+                    size="sm"
+                    onClick={() => {
+                      if (!selectedDealDraft) return;
+                      if (selectedDealEditing) {
+                        setSelectedDealDraft(dealToEditForm(selectedDeal));
+                        setSelectedDealEditing(false);
+                        return;
+                      }
+                      setSelectedDealEditing(true);
+                    }}
+                  >
+                    {selectedDealEditing ? "Cancel edit" : "Edit details"}
+                  </Button>
+                ) : null}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {selectedDeal ? (
@@ -1082,28 +1207,191 @@ function DealsPage() {
                       <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
                     ) : null}
                   </div>
-                  <div className="grid gap-3 text-sm md:grid-cols-2">
-                    <Meta label="Country" value={selectedDeal.country} />
-                    <Meta label="Region" value={selectedDeal.region} />
-                    <Meta label="Contact" value={selectedDeal.contact_name} />
-                    <Meta label="Owner" value={selectedDeal.owner_name} />
-                    <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
-                    <Meta
-                      label="Possible close date"
-                      value={formatDateLabel(selectedDeal.possible_close_date)}
-                    />
-                    <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
-                    <Meta label="Source" value={selectedDeal.source} />
-                    <Meta label="Probability" value={`${selectedDeal.probability}%`} />
-                  </div>
+                  {selectedDealEditing && selectedDealDraft ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Account">
+                        <Input
+                          value={selectedDealDraft.account_name}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, account_name: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Client">
+                        <Input
+                          value={selectedDealDraft.contact_name}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, contact_name: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Owner">
+                        <Input
+                          value={selectedDealDraft.owner_name}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, owner_name: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Country">
+                        <Input
+                          value={selectedDealDraft.country}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, country: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Region">
+                        <Input
+                          value={selectedDealDraft.region}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, region: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Product">
+                        <Input
+                          value={selectedDealDraft.product}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, product: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Quantity">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={selectedDealDraft.quantity}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current
+                                ? { ...current, quantity: Number(e.target.value) || 1 }
+                                : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Amount">
+                        <Input
+                          value={selectedDealDraft.amount}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, amount: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Customer budget">
+                        <Input
+                          value={selectedDealDraft.customer_budget}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, customer_budget: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Possible close date">
+                        <Input
+                          type="date"
+                          value={selectedDealDraft.possible_close_date}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current
+                                ? { ...current, possible_close_date: e.target.value }
+                                : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Source">
+                        <Input
+                          value={selectedDealDraft.source}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, source: e.target.value } : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Probability">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={selectedDealDraft.probability}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current
+                                ? { ...current, probability: Number(e.target.value) || 0 }
+                                : current,
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Close date">
+                        <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 text-sm md:grid-cols-2">
+                      <Meta label="Country" value={selectedDeal.country} />
+                      <Meta label="Region" value={selectedDeal.region} />
+                      <Meta label="Contact" value={selectedDeal.contact_name} />
+                      <Meta label="Owner" value={selectedDeal.owner_name} />
+                      <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
+                      <Meta
+                        label="Possible close date"
+                        value={formatDateLabel(selectedDeal.possible_close_date)}
+                      />
+                      <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
+                      <Meta label="Source" value={selectedDeal.source} />
+                      <Meta label="Probability" value={`${selectedDeal.probability}%`} />
+                    </div>
+                  )}
                   <Separator />
                   <div className="space-y-2">
                     <Label>Quick note</Label>
-                    <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                      {selectedDeal.notes || "Capture the latest status, blockers, or next steps."}
-                    </div>
+                    {selectedDealEditing && selectedDealDraft ? (
+                      <Textarea
+                        value={selectedDealDraft.notes}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, notes: e.target.value } : current,
+                          )
+                        }
+                        rows={4}
+                      />
+                    ) : (
+                      <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                        {selectedDeal.notes ||
+                          "Capture the latest status, blockers, or next steps."}
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {selectedDealEditing && canEditSelectedDeal ? (
+                      <Button onClick={() => void saveSelectedDeal()} disabled={saving}>
+                        {saving ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                        )}
+                        Save changes
+                      </Button>
+                    ) : null}
                     <Button
                       variant="outline"
                       onClick={() => {
@@ -1183,14 +1471,14 @@ function DealsPage() {
         </DialogContent>
       </Dialog>
 
-        <CustomerQuickCreateDialog
-          open={clientCreateOpen}
-          onOpenChange={setClientCreateOpen}
-          initialCompanyName={clientCreateSeed}
-          initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
-          initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
-          initialSegment="Mid-market"
-          initialMrr="$0"
+      <CustomerQuickCreateDialog
+        open={clientCreateOpen}
+        onOpenChange={setClientCreateOpen}
+        initialCompanyName={clientCreateSeed}
+        initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
+        initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
+        initialSegment="Mid-market"
+        initialMrr="$0"
         initialStatus="active"
         initialNextStep="Intro call"
         initialLastTouch="New"
@@ -1213,6 +1501,23 @@ function Meta({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border bg-muted/30 p-3">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium">{value}</div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: import("react").ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`space-y-2 ${className ?? ""}`}>
+      <Label>{label}</Label>
+      {children}
     </div>
   );
 }
