@@ -4,9 +4,11 @@ import type { CsvColumn } from "@/lib/csv-export";
 export type ExportRole = "super_admin" | "partner_admin" | "partner_user";
 
 export type ExportScope = {
+  role: ExportRole;
   isSuperAdmin: boolean;
   partnerId: string | null;
   userId: string | null;
+  companyName: string | null;
 };
 
 export type ExportDatasetDescriptor = {
@@ -22,7 +24,20 @@ export type ExportDatasetDescriptor = {
   loadRows: (scope: ExportScope) => Promise<Array<Record<string, unknown>>>;
 };
 
-type ScopeMode = "global" | "partner" | "user" | "partner-or-user";
+type ScopeMode = "global" | "partner" | "user" | "partner-or-user" | "company";
+
+type ScopeFilter = {
+  column: string;
+  value: string;
+};
+
+function requireScopeValue(value: string | null, fieldName: string) {
+  if (!value) {
+    throw new Error(`Cannot export without ${fieldName}.`);
+  }
+
+  return value;
+}
 
 type DatasetConfig = Omit<ExportDatasetDescriptor, "loadCount" | "loadRows"> & {
   table: string;
@@ -38,23 +53,65 @@ async function loadTableRows(
 ) {
   let query = supabase.from(table).select("*");
 
-  if (!scope.isSuperAdmin) {
-    if (scopeMode === "partner" && scope.partnerId) {
-      query = query.eq("partner_id", scope.partnerId);
-    } else if (scopeMode === "user" && scope.userId) {
-      query = query.eq(fallbackUserColumn, scope.userId);
-    } else if (scopeMode === "partner-or-user") {
-      if (scope.partnerId) {
-        query = query.eq("partner_id", scope.partnerId);
-      } else if (scope.userId) {
-        query = query.eq(fallbackUserColumn, scope.userId);
-      }
-    }
+  for (const filter of resolveScopeFilters(scope, scopeMode, fallbackUserColumn)) {
+    query = query.eq(filter.column, filter.value);
   }
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export function resolveScopeFilters(
+  scope: ExportScope,
+  scopeMode: ScopeMode,
+  fallbackUserColumn = "user_id",
+) {
+  if (scope.isSuperAdmin || scopeMode === "global") {
+    return [];
+  }
+
+  if (scopeMode === "partner") {
+    return [{ column: "partner_id", value: requireScopeValue(scope.partnerId, "partner scope") }];
+  }
+
+  if (scopeMode === "user") {
+    return [{ column: fallbackUserColumn, value: requireScopeValue(scope.userId, "user scope") }];
+  }
+
+  if (scopeMode === "company") {
+    return [{ column: "company_name", value: requireScopeValue(scope.companyName, "company scope") }];
+  }
+
+  if (scopeMode === "partner-or-user") {
+    if (scope.role === "partner_admin" && scope.partnerId) {
+      return [{ column: "partner_id", value: scope.partnerId }];
+    }
+
+    if (scope.role === "partner_user" && scope.userId) {
+      return [{ column: fallbackUserColumn, value: scope.userId }];
+    }
+
+    if (scope.role === "partner_admin") {
+      throw new Error("Cannot export partner-admin data without partner scope.");
+    }
+
+    if (scope.role === "partner_user") {
+      throw new Error("Cannot export partner-user data without user scope.");
+    }
+
+    if (scope.partnerId) {
+      return [{ column: "partner_id", value: scope.partnerId }];
+    }
+
+    if (scope.userId) {
+      return [{ column: fallbackUserColumn, value: scope.userId }];
+    }
+
+    throw new Error("Cannot export without partner or user scope.");
+  }
+
+  return [];
 }
 
 function dataset(config: DatasetConfig): ExportDatasetDescriptor {
@@ -299,9 +356,9 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
     description: "Partner team records across the workspace.",
     group: "governance",
     filenameStem: "livey-team-members",
-    visibleTo: SUPER_ADMIN_ONLY,
+    visibleTo: ADMIN_ROLES,
     routePath: "/partner/team",
-    scopeMode: "global",
+    scopeMode: "company",
     columns: [
       { key: "id", header: "ID" },
       { key: "company_name", header: "Company" },

@@ -10,7 +10,7 @@ export function formatCsvDate(value = new Date()) {
 export function normalizeCsvValue(value: unknown): string {
   if (value == null) return "";
   if (Array.isArray(value)) {
-    return value.map(normalizeCsvValue).filter(Boolean).join("; ");
+    return value.map(normalizeCsvValue).filter((item) => item !== "").join("; ");
   }
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "object") {
@@ -24,14 +24,17 @@ export function normalizeCsvValue(value: unknown): string {
 }
 
 function escapeCsvCell(value: unknown) {
-  return `"${normalizeCsvValue(value).replace(/"/g, '""')}"`;
+  const normalized = normalizeCsvValue(value);
+  if (normalized === "") return "";
+
+  return `"${normalized.replace(/"/g, '""')}"`;
 }
 
 export function buildCsv(columns: CsvColumn[], rows: Array<Record<string, unknown>>) {
-  const headerRow = columns.map((column) => column.header);
-  const bodyRows = rows.map((row) => columns.map((column) => row[column.key]));
+  const headerRow = columns.map((column) => escapeCsvCell(column.header));
+  const bodyRows = rows.map((row) => columns.map((column) => escapeCsvCell(row[column.key])));
 
-  return [headerRow, ...bodyRows].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+  return [headerRow, ...bodyRows].map((row) => row.join(",")).join("\n");
 }
 
 export function downloadCsv(filename: string, csv: string) {

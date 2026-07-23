@@ -37,7 +37,12 @@ export function CsvExportButton({
   };
 
   return (
-    <Button variant={variant} onClick={() => void exportCsv()} disabled={disabled || exporting}>
+    <Button
+      type="button"
+      variant={variant}
+      onClick={() => void exportCsv()}
+      disabled={disabled || exporting}
+    >
       {exporting ? (
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
       ) : (

@@ -13,7 +13,7 @@ test("buildCsv escapes commas, quotes, arrays, and empty values", () => {
     [
       {
         name: "ACME, Inc.",
-        tags: ["alpha", "beta"],
+        tags: ["alpha", 0, false, null, undefined, "beta"],
         notes: 'He said "yes"',
         empty: null,
       },
@@ -21,13 +21,15 @@ test("buildCsv escapes commas, quotes, arrays, and empty values", () => {
   );
 
   expect(csv).toContain('"ACME, Inc."');
-  expect(csv).toContain('"alpha; beta"');
+  expect(csv).toContain('"alpha; 0; false; beta"');
   expect(csv).toContain('"He said ""yes"""');
-  expect(csv).toContain('""');
+  expect(csv.split("\n")[1]).toBe('"ACME, Inc.","alpha; 0; false; beta","He said ""yes""",');
 });
 
 test("normalizeCsvValue joins arrays and serializes objects", () => {
-  expect(normalizeCsvValue(["alpha", "beta"])).toBe("alpha; beta");
+  expect(normalizeCsvValue(["alpha", 0, false, null, undefined, "beta"])).toBe(
+    "alpha; 0; false; beta",
+  );
   expect(normalizeCsvValue({ ok: true })).toBe(JSON.stringify({ ok: true }));
 });
 
