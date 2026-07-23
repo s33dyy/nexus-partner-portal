@@ -29,6 +29,10 @@ function AuthPage() {
   const [tab, setTab] = useState<string>(search.mode ?? "signin");
 
   useEffect(() => {
+    setTab(search.mode ?? "signin");
+  }, [search.mode]);
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: search.redirect ?? "/dashboard", replace: true });
     });
@@ -93,22 +97,22 @@ function AuthPage() {
             </div>
             <span className="text-sm font-semibold">Partner Portal</span>
           </div>
-          <Tabs value={tab} onValueChange={setTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="signin">Sign in</TabsTrigger>
-              <TabsTrigger value="signup">Register</TabsTrigger>
-              <TabsTrigger value="forgot">Recover</TabsTrigger>
-            </TabsList>
-            <TabsContent value="signin" className="mt-6">
-              <SignInForm redirect={search.redirect} />
-            </TabsContent>
-            <TabsContent value="signup" className="mt-6">
-              <SignUpForm />
-            </TabsContent>
-            <TabsContent value="forgot" className="mt-6">
-              <ForgotForm />
-            </TabsContent>
-          </Tabs>
+          {tab === "forgot" ? (
+            <ForgotForm />
+          ) : (
+            <Tabs value={tab} onValueChange={setTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="signin">Sign in</TabsTrigger>
+                <TabsTrigger value="signup">Register</TabsTrigger>
+              </TabsList>
+              <TabsContent value="signin" className="mt-6">
+                <SignInForm redirect={search.redirect} />
+              </TabsContent>
+              <TabsContent value="signup" className="mt-6">
+                <SignUpForm />
+              </TabsContent>
+            </Tabs>
+          )}
         </div>
       </div>
     </div>
@@ -202,6 +206,15 @@ function SignInForm({ redirect }: { redirect?: string }) {
         Sign in
       </Button>
       <p className="text-center text-xs text-muted-foreground">
+        <Link
+          to="/auth"
+          search={{ mode: "forgot" }}
+          className="font-medium text-primary hover:underline"
+        >
+          Forgot password?
+        </Link>
+      </p>
+      <p className="text-center text-xs text-muted-foreground">
         New to LIVEY?{" "}
         <Link
           to="/auth"
@@ -268,7 +281,8 @@ function SignUpForm() {
       <div className="space-y-1.5">
         <h2 className="text-2xl font-semibold tracking-tight">Register a partner admin account</h2>
         <p className="text-sm text-muted-foreground">
-          Step 1 of 2. Partner admins complete company verification in the onboarding form after sign-in.
+          Step 1 of 2. Partner admins complete company verification in the onboarding form after
+          sign-in.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -369,7 +383,7 @@ function ForgotForm() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-1.5">
-        <h2 className="text-2xl font-semibold tracking-tight">Recover access</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Recover account</h2>
         <p className="text-sm text-muted-foreground">
           We'll email you a secure link to set a new password.
         </p>
@@ -388,6 +402,15 @@ function ForgotForm() {
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         Send reset link
       </Button>
+      <p className="text-center text-xs text-muted-foreground">
+        <Link
+          to="/auth"
+          search={{ mode: "signin" }}
+          className="font-medium text-primary hover:underline"
+        >
+          Back to sign in
+        </Link>
+      </p>
     </form>
   );
 }
