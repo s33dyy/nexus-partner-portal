@@ -1,6 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Trophy,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -13,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/integrations/local/client";
+import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -88,6 +97,8 @@ function AdminRewardsPage() {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const rewardImageInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -260,6 +271,25 @@ function AdminRewardsPage() {
       toast.error(error instanceof Error ? error.message : "Failed to delete reward");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRewardImageUpload = async (file: File) => {
+    setUploadingImage(true);
+    try {
+      const result = await uploadRewardImage({
+        file,
+        folder: "reward-catalog",
+      });
+      if (result.error || !result.data) {
+        throw new Error(result.error?.message ?? "Image upload failed");
+      }
+      setDraft((current) => ({ ...current, image_path: result.data.secure_url }));
+      toast.success("Reward image uploaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Image upload failed");
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -530,15 +560,61 @@ function AdminRewardsPage() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="reward_image">Image URL</Label>
-                    <Input
-                      id="reward_image"
-                      value={draft.image_path}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, image_path: event.target.value }))
-                      }
-                      placeholder="/news/livey-wc350-qhd.png"
-                    />
+                    <Label htmlFor="reward_image">Image</Label>
+                    <div className="overflow-hidden rounded-xl border bg-muted/20">
+                      {draft.image_path.trim() ? (
+                        <img
+                          src={draft.image_path}
+                          alt={draft.title.trim() || "Reward preview"}
+                          className="h-48 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-48 flex-col justify-between p-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                              No image uploaded
+                            </div>
+                            <div className="mt-2 max-w-sm text-sm font-medium">
+                              Upload a reward image to display it in the catalog.
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            PNG, JPG, or WEBP recommended
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        id="reward_image"
+                        ref={rewardImageInputRef}
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void handleRewardImageUpload(file);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={uploadingImage}
+                        onClick={() => rewardImageInputRef.current?.click()}
+                      >
+                        {uploadingImage ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {draft.image_path.trim() ? "Replace image" : "Upload image"}
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Uploads go straight to Cloudinary and save into this field.
+                      </span>
+                    </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="grid gap-2">
@@ -599,6 +675,7 @@ function AdminRewardsPage() {
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
+                    disabled={uploadingImage}
                     onClick={() => {
                       setSelectedId(null);
                       setDraft(EMPTY_FORM);
@@ -606,7 +683,7 @@ function AdminRewardsPage() {
                   >
                     New reward
                   </Button>
-                  <Button onClick={() => void addItem()} disabled={creating}>
+                  <Button onClick={() => void addItem()} disabled={creating || uploadingImage}>
                     {creating ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -614,7 +691,10 @@ function AdminRewardsPage() {
                     )}
                     Create reward
                   </Button>
-                  <Button onClick={() => void saveItem()} disabled={saving || !selectedItem}>
+                  <Button
+                    onClick={() => void saveItem()}
+                    disabled={saving || !selectedItem || uploadingImage}
+                  >
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Save changes
                   </Button>

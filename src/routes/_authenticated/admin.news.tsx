@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/integrations/local/client";
+import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { formatDateLabel } from "@/lib/date-utils";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { hasNewsImage, type NewsPostRecord } from "@/lib/portal-news-data";
@@ -212,17 +212,14 @@ function AdminNewsPage() {
   const uploadImage = async (file: File) => {
     setUploadingImage(true);
     try {
-      const extension = file.name.split(".").pop() ?? "jpg";
-      const path = `news/${globalThis.crypto.randomUUID()}-${Date.now()}.${extension}`;
-      const { data, error } = await supabase.storage.from("news-media").upload(path, file, {
-        upsert: false,
-        contentType: file.type,
+      const result = await uploadRewardImage({
+        file,
+        folder: "news",
       });
-      if (error || !data) {
-        throw error ?? new Error("Image upload failed");
+      if (result.error || !result.data) {
+        throw new Error(result.error?.message ?? "Image upload failed");
       }
-      
-      setDraft((current) => ({ ...current, image_path: data.signedUrl }));
+      setDraft((current) => ({ ...current, image_path: result.data.secure_url }));
       toast.success("Image uploaded successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Image upload failed");
@@ -360,7 +357,9 @@ function AdminNewsPage() {
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{post.posted_by_name}</span>
                         <span>•</span>
-                        <span>{hasNewsImage(post.image_path) ? "Image attached" : "No image attached"}</span>
+                        <span>
+                          {hasNewsImage(post.image_path) ? "Image attached" : "No image attached"}
+                        </span>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button size="sm" variant="outline" onClick={() => setSelectedId(post.id)}>
@@ -412,7 +411,9 @@ function AdminNewsPage() {
                           <div className="text-xs uppercase tracking-widest text-muted-foreground">
                             Text-only preview
                           </div>
-                          <div className="text-lg font-semibold">{draft.title || "Untitled post"}</div>
+                          <div className="text-lg font-semibold">
+                            {draft.title || "Untitled post"}
+                          </div>
                           <div className="whitespace-pre-line text-sm text-muted-foreground">
                             {draft.caption || "This post will render without an image."}
                           </div>
@@ -427,20 +428,39 @@ function AdminNewsPage() {
                     <Field label="Title">
                       <Input
                         value={draft.title}
-                        onChange={(e) => setDraft((current) => ({ ...current, title: e.target.value }))}
+                        onChange={(e) =>
+                          setDraft((current) => ({ ...current, title: e.target.value }))
+                        }
                       />
                     </Field>
-                    <Field label="Image path">
+                    <Field label="Image">
                       <div className="space-y-2">
-                        <Input
-                          value={draft.image_path}
-                          onChange={(e) =>
-                            setDraft((current) => ({ ...current, image_path: e.target.value }))
-                          }
-                          placeholder="Paste a Cloudinary URL or upload below"
-                        />
-                        <div className="inline-flex">
+                        <div className="overflow-hidden rounded-xl border bg-muted/20">
+                          {draft.image_path.trim() ? (
+                            <img
+                              src={draft.image_path}
+                              alt={draft.image_alt || draft.title || "LIVEY update"}
+                              className="h-48 w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-48 flex-col justify-between p-4">
+                              <div>
+                                <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                                  No image uploaded
+                                </div>
+                                <div className="mt-2 max-w-sm text-sm font-medium">
+                                  Upload an image to display it in the post preview.
+                                </div>
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                PNG, JPG, or WEBP recommended
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="inline-flex items-center gap-2">
                           <input
+                            id="news_image"
                             type="file"
                             className="hidden"
                             accept="image/*"
@@ -451,10 +471,10 @@ function AdminNewsPage() {
                               e.currentTarget.value = "";
                             }}
                           />
-                          <Button 
-                            type="button" 
-                            variant="secondary" 
-                            size="sm" 
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
                             disabled={uploadingImage}
                             onClick={() => editFileInputRef.current?.click()}
                           >
@@ -463,8 +483,11 @@ function AdminNewsPage() {
                             ) : (
                               <Upload className="mr-2 h-4 w-4" />
                             )}
-                            Upload image
+                            {draft.image_path.trim() ? "Replace image" : "Upload image"}
                           </Button>
+                          <span className="text-xs text-muted-foreground">
+                            Uploads go straight to Cloudinary and save into this field.
+                          </span>
                         </div>
                       </div>
                     </Field>
@@ -494,7 +517,7 @@ function AdminNewsPage() {
                       />
                     </Field>
                   </div>
-                  <Button onClick={() => void savePost()} disabled={saving}>
+                  <Button onClick={() => void savePost()} disabled={saving || uploadingImage}>
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Save changes
                   </Button>
@@ -523,17 +546,34 @@ function AdminNewsPage() {
                     placeholder="Upgrade your video presence instantly"
                   />
                 </Field>
-                <Field label="Image path">
+                <Field label="Image">
                   <div className="space-y-2">
-                    <Input
-                      value={draft.image_path}
-                      onChange={(e) =>
-                        setDraft((current) => ({ ...current, image_path: e.target.value }))
-                      }
-                      placeholder="Paste a Cloudinary URL or upload below"
-                    />
-                    <div className="inline-flex">
+                    <div className="overflow-hidden rounded-xl border bg-muted/20">
+                      {draft.image_path.trim() ? (
+                        <img
+                          src={draft.image_path}
+                          alt={draft.image_alt || draft.title || "LIVEY update"}
+                          className="h-48 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-48 flex-col justify-between p-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                              No image uploaded
+                            </div>
+                            <div className="mt-2 max-w-sm text-sm font-medium">
+                              Upload an image to display it in the post preview.
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            PNG, JPG, or WEBP recommended
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="inline-flex items-center gap-2">
                       <input
+                        id="news_image_create"
                         type="file"
                         className="hidden"
                         accept="image/*"
@@ -544,10 +584,10 @@ function AdminNewsPage() {
                           e.currentTarget.value = "";
                         }}
                       />
-                      <Button 
-                        type="button" 
-                        variant="secondary" 
-                        size="sm" 
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
                         disabled={uploadingImage}
                         onClick={() => createFileInputRef.current?.click()}
                       >
@@ -556,8 +596,11 @@ function AdminNewsPage() {
                         ) : (
                           <Upload className="mr-2 h-4 w-4" />
                         )}
-                        Upload image
+                        {draft.image_path.trim() ? "Replace image" : "Upload image"}
                       </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Uploads go straight to Cloudinary and save into this field.
+                      </span>
                     </div>
                   </div>
                 </Field>
@@ -590,7 +633,7 @@ function AdminNewsPage() {
                   />
                 </Field>
               </div>
-              <Button onClick={() => void createPost()} disabled={creating}>
+              <Button onClick={() => void createPost()} disabled={creating || uploadingImage}>
                 {creating ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (

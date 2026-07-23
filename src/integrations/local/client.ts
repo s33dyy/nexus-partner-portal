@@ -13,7 +13,12 @@ type RpcResult<T> = {
   error: { message: string } | null;
 };
 
-type AuthChangeEvent = "INITIAL_SESSION" | "SIGNED_IN" | "SIGNED_OUT" | "TOKEN_REFRESHED" | "USER_UPDATED";
+type AuthChangeEvent =
+  | "INITIAL_SESSION"
+  | "SIGNED_IN"
+  | "SIGNED_OUT"
+  | "TOKEN_REFRESHED"
+  | "USER_UPDATED";
 
 type AuthStateChangeListener = (event: AuthChangeEvent, session: LocalSession | null) => void;
 
@@ -142,6 +147,27 @@ const uploadDocument = createServerFn({ method: "POST" })
     });
   });
 
+const uploadCloudinaryImage = createServerFn({ method: "POST" })
+  .validator((input: FormData) => input)
+  .handler(async ({ data }) => {
+    const { uploadToCloudinary } = await import("@/server/cloudinary.server");
+
+    const file = data.get("file");
+    if (!(file instanceof File)) {
+      throw new Error("Missing file");
+    }
+
+    const folder = String(data.get("folder") ?? "rewards");
+    const publicId = String(data.get("publicId") ?? `${folder}/${crypto.randomUUID()}`);
+
+    return uploadToCloudinary({
+      file,
+      folder,
+      publicId,
+      resourceType: "image",
+    });
+  });
+
 const createSignedUrl = createServerFn({ method: "POST" })
   .validator((input: { bucket: string; path: string; expiresIn: number }) => input)
   .handler(async ({ data }) => {
@@ -163,6 +189,24 @@ export async function completePasswordReset(token: string, password: string) {
 
 export async function requestPasswordReset(email: string, redirectTo?: string) {
   return requestReset({ data: { email, redirectTo } });
+}
+
+export async function uploadRewardImage(input: { file: File; folder?: string; publicId?: string }) {
+  try {
+    const form = new FormData();
+    const folder = input.folder ?? "rewards";
+    form.append("file", input.file);
+    form.append("folder", folder);
+    form.append("publicId", input.publicId ?? `${folder}/${crypto.randomUUID()}`);
+
+    const data = await uploadCloudinaryImage({ data: form });
+    return { data, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: { message: error instanceof Error ? error.message : String(error) },
+    };
+  }
 }
 
 class QueryBuilder {
@@ -246,7 +290,7 @@ class QueryBuilder {
 
 function createStorageBucket(bucket: string) {
   return {
-  async upload(
+    async upload(
       filePath: string,
       file: File,
       options?: { upsert?: boolean; contentType?: string },
@@ -268,7 +312,10 @@ function createStorageBucket(bucket: string) {
         };
       }
     },
-    async createSignedUrl(path: string, expiresIn: number): Promise<RpcResult<{ signedUrl: string }>> {
+    async createSignedUrl(
+      path: string,
+      expiresIn: number,
+    ): Promise<RpcResult<{ signedUrl: string }>> {
       try {
         const data = await createSignedUrl({ data: { bucket, path, expiresIn } });
         return { data, error: null };
@@ -296,9 +343,9 @@ function createStorageBucket(bucket: string) {
 type AuthApi = {
   getSession: () => Promise<{ data: { session: LocalSession | null } }>;
   getUser: () => Promise<{ data: { user: LocalUser | null } }>;
-  onAuthStateChange: (
-    callback: AuthStateChangeListener,
-  ) => { data: { subscription: { unsubscribe: () => void } } };
+  onAuthStateChange: (callback: AuthStateChangeListener) => {
+    data: { subscription: { unsubscribe: () => void } };
+  };
   signInWithPassword: (input: {
     email: string;
     password: string;
@@ -330,15 +377,17 @@ type AuthApi = {
     role: AppRole;
     partner_status?: PartnerStatus;
     partner_id?: string;
-  }) => Promise<RpcResult<{
-    id: string;
-    email: string;
-    full_name: string;
-    phone: string | null;
-    company_name: string | null;
-    role: AppRole;
-    partner_status: PartnerStatus;
-  }>>;
+  }) => Promise<
+    RpcResult<{
+      id: string;
+      email: string;
+      full_name: string;
+      phone: string | null;
+      company_name: string | null;
+      role: AppRole;
+      partner_status: PartnerStatus;
+    }>
+  >;
 };
 
 const auth: AuthApi = {
