@@ -76,7 +76,8 @@ async function loadTableCount(
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return typeof data === "number" ? data : 0;
+  const count = Number(data ?? 0);
+  return Number.isFinite(count) ? count : 0;
 }
 
 export function resolveScopeFilters(

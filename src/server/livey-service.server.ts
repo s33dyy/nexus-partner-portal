@@ -538,12 +538,11 @@ export async function queryTable(query: TableQuery) {
   if (query.operation === "count") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
-      `SELECT count(*)::int AS count FROM ${quoteIdent(query.table)}${whereSql}`,
+      `SELECT count(*) AS count FROM ${quoteIdent(query.table)}${whereSql}`,
       whereParams,
     );
-    const count = Number(result.rows[0]?.count ?? 0);
     return {
-      data: Number.isFinite(count) ? count : 0,
+      data: result.rows[0]?.count ?? 0,
       error: null,
     };
   }
