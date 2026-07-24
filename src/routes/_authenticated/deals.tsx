@@ -176,8 +176,6 @@ function DealsPage() {
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
-  const canEditSelectedDeal =
-    hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -344,6 +342,8 @@ function DealsPage() {
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
   );
+  const canEditSelectedDeal =
+    hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
 
   useEffect(() => {
     if (!selectedDeal) {
