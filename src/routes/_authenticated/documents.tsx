@@ -68,6 +68,7 @@ function DocumentsPage() {
   const [saving, setSaving] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
 
@@ -150,6 +151,7 @@ function DocumentsPage() {
     if (!selectedDoc) {
       setPreviewUrl(null);
       setPreviewName("");
+      setPreviewLoading(false);
       setDraft({ file_name: "", doc_type: "" });
       return;
     }
@@ -161,6 +163,9 @@ function DocumentsPage() {
   }, [selectedDoc]);
 
   const openPreview = async (doc: DocRow) => {
+    setPreviewUrl(null);
+    setPreviewName(doc.file_name);
+    setPreviewLoading(true);
     try {
       const { data, error } = await supabase.storage
         .from("partner-documents")
@@ -171,6 +176,8 @@ function DocumentsPage() {
       setSelectedId(doc.id);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to open preview");
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -188,6 +195,7 @@ function DocumentsPage() {
       if (selectedId === doc.id) {
         setSelectedId(null);
         setPreviewUrl(null);
+        setPreviewLoading(false);
         setEditOpen(false);
       }
       await load();
@@ -282,7 +290,7 @@ function DocumentsPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
+      <div>
         <Card>
           <CardHeader className="space-y-4 border-b">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -359,38 +367,6 @@ function DocumentsPage() {
             )}
           </CardContent>
         </Card>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Preview</CardTitle>
-              <CardDescription>
-                {previewName || "Pick a document to preview it in-browser."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {previewUrl ? (
-                <div className="space-y-3">
-                  <iframe
-                    title={previewName}
-                    src={previewUrl}
-                    className="h-80 w-full rounded-lg border bg-background"
-                  />
-                  <Button asChild variant="outline">
-                    <a href={previewUrl} target="_blank" rel="noreferrer">
-                      <ExternalLink className="mr-2 h-4 w-4" />
-                      Open in new tab
-                    </a>
-                  </Button>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  Select a document to see the preview here.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -451,6 +427,33 @@ function DocumentsPage() {
                     options={docTypeOptions}
                   />
                 </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-medium">Preview</div>
+                {previewLoading ? (
+                  <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading preview...
+                  </div>
+                ) : previewUrl ? (
+                  <>
+                    <iframe
+                      title={previewName || selectedDoc.file_name}
+                      src={previewUrl}
+                      className="h-80 w-full rounded-lg border bg-background"
+                    />
+                    <Button asChild variant="outline">
+                      <a href={previewUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Open in new tab
+                      </a>
+                    </Button>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    Preview unavailable for this document.
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button
