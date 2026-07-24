@@ -8,6 +8,13 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,6 +64,7 @@ function AdminNewsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [draft, setDraft] = useState<NewsForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -183,6 +191,7 @@ function AdminNewsPage() {
         .eq("id", selectedPost.id);
       if (error) throw error;
       toast.success("News post updated");
+      setEditOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update news post");
@@ -200,6 +209,7 @@ function AdminNewsPage() {
       if (selectedId === post.id) {
         setSelectedId(null);
         setDraft(EMPTY_FORM);
+        setEditOpen(false);
       }
       await load();
     } catch (error) {
@@ -362,7 +372,14 @@ function AdminNewsPage() {
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setSelectedId(post.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedId(post.id);
+                            setEditOpen(true);
+                          }}
+                        >
                           Edit
                         </Button>
                         <Button
@@ -392,17 +409,17 @@ function AdminNewsPage() {
             <CardHeader className="border-b">
               <CardTitle className="text-base">Edit post</CardTitle>
               <CardDescription>
-                {selectedPost ? `Editing ${selectedPost.title}` : "Select a post to edit."}
+                {selectedPost ? `Selected ${selectedPost.title}` : "Select a post to edit."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
               {selectedPost ? (
                 <>
                   <div className="overflow-hidden rounded-xl border">
-                    {hasNewsImage(draft.image_path) ? (
+                    {hasNewsImage(selectedPost.image_path) ? (
                       <img
-                        src={draft.image_path}
-                        alt={draft.image_alt || draft.title || "LIVEY update"}
+                        src={selectedPost.image_path ?? ""}
+                        alt={selectedPost.image_alt || selectedPost.title || "LIVEY update"}
                         className="h-56 w-full object-cover"
                       />
                     ) : (
@@ -412,114 +429,35 @@ function AdminNewsPage() {
                             Text-only preview
                           </div>
                           <div className="text-lg font-semibold">
-                            {draft.title || "Untitled post"}
+                            {selectedPost.title || "Untitled post"}
                           </div>
                           <div className="whitespace-pre-line text-sm text-muted-foreground">
-                            {draft.caption || "This post will render without an image."}
+                            {selectedPost.caption || "This post will render without an image."}
                           </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {draft.posted_by_name || "LIVEY Admin"}
+                          {selectedPost.posted_by_name || "LIVEY Admin"}
                         </div>
                       </div>
                     )}
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Title">
-                      <Input
-                        value={draft.title}
-                        onChange={(e) =>
-                          setDraft((current) => ({ ...current, title: e.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Image">
-                      <div className="space-y-2">
-                        <div className="overflow-hidden rounded-xl border bg-muted/20">
-                          {draft.image_path.trim() ? (
-                            <img
-                              src={draft.image_path}
-                              alt={draft.image_alt || draft.title || "LIVEY update"}
-                              className="h-48 w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-48 flex-col justify-between p-4">
-                              <div>
-                                <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                                  No image uploaded
-                                </div>
-                                <div className="mt-2 max-w-sm text-sm font-medium">
-                                  Upload an image to display it in the post preview.
-                                </div>
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                PNG, JPG, or WEBP recommended
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="inline-flex items-center gap-2">
-                          <input
-                            id="news_image"
-                            type="file"
-                            className="hidden"
-                            accept="image/*"
-                            ref={editFileInputRef}
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) void uploadImage(file);
-                              e.currentTarget.value = "";
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={uploadingImage}
-                            onClick={() => editFileInputRef.current?.click()}
-                          >
-                            {uploadingImage ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            {draft.image_path.trim() ? "Replace image" : "Upload image"}
-                          </Button>
-                          <span className="text-xs text-muted-foreground">
-                            Uploads go straight to Cloudinary and save into this field.
-                          </span>
-                        </div>
-                      </div>
-                    </Field>
-                    <Field label="Caption" className="md:col-span-2">
-                      <Textarea
-                        value={draft.caption}
-                        onChange={(e) =>
-                          setDraft((current) => ({ ...current, caption: e.target.value }))
-                        }
-                        rows={8}
-                      />
-                    </Field>
-                    <Field label="Alt text">
-                      <Input
-                        value={draft.image_alt}
-                        onChange={(e) =>
-                          setDraft((current) => ({ ...current, image_alt: e.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Posted by">
-                      <Input
-                        value={draft.posted_by_name}
-                        onChange={(e) =>
-                          setDraft((current) => ({ ...current, posted_by_name: e.target.value }))
-                        }
-                      />
-                    </Field>
+                    <SummaryRow label="Posted by" value={selectedPost.posted_by_name} />
+                    <SummaryRow label="Role" value={selectedPost.posted_by_role} />
+                    <SummaryRow
+                      label="Image"
+                      value={hasNewsImage(selectedPost.image_path) ? "Attached" : "None"}
+                    />
+                    <SummaryRow label="Updated" value={formatDateLabel(selectedPost.updated_at)} />
                   </div>
-                  <Button onClick={() => void savePost()} disabled={saving || uploadingImage}>
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Save changes
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                    <div className="font-medium text-foreground">Caption</div>
+                    <div className="mt-1 whitespace-pre-line">
+                      {selectedPost.caption || "No caption set."}
+                    </div>
+                  </div>
+                  <Button type="button" onClick={() => setEditOpen(true)}>
+                    Edit selected post
                   </Button>
                 </>
               ) : (
@@ -645,6 +583,143 @@ function AdminNewsPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{selectedPost ? `Edit ${selectedPost.title}` : "Edit post"}</DialogTitle>
+            <DialogDescription>
+              Update the selected post without keeping the full editor on the page.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedPost ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Title">
+                  <Input
+                    value={draft.title}
+                    onChange={(e) => setDraft((current) => ({ ...current, title: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Image">
+                  <div className="space-y-2">
+                    <div className="overflow-hidden rounded-xl border bg-muted/20">
+                      {draft.image_path.trim() ? (
+                        <img
+                          src={draft.image_path}
+                          alt={draft.image_alt || draft.title || "LIVEY update"}
+                          className="h-48 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-48 flex-col justify-between p-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                              No image uploaded
+                            </div>
+                            <div className="mt-2 max-w-sm text-sm font-medium">
+                              Upload an image to display it in the post preview.
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            PNG, JPG, or WEBP recommended
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="inline-flex items-center gap-2">
+                      <input
+                        id="news_image_modal"
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        ref={editFileInputRef}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void uploadImage(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={uploadingImage}
+                        onClick={() => editFileInputRef.current?.click()}
+                      >
+                        {uploadingImage ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {draft.image_path.trim() ? "Replace image" : "Upload image"}
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Uploads go straight to Cloudinary and save into this field.
+                      </span>
+                    </div>
+                  </div>
+                </Field>
+                <Field label="Caption" className="md:col-span-2">
+                  <Textarea
+                    rows={8}
+                    value={draft.caption}
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, caption: e.target.value }))
+                    }
+                    placeholder="Write the caption that partners will see."
+                  />
+                </Field>
+                <Field label="Alt text">
+                  <Input
+                    value={draft.image_alt}
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, image_alt: e.target.value }))
+                    }
+                    placeholder="LIVEY webcam promotion"
+                  />
+                </Field>
+                <Field label="Posted by">
+                  <Input
+                    value={draft.posted_by_name}
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, posted_by_name: e.target.value }))
+                    }
+                    placeholder="LIVEY Admin"
+                  />
+                </Field>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    selectedPost &&
+                    setDraft({
+                      title: selectedPost.title,
+                      caption: selectedPost.caption,
+                      image_path: selectedPost.image_path ?? "",
+                      image_alt: selectedPost.image_alt ?? "",
+                      posted_by_name: selectedPost.posted_by_name,
+                      posted_by_role: selectedPost.posted_by_role,
+                    })
+                  }
+                >
+                  Reset form
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void savePost()}
+                  disabled={saving || uploadingImage}
+                >
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save changes
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -662,6 +737,15 @@ function Field({
     <div className={`space-y-2 ${className ?? ""}`}>
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-medium">{value}</div>
     </div>
   );
 }

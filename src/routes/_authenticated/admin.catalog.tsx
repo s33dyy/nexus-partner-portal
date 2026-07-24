@@ -8,6 +8,13 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,6 +79,7 @@ function AdminCatalogPage() {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CatalogForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -178,6 +186,7 @@ function AdminCatalogPage() {
         .eq("id", selectedItem.id);
       if (error) throw error;
       toast.success("Catalog item updated");
+      setEditOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save item");
@@ -358,7 +367,7 @@ function AdminCatalogPage() {
               <CardTitle className="text-base">Edit item</CardTitle>
               <CardDescription>
                 {selectedItem
-                  ? `Editing ${selectedItem.product_name}`
+                  ? `Selected ${selectedItem.product_name}`
                   : "Select a catalog item to edit."}
               </CardDescription>
             </CardHeader>
@@ -366,111 +375,23 @@ function AdminCatalogPage() {
               {selectedItem ? (
                 <>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="SKU">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogSku}
-                        label="SKU"
-                        value={draft.sku}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, sku: value }))
-                        }
-                        placeholder="Select or create SKU"
-                        options={editOptions.skus}
-                      />
-                    </Field>
-                    <Field label="Product name">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogProduct}
-                        label="Product name"
-                        value={draft.product_name}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, product_name: value }))
-                        }
-                        placeholder="Select or create product"
-                        options={editOptions.productNames}
-                      />
-                    </Field>
-                    <Field label="Category">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogCategory}
-                        label="Category"
-                        value={draft.category}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, category: value }))
-                        }
-                        placeholder="Select or create category"
-                        options={editOptions.categories}
-                      />
-                    </Field>
-                    <Field label="Tier">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogTier}
-                        label="Tier"
-                        value={draft.partner_tier}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, partner_tier: value }))
-                        }
-                        placeholder="Select or create tier"
-                        options={editOptions.tiers}
-                      />
-                    </Field>
-                    <Field label="List price">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogPrice}
-                        label="List price"
-                        value={draft.list_price}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, list_price: value }))
-                        }
-                        placeholder="Select or create price"
-                        options={editOptions.prices}
-                      />
-                    </Field>
-                    <Field label="Margin">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogMargin}
-                        label="Margin"
-                        value={draft.margin}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, margin: value }))
-                        }
-                        placeholder="Select or create margin"
-                        options={editOptions.margins}
-                      />
-                    </Field>
-                    <Field label="Stock">
-                      <Input
-                        type="number"
-                        value={draft.stock}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, stock: Number(e.target.value) || 0 }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Availability">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.catalogAvailability}
-                        label="Availability"
-                        value={draft.availability}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, availability: value }))
-                        }
-                        placeholder="Select or create availability"
-                        options={editOptions.availability}
-                      />
-                    </Field>
+                    <Meta label="SKU" value={selectedItem.sku} />
+                    <Meta label="Product name" value={selectedItem.product_name} />
+                    <Meta label="Category" value={selectedItem.category} />
+                    <Meta label="Tier" value={selectedItem.partner_tier} />
+                    <Meta label="List price" value={selectedItem.list_price} />
+                    <Meta label="Margin" value={selectedItem.margin} />
+                    <Meta label="Stock" value={String(selectedItem.stock)} />
+                    <Meta label="Availability" value={selectedItem.availability} />
                   </div>
-                  <Field label="Benefits">
-                    <Textarea
-                      value={draft.benefits}
-                      onChange={(e) =>
-                        setDraft((value) => ({ ...value, benefits: e.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Button onClick={() => void saveItem()} disabled={saving}>
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Save changes
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                    <div className="font-medium text-foreground">Benefits</div>
+                    <div className="mt-1 whitespace-pre-line">
+                      {selectedItem.benefits || "No benefits added."}
+                    </div>
+                  </div>
+                  <Button type="button" onClick={() => setEditOpen(true)}>
+                    Edit selected item
                   </Button>
                 </>
               ) : (
@@ -576,6 +497,149 @@ function AdminCatalogPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedItem ? `Edit ${selectedItem.product_name}` : "Edit catalog item"}
+            </DialogTitle>
+            <DialogDescription>
+              Update the selected item without keeping the full form in the page layout.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedItem ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="SKU">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogSku}
+                    label="SKU"
+                    value={draft.sku}
+                    onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
+                    placeholder="Select or create SKU"
+                    options={editOptions.skus}
+                  />
+                </Field>
+                <Field label="Product name">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogProduct}
+                    label="Product name"
+                    value={draft.product_name}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, product_name: value }))
+                    }
+                    placeholder="Select or create product"
+                    options={editOptions.productNames}
+                  />
+                </Field>
+                <Field label="Category">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogCategory}
+                    label="Category"
+                    value={draft.category}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, category: value }))
+                    }
+                    placeholder="Select or create category"
+                    options={editOptions.categories}
+                  />
+                </Field>
+                <Field label="Tier">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogTier}
+                    label="Tier"
+                    value={draft.partner_tier}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, partner_tier: value }))
+                    }
+                    placeholder="Select or create tier"
+                    options={editOptions.tiers}
+                  />
+                </Field>
+                <Field label="List price">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogPrice}
+                    label="List price"
+                    value={draft.list_price}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, list_price: value }))
+                    }
+                    placeholder="Select or create price"
+                    options={editOptions.prices}
+                  />
+                </Field>
+                <Field label="Margin">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogMargin}
+                    label="Margin"
+                    value={draft.margin}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, margin: value }))
+                    }
+                    placeholder="Select or create margin"
+                    options={editOptions.margins}
+                  />
+                </Field>
+                <Field label="Stock">
+                  <Input
+                    type="number"
+                    value={draft.stock}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, stock: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </Field>
+                <Field label="Availability">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.catalogAvailability}
+                    label="Availability"
+                    value={draft.availability}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, availability: value }))
+                    }
+                    placeholder="Select or create availability"
+                    options={editOptions.availability}
+                  />
+                </Field>
+              </div>
+              <Field label="Benefits">
+                <Textarea
+                  value={draft.benefits}
+                  onChange={(e) => setDraft((value) => ({ ...value, benefits: e.target.value }))}
+                />
+              </Field>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    selectedItem &&
+                    setDraft({
+                      sku: selectedItem.sku,
+                      product_name: selectedItem.product_name,
+                      category: selectedItem.category,
+                      partner_tier: selectedItem.partner_tier,
+                      list_price: selectedItem.list_price,
+                      margin: selectedItem.margin,
+                      stock: selectedItem.stock,
+                      availability: selectedItem.availability,
+                      benefits: selectedItem.benefits,
+                    })
+                  }
+                >
+                  Reset form
+                </Button>
+                <Button type="button" onClick={() => void saveItem()} disabled={saving}>
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save changes
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -597,6 +661,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-medium">{value}</div>
     </div>
   );
 }

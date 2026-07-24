@@ -7,6 +7,13 @@ import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,6 +93,7 @@ function CustomersPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,7 +102,10 @@ function CustomersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      let query = supabase.from("portal_customers").select("*").order("updated_at", { ascending: false });
+      let query = supabase
+        .from("portal_customers")
+        .select("*")
+        .order("updated_at", { ascending: false });
 
       query = applyPartnerScope(query, {
         isSuperAdmin: hasRole("super_admin"),
@@ -221,6 +232,7 @@ function CustomersPage() {
         .eq("id", selectedCustomer.id);
       if (error) throw error;
       toast.success("Customer updated");
+      setEditOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save customer");
@@ -389,134 +401,36 @@ function CustomersPage() {
               <CardTitle className="text-base">Account details</CardTitle>
               <CardDescription>
                 {selectedCustomer
-                  ? `Editing ${selectedCustomer.company_name}`
+                  ? `Selected ${selectedCustomer.company_name}`
                   : "Select a customer to edit."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {selectedCustomer ? (
                 <>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Company">
-                    <Input
-                      value={draft.company_name}
-                      onChange={(e) =>
-                        setDraft((current) => ({ ...current, company_name: e.target.value }))
-                      }
-                      placeholder="Acme Infra"
-                    />
-                  </Field>
-                    <Field label="Owner">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerOwner}
-                        label="Owner"
-                        value={draft.account_owner}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, account_owner: value }))
-                        }
-                        placeholder="Select or create owner"
-                        options={editOptions.owners}
-                      />
-                    </Field>
-                    <Field label="Region">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerRegion}
-                        label="Region"
-                        value={draft.region}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, region: value }))
-                        }
-                        placeholder="Select or create region"
-                        options={editOptions.regions}
-                      />
-                    </Field>
-                    <Field label="Segment">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerSegment}
-                        label="Segment"
-                        value={draft.segment}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, segment: value }))
-                        }
-                        placeholder="Select or create segment"
-                        options={editOptions.segments}
-                      />
-                    </Field>
-                    <Field label="Health score">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={draft.health_score}
-                        onChange={(e) =>
-                          setDraft((valueState) => ({
-                            ...valueState,
-                            health_score: Number(e.target.value) || 0,
-                          }))
-                        }
-                      />
-                    </Field>
-                    <Field label="MRR">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerMrr}
-                        label="MRR"
-                        value={draft.mrr}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, mrr: value }))
-                        }
-                        placeholder="Select or create MRR"
-                        options={editOptions.mrrs}
-                      />
-                    </Field>
-                    <Field label="Renewal date">
-                      <Input
-                        type="date"
-                        value={draft.renewal_date}
-                        onChange={(e) =>
-                          setDraft((value) => ({ ...value, renewal_date: e.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Status">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.customerStatus}
-                        label="Status"
-                        value={draft.status}
-                        onValueChange={(value) =>
-                          setDraft((current) => ({ ...current, status: value }))
-                        }
-                        placeholder="Select or create status"
-                        options={editOptions.statuses}
-                      />
-                    </Field>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Meta label="Company" value={selectedCustomer.company_name} />
+                    <Meta label="Owner" value={selectedCustomer.account_owner} />
+                    <Meta label="Region" value={selectedCustomer.region} />
+                    <Meta label="Segment" value={selectedCustomer.segment} />
+                    <Meta label="Health score" value={`${selectedCustomer.health_score}%`} />
+                    <Meta label="MRR" value={selectedCustomer.mrr} />
+                    <Meta label="Renewal date" value={selectedCustomer.renewal_date} />
+                    <Meta label="Status" value={selectedCustomer.status} />
                   </div>
-                  <Field label="Next step">
-                    <Textarea
-                      value={draft.next_step}
-                      onChange={(e) =>
-                        setDraft((value) => ({ ...value, next_step: e.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label="Last touch">
-                    <LookupCombobox
-                      fieldName={LOOKUP_FIELDS.customerLastTouch}
-                      label="Last touch"
-                      value={draft.last_touch}
-                      onValueChange={(value) =>
-                        setDraft((current) => ({ ...current, last_touch: value }))
-                      }
-                      placeholder="Select or create last touch"
-                      options={LAST_TOUCH_OPTIONS as unknown as string[]}
-                    />
-                  </Field>
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                    <div className="font-medium text-foreground">Next step</div>
+                    <div className="mt-1 whitespace-pre-line">
+                      {selectedCustomer.next_step || "No next step set."}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                    <div className="font-medium text-foreground">Last touch</div>
+                    <div className="mt-1">{selectedCustomer.last_touch}</div>
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => void saveCustomer()} disabled={saving}>
-                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save changes
-                    </Button>
-                    <Button variant="outline" onClick={() => setDraft(EMPTY_FORM)}>
-                      Reset form
+                    <Button type="button" onClick={() => setEditOpen(true)}>
+                      Edit account
                     </Button>
                   </div>
                 </>
@@ -653,6 +567,161 @@ function CustomersPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedCustomer ? `Edit ${selectedCustomer.company_name}` : "Edit customer"}
+            </DialogTitle>
+            <DialogDescription>
+              Update the selected account without expanding the page height.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedCustomer ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Company">
+                  <Input
+                    value={draft.company_name}
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, company_name: e.target.value }))
+                    }
+                    placeholder="Acme Infra"
+                  />
+                </Field>
+                <Field label="Owner">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerOwner}
+                    label="Owner"
+                    value={draft.account_owner}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, account_owner: value }))
+                    }
+                    placeholder="Select or create owner"
+                    options={editOptions.owners}
+                  />
+                </Field>
+                <Field label="Region">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerRegion}
+                    label="Region"
+                    value={draft.region}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, region: value }))
+                    }
+                    placeholder="Select or create region"
+                    options={editOptions.regions}
+                  />
+                </Field>
+                <Field label="Segment">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerSegment}
+                    label="Segment"
+                    value={draft.segment}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, segment: value }))
+                    }
+                    placeholder="Select or create segment"
+                    options={editOptions.segments}
+                  />
+                </Field>
+                <Field label="Health score">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={draft.health_score}
+                    onChange={(e) =>
+                      setDraft((valueState) => ({
+                        ...valueState,
+                        health_score: Number(e.target.value) || 0,
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="MRR">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerMrr}
+                    label="MRR"
+                    value={draft.mrr}
+                    onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
+                    placeholder="Select or create MRR"
+                    options={editOptions.mrrs}
+                  />
+                </Field>
+                <Field label="Renewal date">
+                  <Input
+                    type="date"
+                    value={draft.renewal_date}
+                    onChange={(e) =>
+                      setDraft((value) => ({ ...value, renewal_date: e.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="Status">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.customerStatus}
+                    label="Status"
+                    value={draft.status}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, status: value }))
+                    }
+                    placeholder="Select or create status"
+                    options={editOptions.statuses}
+                  />
+                </Field>
+              </div>
+              <Field label="Next step">
+                <Textarea
+                  value={draft.next_step}
+                  onChange={(e) => setDraft((value) => ({ ...value, next_step: e.target.value }))}
+                />
+              </Field>
+              <Field label="Last touch">
+                <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.customerLastTouch}
+                  label="Last touch"
+                  value={draft.last_touch}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, last_touch: value }))
+                  }
+                  placeholder="Select or create last touch"
+                  options={LAST_TOUCH_OPTIONS as unknown as string[]}
+                />
+              </Field>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    selectedCustomer &&
+                    setDraft({
+                      company_name: selectedCustomer.company_name,
+                      account_owner: selectedCustomer.account_owner,
+                      region: selectedCustomer.region,
+                      segment: selectedCustomer.segment,
+                      health_score: selectedCustomer.health_score,
+                      mrr: selectedCustomer.mrr,
+                      renewal_date: toDateInputValue(selectedCustomer.renewal_date),
+                      status: selectedCustomer.status,
+                      next_step: selectedCustomer.next_step,
+                      last_touch: selectedCustomer.last_touch,
+                    })
+                  }
+                >
+                  Reset form
+                </Button>
+                <Button type="button" onClick={() => void saveCustomer()} disabled={saving}>
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save changes
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -666,6 +735,15 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-medium">{value}</div>
+    </div>
   );
 }
 

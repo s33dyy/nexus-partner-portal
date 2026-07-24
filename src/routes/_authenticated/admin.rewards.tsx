@@ -18,6 +18,13 @@ import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -92,6 +99,7 @@ function AdminRewardsPage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<RewardForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -187,6 +195,7 @@ function AdminRewardsPage() {
         .eq("id", selectedItem.id);
       if (error) throw error;
       toast.success("Reward updated");
+      setEditOpen(false);
       await recordAuditEvent(supabase, {
         actorName: profile?.full_name ?? "LIVEY Admin",
         actorRole: "super_admin",
@@ -252,6 +261,9 @@ function AdminRewardsPage() {
       const { error } = await supabase.from("reward_catalog_items").delete().eq("id", item.id);
       if (error) throw error;
       toast.success("Reward deleted");
+      if (selectedId === item.id) {
+        setEditOpen(false);
+      }
       await recordAuditEvent(supabase, {
         actorName: profile?.full_name ?? "LIVEY Admin",
         actorRole: "super_admin",
@@ -525,15 +537,27 @@ function AdminRewardsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium">
-                      {selectedItem ? "Edit reward" : "Create reward"}
+                      {selectedItem ? "Selected reward" : "Create reward"}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       Manage product images, costs, and catalog grouping.
                     </div>
                   </div>
-                  {selectedItem && (
-                    <Badge variant="secondary">{selectedItem.points_cost} pts</Badge>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {selectedItem && (
+                      <Badge variant="secondary">{selectedItem.points_cost} pts</Badge>
+                    )}
+                    {selectedItem ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditOpen(true)}
+                      >
+                        Edit selected
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="mt-5 grid gap-4">
@@ -692,13 +716,6 @@ function AdminRewardsPage() {
                     Create reward
                   </Button>
                   <Button
-                    onClick={() => void saveItem()}
-                    disabled={saving || !selectedItem || uploadingImage}
-                  >
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Save changes
-                  </Button>
-                  <Button
                     variant="destructive"
                     onClick={() => selectedItem && void deleteItem(selectedItem)}
                     disabled={deletingId === selectedItem?.id || !selectedItem}
@@ -715,6 +732,185 @@ function AdminRewardsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>
+                {selectedItem ? `Edit ${selectedItem.title}` : "Edit reward"}
+              </DialogTitle>
+              <DialogDescription>
+                Update the selected reward without keeping the editor inline on the page.
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedItem ? (
+              <>
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="reward_title_modal">Title</Label>
+                    <Input
+                      id="reward_title_modal"
+                      value={draft.title}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, title: event.target.value }))
+                      }
+                      placeholder="LIVEY merch pack"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="reward_description_modal">Description</Label>
+                    <Textarea
+                      id="reward_description_modal"
+                      value={draft.description}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, description: event.target.value }))
+                      }
+                      placeholder="Short benefit-led description"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="reward_image_modal">Image</Label>
+                    <div className="overflow-hidden rounded-xl border bg-muted/20">
+                      {draft.image_path.trim() ? (
+                        <img
+                          src={draft.image_path}
+                          alt={draft.title.trim() || "Reward preview"}
+                          className="h-48 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-48 flex-col justify-between p-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                              No image uploaded
+                            </div>
+                            <div className="mt-2 max-w-sm text-sm font-medium">
+                              Upload a reward image to display it in the catalog.
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            PNG, JPG, or WEBP recommended
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        id="reward_image_modal"
+                        ref={rewardImageInputRef}
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void handleRewardImageUpload(file);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={uploadingImage}
+                        onClick={() => rewardImageInputRef.current?.click()}
+                      >
+                        {uploadingImage ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {draft.image_path.trim() ? "Replace image" : "Upload image"}
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Uploads go straight to Cloudinary and save into this field.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label>Category</Label>
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.rewardCategory}
+                        label="Category"
+                        value={draft.category}
+                        onValueChange={(value) =>
+                          setDraft((current) => ({ ...current, category: value }))
+                        }
+                        placeholder="Select or create category"
+                        options={[...new Set(catalog.map((item) => item.category))]}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="reward_availability_modal">Availability</Label>
+                      <Input
+                        id="reward_availability_modal"
+                        value={draft.availability}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, availability: event.target.value }))
+                        }
+                        placeholder="available"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="reward_points_modal">Points cost</Label>
+                      <Input
+                        id="reward_points_modal"
+                        type="number"
+                        min={0}
+                        value={draft.points_cost}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, points_cost: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="reward_stock_modal">Stock</Label>
+                      <Input
+                        id="reward_stock_modal"
+                        type="number"
+                        min={0}
+                        value={draft.stock}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, stock: event.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      selectedItem &&
+                      setDraft({
+                        title: selectedItem.title,
+                        description: selectedItem.description,
+                        image_path: selectedItem.image_path ?? "",
+                        category: selectedItem.category,
+                        points_cost: String(selectedItem.points_cost),
+                        stock: String(selectedItem.stock),
+                        availability: selectedItem.availability,
+                      })
+                    }
+                  >
+                    Reset form
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void saveItem()}
+                    disabled={saving || uploadingImage}
+                  >
+                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Save changes
+                  </Button>
+                </div>
+              </>
+            ) : null}
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader className="pb-3">
