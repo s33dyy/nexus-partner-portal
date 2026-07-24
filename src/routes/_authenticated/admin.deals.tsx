@@ -8,6 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +42,7 @@ function AdminDealsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [note, setNote] = useState("");
   const [reviewDraft, setReviewDraft] = useState<DealRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -353,6 +361,7 @@ function AdminDealsPage() {
                     onClick={() => {
                       setSelectedId(deal.id);
                       setNote(deal.notes);
+                      setReviewOpen(true);
                     }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedDeal?.id === deal.id ? "bg-muted/40" : ""
@@ -380,288 +389,290 @@ function AdminDealsPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-base">Decision desk</CardTitle>
-            <CardDescription>
-              {selectedDeal
-                ? `Reviewing ${selectedDeal.account_name}`
-                : "Select a deal to review it."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {selectedDeal ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge>{selectedDeal.stage}</Badge>
-                  <Badge variant="outline">{selectedDeal.status}</Badge>
-                  <Badge variant="secondary">{selectedDeal.amount}</Badge>
-                </div>
-                <div className="grid gap-3 text-sm md:grid-cols-2">
-                  <Meta label="Contact" value={selectedDeal.contact_name} />
-                  <Meta label="Owner" value={selectedDeal.owner_name} />
-                  <Meta label="Product" value={selectedDeal.product} />
-                  <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
-                </div>
-                {reviewDraft ? (
-                  <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-                    <div className="text-sm font-medium">Edit review details</div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Account</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealAccount}
-                          source="account"
-                          label="Account"
-                          value={reviewDraft.account_name}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, account_name: value } : current,
-                            )
-                          }
-                          onSelectionChange={(selection) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    partner_id: selection?.id ?? null,
-                                    account_name: selection?.label ?? current.account_name,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="Select or create account"
-                          allowCreate={false}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Client</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealContact}
-                          source="client"
-                          label="Client"
-                          value={reviewDraft.contact_name}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, contact_name: value } : current,
-                            )
-                          }
-                          onSelectionChange={(selection) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    customer_id: selection?.id ?? null,
-                                    contact_name: selection?.label ?? current.contact_name,
-                                  }
-                                : current,
-                            )
-                          }
-                          onCreateRequest={(value) => {
-                            setClientCreateSeed(value);
-                            setClientCreateOpen(true);
-                          }}
-                          placeholder="Select or create client"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>POC</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealOwner}
-                          source="poc"
-                          label="POC"
-                          value={reviewDraft.owner_name}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, owner_name: value } : current,
-                            )
-                          }
-                          onSelectionChange={(selection) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    poc_profile_id: selection?.id ?? null,
-                                    owner_name: selection?.label ?? current.owner_name,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="Select POC"
-                          allowCreate={false}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Country</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealCountry}
-                          label="Country"
-                          value={reviewDraft.country}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, country: value, region: "" } : current,
-                            )
-                          }
-                          placeholder="Select or create country"
-                          options={editOptions.countries}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Region</Label>
-                        <LookupCombobox
-                          fieldName={dealRegionLookupField(reviewDraft.country)}
-                          label="Region"
-                          value={reviewDraft.region}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, region: value } : current,
-                            )
-                          }
-                          placeholder="Select or create region"
-                          options={regionOptions}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Product</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealProduct}
-                          label="Product"
-                          value={reviewDraft.product}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, product: value } : current,
-                            )
-                          }
-                          placeholder="Select or create product"
-                          options={editOptions.products}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Amount</Label>
-                        <Input
-                          value={reviewDraft.amount}
-                          onChange={(e) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, amount: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Customer budget</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealCustomerBudget}
-                          label="Customer budget"
-                          value={reviewDraft.customer_budget ?? ""}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, customer_budget: value } : current,
-                            )
-                          }
-                          placeholder="Select or create budget"
-                          options={editOptions.budgets}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Quantity</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={reviewDraft.quantity}
-                          onChange={(e) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? { ...current, quantity: Number(e.target.value) || 1 }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Probability</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={reviewDraft.probability}
-                          onChange={(e) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? { ...current, probability: Number(e.target.value) || 0 }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Possible close date</Label>
-                        <Input
-                          type="date"
-                          value={reviewDraft.possible_close_date ?? ""}
-                          onChange={(e) =>
-                            setReviewDraft((current) =>
-                              current
-                                ? { ...current, possible_close_date: e.target.value }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Source</Label>
-                        <LookupCombobox
-                          fieldName={LOOKUP_FIELDS.dealSource}
-                          label="Source"
-                          value={reviewDraft.source}
-                          onValueChange={(value) =>
-                            setReviewDraft((current) =>
-                              current ? { ...current, source: value } : current,
-                            )
-                          }
-                          placeholder="Select or create source"
-                          options={editOptions.sources}
-                        />
+        <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+          <DialogContent className="sm:max-w-4xl">
+            <CardHeader className="border-b px-0 pb-4">
+              <CardTitle className="text-base">Decision desk</CardTitle>
+              <CardDescription>
+                {selectedDeal
+                  ? `Reviewing ${selectedDeal.account_name}`
+                  : "Select a deal to review it."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 px-0 pt-6">
+              {selectedDeal ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge>{selectedDeal.stage}</Badge>
+                    <Badge variant="outline">{selectedDeal.status}</Badge>
+                    <Badge variant="secondary">{selectedDeal.amount}</Badge>
+                  </div>
+                  <div className="grid gap-3 text-sm md:grid-cols-2">
+                    <Meta label="Contact" value={selectedDeal.contact_name} />
+                    <Meta label="Owner" value={selectedDeal.owner_name} />
+                    <Meta label="Product" value={selectedDeal.product} />
+                    <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
+                  </div>
+                  {reviewDraft ? (
+                    <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                      <div className="text-sm font-medium">Edit review details</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Account</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealAccount}
+                            source="account"
+                            label="Account"
+                            value={reviewDraft.account_name}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, account_name: value } : current,
+                              )
+                            }
+                            onSelectionChange={(selection) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      partner_id: selection?.id ?? null,
+                                      account_name: selection?.label ?? current.account_name,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="Select or create account"
+                            allowCreate={false}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Client</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealContact}
+                            source="client"
+                            label="Client"
+                            value={reviewDraft.contact_name}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, contact_name: value } : current,
+                              )
+                            }
+                            onSelectionChange={(selection) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      customer_id: selection?.id ?? null,
+                                      contact_name: selection?.label ?? current.contact_name,
+                                    }
+                                  : current,
+                              )
+                            }
+                            onCreateRequest={(value) => {
+                              setClientCreateSeed(value);
+                              setClientCreateOpen(true);
+                            }}
+                            placeholder="Select or create client"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>POC</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealOwner}
+                            source="poc"
+                            label="POC"
+                            value={reviewDraft.owner_name}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, owner_name: value } : current,
+                              )
+                            }
+                            onSelectionChange={(selection) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      poc_profile_id: selection?.id ?? null,
+                                      owner_name: selection?.label ?? current.owner_name,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="Select POC"
+                            allowCreate={false}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Country</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealCountry}
+                            label="Country"
+                            value={reviewDraft.country}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, country: value, region: "" } : current,
+                              )
+                            }
+                            placeholder="Select or create country"
+                            options={editOptions.countries}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Region</Label>
+                          <LookupCombobox
+                            fieldName={dealRegionLookupField(reviewDraft.country)}
+                            label="Region"
+                            value={reviewDraft.region}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, region: value } : current,
+                              )
+                            }
+                            placeholder="Select or create region"
+                            options={regionOptions}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Product</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealProduct}
+                            label="Product"
+                            value={reviewDraft.product}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, product: value } : current,
+                              )
+                            }
+                            placeholder="Select or create product"
+                            options={editOptions.products}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Amount</Label>
+                          <Input
+                            value={reviewDraft.amount}
+                            onChange={(e) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, amount: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Customer budget</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealCustomerBudget}
+                            label="Customer budget"
+                            value={reviewDraft.customer_budget ?? ""}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, customer_budget: value } : current,
+                              )
+                            }
+                            placeholder="Select or create budget"
+                            options={editOptions.budgets}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Quantity</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={reviewDraft.quantity}
+                            onChange={(e) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? { ...current, quantity: Number(e.target.value) || 1 }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Probability</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={reviewDraft.probability}
+                            onChange={(e) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? { ...current, probability: Number(e.target.value) || 0 }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Possible close date</Label>
+                          <Input
+                            type="date"
+                            value={reviewDraft.possible_close_date ?? ""}
+                            onChange={(e) =>
+                              setReviewDraft((current) =>
+                                current
+                                  ? { ...current, possible_close_date: e.target.value }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Source</Label>
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealSource}
+                            label="Source"
+                            value={reviewDraft.source}
+                            onValueChange={(value) =>
+                              setReviewDraft((current) =>
+                                current ? { ...current, source: value } : current,
+                              )
+                            }
+                            placeholder="Select or create source"
+                            options={editOptions.sources}
+                          />
+                        </div>
                       </div>
                     </div>
+                  ) : null}
+                  <Field label="Admin note">
+                    <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
+                  </Field>
+                  <Separator />
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => void saveReview()} disabled={saving}>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Save changes
+                    </Button>
+                    <Button onClick={() => void saveReview("approved")} disabled={saving}>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void saveReview("need_more_info")}
+                      disabled={saving}
+                    >
+                      Request changes
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => void saveReview("rejected")}
+                      disabled={saving}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Reject
+                    </Button>
                   </div>
-                ) : null}
-                <Field label="Admin note">
-                  <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
-                </Field>
-                <Separator />
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void saveReview()} disabled={saving}>
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Save changes
-                  </Button>
-                  <Button onClick={() => void saveReview("approved")} disabled={saving}>
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Approve
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => void saveReview("need_more_info")}
-                    disabled={saving}
-                  >
-                    Request changes
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => void saveReview("rejected")}
-                    disabled={saving}
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    Reject
-                  </Button>
+                </>
+              ) : (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  No deal selected.
                 </div>
-              </>
-            ) : (
-              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                No deal selected.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <CustomerQuickCreateDialog
@@ -669,7 +680,11 @@ function AdminDealsPage() {
         onOpenChange={setClientCreateOpen}
         initialCompanyName={clientCreateSeed}
         initialAccountOwner={profile?.full_name ?? reviewDraft?.owner_name ?? "LIVEY Admin"}
-        initialRegion={reviewDraft?.country === "India" ? reviewDraft?.region || "India West" : reviewDraft?.region || "Global"}
+        initialRegion={
+          reviewDraft?.country === "India"
+            ? reviewDraft?.region || "India West"
+            : reviewDraft?.region || "Global"
+        }
         initialSegment="Mid-market"
         initialMrr="$0"
         initialStatus="active"

@@ -168,6 +168,7 @@ function DealsPage() {
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [selectedDealOpen, setSelectedDealOpen] = useState(false);
   const [selectedDealEditing, setSelectedDealEditing] = useState(false);
   const [selectedDealDraft, setSelectedDealDraft] = useState<DealEditForm | null>(null);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
@@ -175,7 +176,8 @@ function DealsPage() {
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
-  const canEditSelectedDeal = hasRole("super_admin") || hasRole("partner_admin");
+  const canEditSelectedDeal =
+    hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -858,6 +860,8 @@ function DealsPage() {
                     onClick={() => {
                       setSelectedId(deal.id);
                       setNote(deal.notes);
+                      setSelectedDealEditing(false);
+                      setSelectedDealOpen(true);
                     }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedDeal?.id === deal.id ? "bg-muted/40" : ""
@@ -1167,272 +1171,278 @@ function DealsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="border-b">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <CardTitle className="text-base">Selected deal</CardTitle>
-                  <CardDescription>
-                    {selectedDeal
-                      ? `Focused on ${selectedDeal.account_name}`
-                      : "Choose a deal to inspect and advance it."}
-                  </CardDescription>
-                </div>
-                {selectedDeal && canEditSelectedDeal ? (
-                  <Button
-                    variant={selectedDealEditing ? "outline" : "secondary"}
-                    size="sm"
-                    onClick={() => {
-                      if (!selectedDealDraft) return;
-                      if (selectedDealEditing) {
-                        setSelectedDealDraft(dealToEditForm(selectedDeal));
-                        setSelectedDealEditing(false);
-                        return;
-                      }
-                      setSelectedDealEditing(true);
-                    }}
-                  >
-                    {selectedDealEditing ? "Cancel edit" : "Edit details"}
-                  </Button>
-                ) : null}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedDeal ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge>{selectedDeal.stage}</Badge>
-                    <Badge variant="secondary">{selectedDeal.amount}</Badge>
-                    {selectedDeal.customer_budget ? (
-                      <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
-                    ) : null}
+          <Dialog open={selectedDealOpen} onOpenChange={setSelectedDealOpen}>
+            <DialogContent className="sm:max-w-3xl">
+              <DialogHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <DialogTitle>
+                      {selectedDeal ? `Focused on ${selectedDeal.account_name}` : "Selected deal"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      Inspect and advance the selected opportunity without expanding the page.
+                    </DialogDescription>
                   </div>
-                  {selectedDealEditing && selectedDealDraft ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Field label="Account">
-                        <Input
-                          value={selectedDealDraft.account_name}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, account_name: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Client">
-                        <Input
-                          value={selectedDealDraft.contact_name}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, contact_name: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Owner">
-                        <Input
-                          value={selectedDealDraft.owner_name}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, owner_name: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Country">
-                        <Input
-                          value={selectedDealDraft.country}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, country: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Region">
-                        <Input
-                          value={selectedDealDraft.region}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, region: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Product">
-                        <Input
-                          value={selectedDealDraft.product}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, product: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Quantity">
-                        <Input
-                          type="number"
-                          min={1}
-                          value={selectedDealDraft.quantity}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current
-                                ? { ...current, quantity: Number(e.target.value) || 1 }
-                                : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Amount">
-                        <Input
-                          value={selectedDealDraft.amount}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, amount: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Customer budget">
-                        <Input
-                          value={selectedDealDraft.customer_budget}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, customer_budget: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Possible close date">
-                        <Input
-                          type="date"
-                          value={selectedDealDraft.possible_close_date}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current
-                                ? { ...current, possible_close_date: e.target.value }
-                                : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Source">
-                        <Input
-                          value={selectedDealDraft.source}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, source: e.target.value } : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Probability">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={selectedDealDraft.probability}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current
-                                ? { ...current, probability: Number(e.target.value) || 0 }
-                                : current,
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Close date">
-                        <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
-                      </Field>
-                    </div>
-                  ) : (
-                    <div className="grid gap-3 text-sm md:grid-cols-2">
-                      <Meta label="Country" value={selectedDeal.country} />
-                      <Meta label="Region" value={selectedDeal.region} />
-                      <Meta label="Contact" value={selectedDeal.contact_name} />
-                      <Meta label="Owner" value={selectedDeal.owner_name} />
-                      <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
-                      <Meta
-                        label="Possible close date"
-                        value={formatDateLabel(selectedDeal.possible_close_date)}
-                      />
-                      <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
-                      <Meta label="Source" value={selectedDeal.source} />
-                      <Meta label="Probability" value={`${selectedDeal.probability}%`} />
-                    </div>
-                  )}
-                  <Separator />
-                  <div className="space-y-2">
-                    <Label>Quick note</Label>
-                    {selectedDealEditing && selectedDealDraft ? (
-                      <Textarea
-                        value={selectedDealDraft.notes}
-                        onChange={(e) =>
-                          setSelectedDealDraft((current) =>
-                            current ? { ...current, notes: e.target.value } : current,
-                          )
+                  {selectedDeal && canEditSelectedDeal ? (
+                    <Button
+                      variant={selectedDealEditing ? "outline" : "secondary"}
+                      size="sm"
+                      onClick={() => {
+                        if (!selectedDealDraft) return;
+                        if (selectedDealEditing) {
+                          setSelectedDealDraft(dealToEditForm(selectedDeal));
+                          setSelectedDealEditing(false);
+                          return;
                         }
-                        rows={4}
-                      />
+                        setSelectedDealEditing(true);
+                      }}
+                    >
+                      {selectedDealEditing ? "Cancel edit" : "Edit details"}
+                    </Button>
+                  ) : null}
+                </div>
+              </DialogHeader>
+              <div className="space-y-4">
+                {selectedDeal ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge>{selectedDeal.stage}</Badge>
+                      <Badge variant="secondary">{selectedDeal.amount}</Badge>
+                      {selectedDeal.customer_budget ? (
+                        <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
+                      ) : null}
+                    </div>
+                    {selectedDealEditing && selectedDealDraft ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Field label="Account">
+                          <Input
+                            value={selectedDealDraft.account_name}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, account_name: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Client">
+                          <Input
+                            value={selectedDealDraft.contact_name}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, contact_name: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Owner">
+                          <Input
+                            value={selectedDealDraft.owner_name}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, owner_name: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Country">
+                          <Input
+                            value={selectedDealDraft.country}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, country: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Region">
+                          <Input
+                            value={selectedDealDraft.region}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, region: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Product">
+                          <Input
+                            value={selectedDealDraft.product}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, product: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Quantity">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={selectedDealDraft.quantity}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current
+                                  ? { ...current, quantity: Number(e.target.value) || 1 }
+                                  : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Amount">
+                          <Input
+                            value={selectedDealDraft.amount}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, amount: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Customer budget">
+                          <Input
+                            value={selectedDealDraft.customer_budget}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, customer_budget: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Possible close date">
+                          <Input
+                            type="date"
+                            value={selectedDealDraft.possible_close_date}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current
+                                  ? { ...current, possible_close_date: e.target.value }
+                                  : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Source">
+                          <Input
+                            value={selectedDealDraft.source}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, source: e.target.value } : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Probability">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={selectedDealDraft.probability}
+                            onChange={(e) =>
+                              setSelectedDealDraft((current) =>
+                                current
+                                  ? { ...current, probability: Number(e.target.value) || 0 }
+                                  : current,
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="Close date">
+                          <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
+                        </Field>
+                      </div>
                     ) : (
-                      <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                        {selectedDeal.notes ||
-                          "Capture the latest status, blockers, or next steps."}
+                      <div className="grid gap-3 text-sm md:grid-cols-2">
+                        <Meta label="Country" value={selectedDeal.country} />
+                        <Meta label="Region" value={selectedDeal.region} />
+                        <Meta label="Contact" value={selectedDeal.contact_name} />
+                        <Meta label="Owner" value={selectedDeal.owner_name} />
+                        <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
+                        <Meta
+                          label="Possible close date"
+                          value={formatDateLabel(selectedDeal.possible_close_date)}
+                        />
+                        <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
+                        <Meta label="Source" value={selectedDeal.source} />
+                        <Meta label="Probability" value={`${selectedDeal.probability}%`} />
                       </div>
                     )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedDealEditing && canEditSelectedDeal ? (
-                      <Button onClick={() => void saveSelectedDeal()} disabled={saving}>
+                    <Separator />
+                    <div className="space-y-2">
+                      <Label>Quick note</Label>
+                      {selectedDealEditing && selectedDealDraft ? (
+                        <Textarea
+                          value={selectedDealDraft.notes}
+                          onChange={(e) =>
+                            setSelectedDealDraft((current) =>
+                              current ? { ...current, notes: e.target.value } : current,
+                            )
+                          }
+                          rows={4}
+                        />
+                      ) : (
+                        <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                          {selectedDeal.notes ||
+                            "Capture the latest status, blockers, or next steps."}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedDealEditing && canEditSelectedDeal ? (
+                        <Button onClick={() => void saveSelectedDeal()} disabled={saving}>
+                          {saving ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                          )}
+                          Save changes
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setNote(selectedDeal.notes);
+                          setNoteOpen(true);
+                        }}
+                      >
+                        Edit note
+                      </Button>
+                      <Button onClick={() => void advance()} disabled={saving}>
                         {saving ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : (
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                          <ArrowRight className="mr-2 h-4 w-4" />
                         )}
-                        Save changes
+                        Advance stage
                       </Button>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setNote(selectedDeal.notes);
-                        setNoteOpen(true);
-                      }}
-                    >
-                      Edit note
-                    </Button>
-                    <Button onClick={() => void advance()} disabled={saving}>
-                      {saving ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowRight className="mr-2 h-4 w-4" />
-                      )}
-                      Advance stage
-                    </Button>
-                    <Button variant="outline" onClick={() => void closeAs("won")} disabled={saving}>
-                      <CheckCircle2 className="mr-2 h-4 w-4" />
-                      Mark won
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => void closeAs("lost")}
-                      disabled={saving}
-                    >
-                      <XCircle className="mr-2 h-4 w-4" />
-                      Mark lost
-                    </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => void closeAs("won")}
+                        disabled={saving}
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Mark won
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => void closeAs("lost")}
+                        disabled={saving}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Mark lost
+                      </Button>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                      Viewing item {selectedIndex + 1} of {filteredDeals.length}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    No deal selected yet. Choose a row from the table to inspect the opportunity.
                   </div>
-                  <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    Viewing item {selectedIndex + 1} of {filteredDeals.length}
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No deal selected yet. Choose a row from the table to inspect the opportunity.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

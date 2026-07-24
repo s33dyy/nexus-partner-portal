@@ -512,7 +512,10 @@ function AdminRewardsPage() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setSelectedId(item.id)}
+                      onClick={() => {
+                        setSelectedId(item.id);
+                        setEditOpen(true);
+                      }}
                       className={`w-full rounded-lg border px-4 py-3 text-left transition ${
                         selectedId === item.id ? "border-primary bg-primary/5" : "bg-card"
                       }`}
@@ -536,27 +539,10 @@ function AdminRewardsPage() {
               <div className="rounded-2xl border bg-card p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium">
-                      {selectedItem ? "Selected reward" : "Create reward"}
-                    </div>
+                    <div className="text-sm font-medium">Create reward</div>
                     <div className="text-xs text-muted-foreground">
                       Manage product images, costs, and catalog grouping.
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {selectedItem && (
-                      <Badge variant="secondary">{selectedItem.points_cost} pts</Badge>
-                    )}
-                    {selectedItem ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditOpen(true)}
-                      >
-                        Edit selected
-                      </Button>
-                    ) : null}
                   </div>
                 </div>
 
@@ -714,18 +700,6 @@ function AdminRewardsPage() {
                       <Plus className="mr-2 h-4 w-4" />
                     )}
                     Create reward
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => selectedItem && void deleteItem(selectedItem)}
-                    disabled={deletingId === selectedItem?.id || !selectedItem}
-                  >
-                    {deletingId === selectedItem?.id ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="mr-2 h-4 w-4" />
-                    )}
-                    Delete
                   </Button>
                 </div>
               </div>
@@ -905,6 +879,19 @@ function AdminRewardsPage() {
                   >
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Save changes
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => selectedItem && void deleteItem(selectedItem)}
+                    disabled={deletingId === selectedItem?.id}
+                  >
+                    {deletingId === selectedItem?.id ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    Delete reward
                   </Button>
                 </div>
               </>

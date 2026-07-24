@@ -17,7 +17,6 @@ import {
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
@@ -368,7 +367,10 @@ function CustomersPage() {
                 {filteredCustomers.map((customer) => (
                   <button
                     key={customer.id}
-                    onClick={() => setSelectedId(customer.id)}
+                    onClick={() => {
+                      setSelectedId(customer.id);
+                      setEditOpen(true);
+                    }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedCustomer?.id === customer.id ? "bg-muted/40" : ""
                     }`}
@@ -396,52 +398,6 @@ function CustomersPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Account details</CardTitle>
-              <CardDescription>
-                {selectedCustomer
-                  ? `Selected ${selectedCustomer.company_name}`
-                  : "Select a customer to edit."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedCustomer ? (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Meta label="Company" value={selectedCustomer.company_name} />
-                    <Meta label="Owner" value={selectedCustomer.account_owner} />
-                    <Meta label="Region" value={selectedCustomer.region} />
-                    <Meta label="Segment" value={selectedCustomer.segment} />
-                    <Meta label="Health score" value={`${selectedCustomer.health_score}%`} />
-                    <Meta label="MRR" value={selectedCustomer.mrr} />
-                    <Meta label="Renewal date" value={selectedCustomer.renewal_date} />
-                    <Meta label="Status" value={selectedCustomer.status} />
-                  </div>
-                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    <div className="font-medium text-foreground">Next step</div>
-                    <div className="mt-1 whitespace-pre-line">
-                      {selectedCustomer.next_step || "No next step set."}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    <div className="font-medium text-foreground">Last touch</div>
-                    <div className="mt-1">{selectedCustomer.last_touch}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" onClick={() => setEditOpen(true)}>
-                      Edit account
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No customer selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Add customer</CardTitle>
@@ -735,15 +691,6 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
   );
 }
 

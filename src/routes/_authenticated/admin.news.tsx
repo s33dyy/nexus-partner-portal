@@ -332,7 +332,10 @@ function AdminNewsPage() {
                     }`}
                   >
                     <button
-                      onClick={() => setSelectedId(post.id)}
+                      onClick={() => {
+                        setSelectedId(post.id);
+                        setEditOpen(true);
+                      }}
                       className="overflow-hidden rounded-xl border bg-background text-left"
                     >
                       {hasNewsImage(post.image_path) ? (
@@ -405,69 +408,6 @@ function AdminNewsPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Edit post</CardTitle>
-              <CardDescription>
-                {selectedPost ? `Selected ${selectedPost.title}` : "Select a post to edit."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-6">
-              {selectedPost ? (
-                <>
-                  <div className="overflow-hidden rounded-xl border">
-                    {hasNewsImage(selectedPost.image_path) ? (
-                      <img
-                        src={selectedPost.image_path ?? ""}
-                        alt={selectedPost.image_alt || selectedPost.title || "LIVEY update"}
-                        className="h-56 w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-56 w-full flex-col justify-between bg-gradient-to-br from-primary/5 via-background to-background p-5">
-                        <div className="space-y-2">
-                          <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                            Text-only preview
-                          </div>
-                          <div className="text-lg font-semibold">
-                            {selectedPost.title || "Untitled post"}
-                          </div>
-                          <div className="whitespace-pre-line text-sm text-muted-foreground">
-                            {selectedPost.caption || "This post will render without an image."}
-                          </div>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {selectedPost.posted_by_name || "LIVEY Admin"}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <SummaryRow label="Posted by" value={selectedPost.posted_by_name} />
-                    <SummaryRow label="Role" value={selectedPost.posted_by_role} />
-                    <SummaryRow
-                      label="Image"
-                      value={hasNewsImage(selectedPost.image_path) ? "Attached" : "None"}
-                    />
-                    <SummaryRow label="Updated" value={formatDateLabel(selectedPost.updated_at)} />
-                  </div>
-                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    <div className="font-medium text-foreground">Caption</div>
-                    <div className="mt-1 whitespace-pre-line">
-                      {selectedPost.caption || "No caption set."}
-                    </div>
-                  </div>
-                  <Button type="button" onClick={() => setEditOpen(true)}>
-                    Edit selected post
-                  </Button>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No post selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Publish post</CardTitle>
@@ -737,15 +677,6 @@ function Field({
     <div className={`space-y-2 ${className ?? ""}`}>
       <Label>{label}</Label>
       {children}
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
     </div>
   );
 }

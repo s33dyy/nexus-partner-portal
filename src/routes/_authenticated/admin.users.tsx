@@ -9,6 +9,13 @@ import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
@@ -72,6 +79,7 @@ function AdminUsersPage() {
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftRole, setDraftRole] = useState("partner_user");
   const [draftStatus, setDraftStatus] = useState("approved");
@@ -176,6 +184,7 @@ function AdminUsersPage() {
         .eq("id", selectedUser.id);
       if (profileRes.error) throw profileRes.error;
       toast.success("User roles updated");
+      setEditOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update user");
@@ -204,6 +213,7 @@ function AdminUsersPage() {
       }
 
       toast.success("User approved");
+      setEditOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to approve user");
@@ -226,7 +236,8 @@ function AdminUsersPage() {
         company_name: newUser.company_name.trim() || null,
         password: newUser.password,
         role: newUser.role,
-        partner_status: newUser.role === "partner_user" ? "approved" : "pending_partner_registration",
+        partner_status:
+          newUser.role === "partner_user" ? "approved" : "pending_partner_registration",
       });
       if (error) throw error;
       toast.success("User created");
@@ -358,7 +369,10 @@ function AdminUsersPage() {
                 {filteredUsers.map((user) => (
                   <button
                     key={user.id}
-                    onClick={() => setSelectedId(user.id)}
+                    onClick={() => {
+                      setSelectedId(user.id);
+                      setEditOpen(true);
+                    }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedUser?.id === user.id ? "bg-muted/40" : ""
                     }`}
@@ -387,77 +401,6 @@ function AdminUsersPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Role editor</CardTitle>
-              <CardDescription>
-                {selectedUser
-                  ? `Editing ${selectedUser.full_name}`
-                  : "Select a user to manage roles."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedUser ? (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Meta label="Email" value={selectedUser.email} />
-                    <Meta label="Company" value={selectedUser.company_name ?? "Not set"} />
-                    <Meta label="Phone" value={selectedUser.phone ?? "Not set"} />
-                    <Meta
-                      label="Created"
-                      value={new Date(selectedUser.created_at).toLocaleDateString()}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Primary role">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.userRole}
-                        label="Role"
-                        value={draftRole}
-                        onValueChange={setDraftRole}
-                        options={[...ROLE_OPTIONS]}
-                      />
-                    </Field>
-                    <Field label="Partner status">
-                      <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.partnerStatus}
-                        label="Partner status"
-                        value={draftStatus}
-                        onValueChange={setDraftStatus}
-                        options={[...PARTNER_STATUS_OPTIONS]}
-                      />
-                    </Field>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => void saveRoles()} disabled={saving}>
-                      {saving ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <UserRoundCog className="mr-2 h-4 w-4" />
-                      )}
-                      Save access
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => void approveUser()}
-                      disabled={
-                        saving ||
-                        selectedUser.partner_status === "approved" ||
-                        selectedUser.roles.includes("super_admin")
-                      }
-                    >
-                      Approve user
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No user selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Create user</CardTitle>
@@ -535,6 +478,95 @@ function AdminUsersPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedUser ? `Edit ${selectedUser.full_name}` : "Role editor"}
+            </DialogTitle>
+            <DialogDescription>
+              Update the selected user without keeping the role controls inline on the page.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedUser ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Email
+                  </div>
+                  <div className="mt-1 text-sm font-medium">{selectedUser.email}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Company
+                  </div>
+                  <div className="mt-1 text-sm font-medium">
+                    {selectedUser.company_name ?? "Not set"}
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Phone
+                  </div>
+                  <div className="mt-1 text-sm font-medium">{selectedUser.phone ?? "Not set"}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Created
+                  </div>
+                  <div className="mt-1 text-sm font-medium">
+                    {new Date(selectedUser.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Primary role">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.userRole}
+                    label="Role"
+                    value={draftRole}
+                    onValueChange={setDraftRole}
+                    options={[...ROLE_OPTIONS]}
+                  />
+                </Field>
+                <Field label="Partner status">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.partnerStatus}
+                    label="Partner status"
+                    value={draftStatus}
+                    onValueChange={setDraftStatus}
+                    options={[...PARTNER_STATUS_OPTIONS]}
+                  />
+                </Field>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => void approveUser()}
+                  disabled={
+                    saving ||
+                    selectedUser.partner_status === "approved" ||
+                    selectedUser.roles.includes("super_admin")
+                  }
+                >
+                  Approve user
+                </Button>
+                <Button onClick={() => void saveRoles()} disabled={saving}>
+                  {saving ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserRoundCog className="mr-2 h-4 w-4" />
+                  )}
+                  Save access
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -548,15 +580,6 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
   );
 }
 

@@ -18,7 +18,6 @@ import {
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -336,7 +335,10 @@ function AdminCatalogPage() {
                 {filteredItems.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => {
+                      setSelectedId(item.id);
+                      setEditOpen(true);
+                    }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedItem?.id === item.id ? "bg-muted/40" : ""
                     }`}
@@ -362,46 +364,6 @@ function AdminCatalogPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Edit item</CardTitle>
-              <CardDescription>
-                {selectedItem
-                  ? `Selected ${selectedItem.product_name}`
-                  : "Select a catalog item to edit."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedItem ? (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Meta label="SKU" value={selectedItem.sku} />
-                    <Meta label="Product name" value={selectedItem.product_name} />
-                    <Meta label="Category" value={selectedItem.category} />
-                    <Meta label="Tier" value={selectedItem.partner_tier} />
-                    <Meta label="List price" value={selectedItem.list_price} />
-                    <Meta label="Margin" value={selectedItem.margin} />
-                    <Meta label="Stock" value={String(selectedItem.stock)} />
-                    <Meta label="Availability" value={selectedItem.availability} />
-                  </div>
-                  <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    <div className="font-medium text-foreground">Benefits</div>
-                    <div className="mt-1 whitespace-pre-line">
-                      {selectedItem.benefits || "No benefits added."}
-                    </div>
-                  </div>
-                  <Button type="button" onClick={() => setEditOpen(true)}>
-                    Edit selected item
-                  </Button>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No item selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Add item</CardTitle>
@@ -661,15 +623,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
-    </div>
-  );
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
     </div>
   );
 }

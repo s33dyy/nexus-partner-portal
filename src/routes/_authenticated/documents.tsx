@@ -7,10 +7,16 @@ import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
@@ -57,6 +63,9 @@ function DocumentsPage() {
   const [query, setQuery] = useState("");
   const [docTypeFilter, setDocTypeFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [draft, setDraft] = useState({ file_name: "", doc_type: "" });
+  const [saving, setSaving] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -141,9 +150,14 @@ function DocumentsPage() {
     if (!selectedDoc) {
       setPreviewUrl(null);
       setPreviewName("");
+      setDraft({ file_name: "", doc_type: "" });
       return;
     }
     setSelectedId(selectedDoc.id);
+    setDraft({
+      file_name: selectedDoc.file_name,
+      doc_type: selectedDoc.doc_type,
+    });
   }, [selectedDoc]);
 
   const openPreview = async (doc: DocRow) => {
@@ -174,6 +188,7 @@ function DocumentsPage() {
       if (selectedId === doc.id) {
         setSelectedId(null);
         setPreviewUrl(null);
+        setEditOpen(false);
       }
       await load();
     } catch (error) {
@@ -185,6 +200,34 @@ function DocumentsPage() {
 
   const docTypes = useMemo(() => ["all", ...new Set(docs.map((doc) => doc.doc_type))], [docs]);
   const docTypeOptions = useMemo(() => uniqueStrings(docs.map((doc) => doc.doc_type)), [docs]);
+
+  const saveMetadata = async () => {
+    if (!selectedDoc) return;
+    const fileName = draft.file_name.trim();
+    const docType = draft.doc_type.trim();
+    if (!fileName || !docType) {
+      toast.error("File name and document type are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("partner_documents")
+        .update({
+          file_name: fileName,
+          doc_type: docType,
+        })
+        .eq("id", selectedDoc.id);
+      if (error) throw error;
+      toast.success("Document metadata updated");
+      setEditOpen(false);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update document metadata");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -286,7 +329,11 @@ function DocumentsPage() {
                 {filteredDocs.map((doc) => (
                   <button
                     key={doc.id}
-                    onClick={() => void openPreview(doc)}
+                    onClick={() => {
+                      setSelectedId(doc.id);
+                      void openPreview(doc);
+                      setEditOpen(true);
+                    }}
                     className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
                       selectedDoc?.id === doc.id ? "bg-muted/40" : ""
                     }`}
@@ -343,69 +390,102 @@ function DocumentsPage() {
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Selected file</CardTitle>
-              <CardDescription>Actions for the current document.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedDoc ? (
-                <>
-                  <div className="grid gap-3 text-sm md:grid-cols-2">
-                    <Meta label="File" value={selectedDoc.file_name} />
-                    <Meta label="Type" value={selectedDoc.doc_type} />
-                    <Meta
-                      label="Partner"
-                      value={partnerById.get(selectedDoc.partner_id) ?? "Unknown"}
-                    />
-                    <Meta
-                      label="Size"
-                      value={
-                        selectedDoc.size_bytes
-                          ? `${Math.round(selectedDoc.size_bytes / 1024)} KB`
-                          : "Unknown"
-                      }
-                    />
-                  </div>
-                  <Separator />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="destructive"
-                      onClick={() => void deleteDoc(selectedDoc)}
-                      disabled={deletingId === selectedDoc.id}
-                    >
-                      {deletingId === selectedDoc.id ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="mr-2 h-4 w-4" />
-                      )}
-                      Delete file
-                    </Button>
-                    <Button variant="outline" onClick={() => void openPreview(selectedDoc)}>
-                      <Upload className="mr-2 h-4 w-4" />
-                      Refresh preview
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No document selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
-    </div>
-  );
-}
 
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedDoc ? `Edit ${selectedDoc.file_name}` : "Edit document"}
+            </DialogTitle>
+            <DialogDescription>
+              Update document metadata without keeping the details panel inline on the page.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedDoc ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Partner
+                  </div>
+                  <div className="mt-1 text-sm font-medium">
+                    {partnerById.get(selectedDoc.partner_id) ?? "Unknown"}
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Size
+                  </div>
+                  <div className="mt-1 text-sm font-medium">
+                    {selectedDoc.size_bytes
+                      ? `${Math.round(selectedDoc.size_bytes / 1024)} KB`
+                      : "Unknown"}
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="doc_file_name">File name</Label>
+                  <Input
+                    id="doc_file_name"
+                    value={draft.file_name}
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, file_name: e.target.value }))
+                    }
+                    placeholder="Partner agreement.pdf"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="doc_type">Document type</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.documentType}
+                    label="Document type"
+                    value={draft.doc_type}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, doc_type: value }))
+                    }
+                    placeholder="Select or create document type"
+                    options={docTypeOptions}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void openPreview(selectedDoc)}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Refresh preview
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void deleteDoc(selectedDoc)}
+                  disabled={deletingId === selectedDoc.id}
+                >
+                  {deletingId === selectedDoc.id ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  Delete file
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void saveMetadata()} disabled={saving}>
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save metadata
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
