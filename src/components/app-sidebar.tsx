@@ -74,7 +74,24 @@ export function AppSidebar() {
   const visible = (items: Item[]) =>
     items.filter((i) => !i.roles || i.roles.some((r) => roles.includes(r)));
   const isApprovedPartner = profile?.partner_status === "approved";
-  const canSeeWorkspace = hasRole("super_admin") || isApprovedPartner;
+  const isPendingAgreement = profile?.partner_status === "pending_agreement";
+  const canSeeWorkspace = hasRole("super_admin") || isApprovedPartner || isPendingAgreement;
+
+  // Agreement page only visible to partners awaiting signature
+  const partnerAdminItems: Item[] = [
+    { title: "Company Profile", url: "/partner", icon: Building2, roles: ["partner_admin"] },
+    { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
+    ...(isPendingAgreement
+      ? [
+          {
+            title: "Sign Agreement",
+            url: "/partner/agreement",
+            icon: FileText,
+            roles: ["partner_admin"] as AppRole[],
+          },
+        ]
+      : []),
+  ];
 
   const renderGroup = (label: string, items: Item[]) => {
     const list = visible(items);
@@ -129,7 +146,9 @@ export function AppSidebar() {
             ])
           : null}
         {canSeeWorkspace ? renderGroup("Workspace", workspace) : null}
-        {canSeeWorkspace && hasRole("partner_admin") ? renderGroup("Company", partnerAdmin) : null}
+        {canSeeWorkspace && hasRole("partner_admin")
+          ? renderGroup("Company", partnerAdminItems)
+          : null}
         {hasRole("super_admin") && renderGroup("Administration", admin)}
       </SidebarContent>
 

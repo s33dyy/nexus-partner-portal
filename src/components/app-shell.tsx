@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -24,6 +25,7 @@ const statusLabel: Record<string, string> = {
   submitted: "Application Submitted",
   under_review: "Under Review",
   need_more_info: "Info Requested",
+  pending_agreement: "Agreement Pending",
   approved: "Approved Partner",
   rejected: "Application Rejected",
 };
@@ -33,6 +35,7 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
   submitted: "secondary",
   under_review: "secondary",
   need_more_info: "destructive",
+  pending_agreement: "secondary",
   approved: "default",
   rejected: "destructive",
 };
@@ -80,10 +83,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigate({ to: "/auth", replace: true });
   };
 
+  const isPendingAgreement = status === "pending_agreement";
+
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
+        {isPendingAgreement && <AgreementPendingBanner />}
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">
           <SidebarTrigger />
           <div className="relative hidden md:flex flex-1 max-w-md">

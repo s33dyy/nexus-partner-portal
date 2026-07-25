@@ -16,6 +16,7 @@ export type Profile = {
     | "submitted"
     | "under_review"
     | "need_more_info"
+    | "pending_agreement"
     | "approved"
     | "rejected";
 };

@@ -11,6 +11,8 @@ import {
   MessageSquare,
   Building2,
   ExternalLink,
+  FileSignature,
+  Send,
 } from "lucide-react";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -59,6 +61,12 @@ type Partner = {
   tier: string;
   owner_user_id: string;
   created_at: string;
+  // Agreement fields
+  agreement_envelope_id: string | null;
+  agreement_sent_at: string | null;
+  agreement_signed_at: string | null;
+  agreement_signed_doc_path: string | null;
+  agreement_provider: string | null;
 };
 
 type Doc = {
@@ -81,6 +89,7 @@ const STATUS_FILTERS = [
   "submitted",
   "under_review",
   "need_more_info",
+  "pending_agreement",
   "approved",
   "rejected",
 ] as const;
@@ -127,6 +136,8 @@ function AdminPartners() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [acting, setActing] = useState(false);
+  const [sendingAgreement, setSendingAgreement] = useState(false);
+  const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,7 +157,8 @@ function AdminPartners() {
     setSelected(p);
     setDocs([]);
     setNotes([]);
-    const [{ data: d }, { data: n }] = await Promise.all([
+    setOwnerEmail(null);
+    const [{ data: d }, { data: n }, { data: profileData }] = await Promise.all([
       supabase
         .from("partner_documents")
         .select("id, doc_type, file_name, file_path")
@@ -156,9 +168,15 @@ function AdminPartners() {
         .select("*")
         .eq("partner_id", p.id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("profiles")
+        .select("email")
+        .eq("id", p.owner_user_id)
+        .maybeSingle(),
     ]);
     setDocs((d as Doc[]) ?? []);
     setNotes((n as Note[]) ?? []);
+    setOwnerEmail((profileData as { email?: string } | null)?.email ?? null);
   };
 
   const openDoc = async (doc: Doc) => {
@@ -236,6 +254,59 @@ function AdminPartners() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Action failed";
       toast.error(msg);
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const sendAgreement = async () => {
+    if (!selected || !ownerEmail) {
+      toast.error("Owner email not found — cannot send agreement");
+      return;
+    }
+    setSendingAgreement(true);
+    try {
+      const res = await fetch("/api/integrations/zoho-sign/send-agreement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partnerId: selected.id,
+          partnerEmail: ownerEmail,
+          partnerName: selected.legal_name ?? selected.company_name,
+          partnerCompany: selected.company_name,
+        }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to send agreement");
+      toast.success("Partner agreement sent via Zoho Sign!");
+      setSelected(null);
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to send agreement");
+    } finally {
+      setSendingAgreement(false);
+    }
+  };
+
+  /** Admin manually confirms a partner's uploaded signed copy → sets status to approved. */
+  const confirmManualSignature = async () => {
+    if (!selected) return;
+    setActing(true);
+    try {
+      const { error } = await supabase
+        .from("partners")
+        .update({ status: "approved", agreement_signed_at: new Date().toISOString() })
+        .eq("id", selected.id);
+      if (error) throw error;
+      await supabase
+        .from("profiles")
+        .update({ partner_status: "approved" })
+        .eq("id", selected.owner_user_id);
+      toast.success("Partner manually approved after signature confirmation");
+      setSelected(null);
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Action failed");
     } finally {
       setActing(false);
     }
@@ -483,6 +554,7 @@ function AdminPartners() {
                 <Separator />
 
                 <div className="flex flex-wrap gap-2">
+                  {/* Approve button — always available */}
                   <Button
                     variant="outline"
                     onClick={() => void decide("under_review")}
@@ -513,6 +585,92 @@ function AdminPartners() {
                     Approve
                   </Button>
                 </div>
+
+                {/* Agreement section — shown when status is approved or pending_agreement */}
+                {(selected.status === "approved" || selected.status === "pending_agreement") && (
+                  <>
+                    <Separator />
+                    <div className="space-y-3">
+                      <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                        Agreement
+                      </div>
+
+                      {selected.agreement_signed_at ? (
+                        <div className="flex items-center gap-2 rounded-md border bg-emerald-500/5 px-3 py-2 text-sm text-emerald-700">
+                          <CheckCircle2 className="h-4 w-4 shrink-0" />
+                          Signed on{" "}
+                          {new Date(selected.agreement_signed_at).toLocaleString("en-IN")}
+                        </div>
+                      ) : selected.agreement_sent_at ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 rounded-md border bg-primary/5 px-3 py-2 text-sm text-primary">
+                            <FileSignature className="h-4 w-4 shrink-0" />
+                            Sent via{" "}
+                            {selected.agreement_provider === "zohosign" ? "Zoho Sign" : selected.agreement_provider} on{" "}
+                            {new Date(selected.agreement_sent_at).toLocaleString("en-IN")} — awaiting
+                            signature
+                          </div>
+                          {/* Manual upload confirmation */}
+                          {selected.agreement_signed_doc_path && (
+                            <div className="rounded-md border bg-amber-500/5 p-3 text-sm">
+                              <div className="font-medium text-amber-700">Partner uploaded signed copy</div>
+                              <div className="mt-2 flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    const { data } = await supabase.storage
+                                      .from("partner-documents")
+                                      .createSignedUrl(selected.agreement_signed_doc_path!, 60);
+                                    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                                  }}
+                                >
+                                  <ExternalLink className="mr-1 h-3.5 w-3.5" /> View
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => void confirmManualSignature()}
+                                  disabled={acting}
+                                >
+                                  {acting ? (
+                                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                  )}
+                                  Confirm &amp; Approve
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-sm text-muted-foreground">
+                            No agreement sent yet. Click below to send the partner agreement via
+                            Zoho Sign.
+                          </p>
+                          {ownerEmail && (
+                            <p className="text-xs text-muted-foreground">
+                              Will be sent to: <strong>{ownerEmail}</strong>
+                            </p>
+                          )}
+                          <Button
+                            size="sm"
+                            onClick={() => void sendAgreement()}
+                            disabled={sendingAgreement || !ownerEmail}
+                          >
+                            {sendingAgreement ? (
+                              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Send className="mr-1 h-3.5 w-3.5" />
+                            )}
+                            Send Agreement via Zoho Sign
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -527,6 +685,7 @@ function StatusBadge({ status }: { status: string }) {
     submitted: "bg-blue-500/10 text-blue-600 border-blue-500/20",
     under_review: "bg-amber-500/10 text-amber-600 border-amber-500/20",
     need_more_info: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+    pending_agreement: "bg-violet-500/10 text-violet-600 border-violet-500/20",
     approved: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
     rejected: "bg-red-500/10 text-red-600 border-red-500/20",
     pending_partner_registration: "bg-muted text-muted-foreground",
