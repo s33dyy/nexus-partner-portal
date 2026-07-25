@@ -586,8 +586,8 @@ function AdminPartners() {
                   </Button>
                 </div>
 
-                {/* Agreement section — shown when status is approved or pending_agreement */}
-                {(selected.status === "approved" || selected.status === "pending_agreement") && (
+                {/* Agreement section — shown when status is not rejected */}
+                {(selected.status !== "rejected" && selected.status !== "pending_partner_registration") && (
                   <>
                     <Separator />
                     <div className="space-y-3">
