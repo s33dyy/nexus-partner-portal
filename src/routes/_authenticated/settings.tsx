@@ -7,7 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { getRouteApi } from "@tanstack/react-router";
 import { listVisibleExportDatasets, type ExportDatasetDescriptor, type ExportScope } from "@/lib/export-registry";
+
+const routeApi = getRouteApi("/_authenticated/settings");
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -64,6 +69,19 @@ function SettingsPage() {
       ),
     [role],
   );
+
+  const searchParams = routeApi.useSearch() as { zohoSignConnected?: string; zohoSignError?: string };
+
+  useEffect(() => {
+    if (searchParams.zohoSignConnected === "1") {
+      toast.success("Zoho Sign connected successfully!");
+      // Clean up URL
+      window.history.replaceState(null, "", "/settings");
+    } else if (searchParams.zohoSignError) {
+      toast.error(`Zoho Sign connection failed: ${searchParams.zohoSignError}`);
+      window.history.replaceState(null, "", "/settings");
+    }
+  }, [searchParams]);
 
   const groupedDatasets = useMemo(() => {
     const buckets: Record<ExportDatasetDescriptor["group"], ExportDatasetDescriptor[]> = {
@@ -208,6 +226,36 @@ function SettingsPage() {
         counts={counts}
         countsLoading={countsLoading}
       />
+
+      {role === "super_admin" && (
+        <>
+          <Separator />
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader className="border-b">
+              <div className="flex items-center gap-2">
+                <Layers3 className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-lg">Integrations</CardTitle>
+              </div>
+              <CardDescription>
+                Manage third-party integrations and platform connections.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-4">
+                <div>
+                  <div className="font-medium">Zoho Sign</div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Connect Zoho Sign to automatically send and track digital partner agreements.
+                  </div>
+                </div>
+                <Button asChild>
+                  <a href="/api/integrations/zoho-sign/connect">Connect Zoho Sign</a>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

@@ -15,11 +15,21 @@ BEGIN
     'submitted',
     'under_review',
     'need_more_info',
+    'pending_agreement',
     'approved',
     'rejected'
   );
 EXCEPTION
   WHEN duplicate_object THEN NULL;
+END
+$$;
+
+-- Add pending_agreement to existing enum if the type already exists (idempotent)
+DO $$
+BEGIN
+  ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'pending_agreement' AFTER 'need_more_info';
+EXCEPTION
+  WHEN others THEN NULL;
 END
 $$;
 
@@ -84,7 +94,34 @@ CREATE TABLE IF NOT EXISTS partners (
   business_focus TEXT[],
   status partner_status NOT NULL DEFAULT 'pending_partner_registration',
   tier partner_tier NOT NULL DEFAULT 'registered',
+  -- Agreement tracking
+  agreement_envelope_id TEXT,
+  agreement_sent_at TIMESTAMPTZ,
+  agreement_signed_at TIMESTAMPTZ,
+  agreement_signed_doc_path TEXT,
+  agreement_provider TEXT DEFAULT 'zohosign',
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Add agreement columns to existing partners table (idempotent)
+DO $$ BEGIN
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_envelope_id TEXT;
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_sent_at TIMESTAMPTZ;
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_signed_at TIMESTAMPTZ;
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_signed_doc_path TEXT;
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_provider TEXT DEFAULT 'zohosign';
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+-- Zoho Sign OAuth token storage (single org row)
+CREATE TABLE IF NOT EXISTS zoho_sign_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  api_domain TEXT NOT NULL DEFAULT 'https://sign.zoho.in',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

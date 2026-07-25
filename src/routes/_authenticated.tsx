@@ -26,12 +26,28 @@ function Gate({ children }: { children: React.ReactNode }) {
   const { loading, session, profile, hasRole } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Partners who are under_review have no portal access at all
   const isUnderReview =
-    hasRole("partner_admin") && profile?.partner_status === "under_review" && !hasRole("super_admin");
-  const needsAdminOnboarding =
     hasRole("partner_admin") &&
+    profile?.partner_status === "under_review" &&
+    !hasRole("super_admin");
+
+  // Partners with pending_agreement get partial portal access (with a banner).
+  // They can navigate freely — no redirect needed.
+  const isPendingAgreement =
+    hasRole("partner_admin") &&
+    profile?.partner_status === "pending_agreement" &&
+    !hasRole("super_admin");
+
+  // Partners who haven't started onboarding (or are need_more_info/rejected/submitted)
+  // must complete onboarding first.
+  const needsOnboarding =
+    hasRole("partner_admin") &&
+    !hasRole("super_admin") &&
     profile?.partner_status !== "approved" &&
-    profile?.partner_status !== "under_review";
+    profile?.partner_status !== "under_review" &&
+    profile?.partner_status !== "pending_agreement";
 
   useEffect(() => {
     if (!loading && !session) {
@@ -44,12 +60,12 @@ function Gate({ children }: { children: React.ReactNode }) {
       !loading &&
       session &&
       profile &&
-      needsAdminOnboarding &&
+      needsOnboarding &&
       location.pathname !== "/partner/onboarding"
     ) {
       navigate({ to: "/partner/onboarding", replace: true });
     }
-  }, [isUnderReview, loading, session, profile, needsAdminOnboarding, location.pathname, navigate]);
+  }, [isUnderReview, loading, session, profile, needsOnboarding, location.pathname, navigate]);
 
   if (loading || !session || !profile) {
     return (
@@ -67,5 +83,6 @@ function Gate({ children }: { children: React.ReactNode }) {
     return <UnderReviewPage />;
   }
 
+  // pending_agreement partners pass through — AppShell will show the banner
   return <>{children}</>;
 }
