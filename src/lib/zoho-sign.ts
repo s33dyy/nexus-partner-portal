@@ -271,6 +271,8 @@ export async function sendAgreement(opts: {
     const docId = uploadData.documents.document_ids[0].document_id!;
 
     // Step 2: create a signing request
+    // NOTE: Zoho Sign API has a known bug where `document_order` validation fails
+    // even when correctly provided (error code 9008). The template path avoids this.
     const requestPayload = {
       requests: {
         request_name: `LIVEY Partner Agreement — ${opts.partnerCompany}`,
@@ -304,7 +306,7 @@ export async function sendAgreement(opts: {
         is_sequential: true,
         reminder_period: 3,
         document_ids: [{ document_id: docId }],
-        document_order: [docId],
+        // document_order causes Zoho API bug (code 9008) - omit and let API infer
       },
     };
 
@@ -319,9 +321,21 @@ export async function sendAgreement(opts: {
     const reqData = (await reqRes.json()) as {
       requests?: { request_id?: string };
       message?: string;
+      code?: number;
+      error_param?: string;
     };
-    if (!reqRes.ok || !reqData.requests?.request_id)
+    if (!reqRes.ok || !reqData.requests?.request_id) {
+      // Zoho API bug: document_order validation fails with code 9008 even when correctly provided
+      if (reqData.code === 9008 && reqData.error_param === "document_order") {
+        throw new Error(
+          "Zoho Sign API bug: document_order validation fails (code 9008). " +
+            "Workaround: Set ZOHO_SIGN_TEMPLATE_ID in environment to use a pre-built Zoho Sign template, " +
+            "which uses a different API endpoint that avoids this bug. " +
+            `Original error: ${reqData.message}`,
+        );
+      }
       throw new Error(`Zoho Sign request creation failed: ${JSON.stringify(reqData)}`);
+    }
     requestId = reqData.requests.request_id;
   }
 
