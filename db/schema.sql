@@ -183,9 +183,23 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   source TEXT NOT NULL,
   last_touch TEXT NOT NULL,
   notes TEXT NOT NULL,
+  is_hidden_to_team BOOLEAN NOT NULL DEFAULT FALSE,
+  reward_rate_percent NUMERIC(6,2) NOT NULL DEFAULT 5,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_deal_collaborators (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  split_percent NUMERIC(6,2) NOT NULL DEFAULT 100,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (deal_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS portal_customers (
@@ -403,6 +417,39 @@ ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_budget TEXT;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS possible_close_date DATE;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS is_hidden_to_team BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS reward_rate_percent NUMERIC(6,2) NOT NULL DEFAULT 5;
+
+ALTER TABLE portal_deal_collaborators ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+
+DROP TRIGGER IF EXISTS portal_deal_collaborators_updated_at ON portal_deal_collaborators;
+CREATE TRIGGER portal_deal_collaborators_updated_at
+BEFORE UPDATE ON portal_deal_collaborators
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+INSERT INTO portal_deal_collaborators (
+  id,
+  deal_id,
+  user_id,
+  split_percent,
+  sort_order,
+  is_seed,
+  created_at,
+  updated_at
+)
+SELECT
+  gen_random_uuid(),
+  d.id,
+  d.user_id,
+  100,
+  0,
+  COALESCE(d.is_seed, FALSE),
+  now(),
+  now()
+FROM portal_deals d
+WHERE d.user_id IS NOT NULL
+ON CONFLICT (deal_id, user_id) DO NOTHING;
 
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
