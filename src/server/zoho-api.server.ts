@@ -145,14 +145,12 @@ export async function handleZohoWebhook(request: Request) {
 
 export function parseZohoSendAgreementFormData(formData: FormData) {
   const partnerId = String(formData.get("partnerId") ?? "").trim();
-  const partnerEmail = String(formData.get("partnerEmail") ?? "").trim();
   const partnerName = String(formData.get("partnerName") ?? "").trim();
   const partnerCompany = String(formData.get("partnerCompany") ?? "").trim();
   const uploadedBy = String(formData.get("uploadedBy") ?? "").trim() || null;
   const fileValue = formData.get("agreementFile") ?? formData.get("file");
 
   if (!partnerId) throw new Error("partnerId is required");
-  if (!partnerEmail) throw new Error("partnerEmail is required");
   if (!partnerName) throw new Error("partnerName is required");
   if (!partnerCompany) throw new Error("partnerCompany is required");
   if (!(fileValue instanceof File)) {
@@ -166,7 +164,6 @@ export function parseZohoSendAgreementFormData(formData: FormData) {
 
   return {
     partnerId,
-    partnerEmail,
     partnerName,
     partnerCompany,
     uploadedBy,
@@ -261,11 +258,19 @@ export async function handleZohoSendAgreement(request: Request) {
     });
   }
 
-  const { partnerId, partnerEmail, partnerName, partnerCompany, uploadedBy, agreementFile } = body;
+  const { partnerId, partnerName, partnerCompany, uploadedBy, agreementFile } = body;
 
   try {
-    const partnerRes = await pool.query<{ id: string; owner_user_id: string }>(
-      `SELECT id, owner_user_id FROM public.partners WHERE id = $1 LIMIT 1`,
+    const partnerRes = await pool.query<{
+      id: string;
+      owner_user_id: string;
+      owner_email: string | null;
+    }>(
+      `SELECT p.id, p.owner_user_id, pr.email AS owner_email
+       FROM public.partners p
+       LEFT JOIN public.profiles pr ON pr.id = p.owner_user_id
+       WHERE p.id = $1
+       LIMIT 1`,
       [partnerId],
     );
     const partner = partnerRes.rows[0];
@@ -274,6 +279,15 @@ export async function handleZohoSendAgreement(request: Request) {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
+    }
+    if (!partner.owner_email) {
+      return new Response(
+        JSON.stringify({ error: "Partner owner email could not be resolved" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     const sourceFilePath = await storeSourceAgreementUpload({
@@ -286,7 +300,7 @@ export async function handleZohoSendAgreement(request: Request) {
     try {
       result = await sendAgreement({
         partnerId,
-        partnerEmail,
+        partnerEmail: partner.owner_email,
         partnerName,
         partnerCompany,
         sourceFile: agreementFile,

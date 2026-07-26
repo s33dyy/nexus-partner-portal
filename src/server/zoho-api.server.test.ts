@@ -7,7 +7,6 @@ test("Zoho send-agreement form parsing requires a PDF upload", async () => {
 
   const form = new FormData();
   form.append("partnerId", "partner-123");
-  form.append("partnerEmail", "partner@example.com");
   form.append("partnerName", "Partner Name");
   form.append("partnerCompany", "Acme & Co");
   form.append(
@@ -19,20 +18,162 @@ test("Zoho send-agreement form parsing requires a PDF upload", async () => {
 
   expect(parseZohoSendAgreementFormData(form)).toMatchObject({
     partnerId: "partner-123",
-    partnerEmail: "partner@example.com",
     partnerName: "Partner Name",
     partnerCompany: "Acme & Co",
   });
 
   const missingFile = new FormData();
   missingFile.append("partnerId", "partner-123");
-  missingFile.append("partnerEmail", "partner@example.com");
   missingFile.append("partnerName", "Partner Name");
   missingFile.append("partnerCompany", "Acme & Co");
 
   expect(() => parseZohoSendAgreementFormData(missingFile)).toThrow(
     "A PDF file upload is required",
   );
+});
+
+test("Zoho send-agreement resolves the recipient email from the partner owner profile", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  process.env.ZOHO_SIGN_CLIENT_ID ??= "client-id";
+  process.env.ZOHO_SIGN_CLIENT_SECRET ??= "client-secret";
+
+  const { handleZohoSendAgreement } = await import("@/server/zoho-api.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown = null;
+
+  pool.query = (async (sql: string, params?: unknown[]) => {
+    if (String(sql).includes("FROM public.partners p") && String(sql).includes("owner_email")) {
+      return {
+        rows: [
+          {
+            id: "partner-123",
+            owner_user_id: "user-123",
+            owner_email: "owner@example.com",
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+
+    if (String(sql).includes("DELETE FROM public.partner_documents")) {
+      return { rows: [], rowCount: 1 } as never;
+    }
+
+    if (String(sql).includes("INSERT INTO public.partner_documents")) {
+      return { rows: [], rowCount: 1 } as never;
+    }
+
+    if (String(sql).includes("UPDATE public.partners") && String(sql).includes("agreement_envelope_id")) {
+      return { rows: [], rowCount: 1 } as never;
+    }
+
+    if (String(sql).includes("UPDATE public.profiles") && String(sql).includes("partner_status")) {
+      return { rows: [], rowCount: 1 } as never;
+    }
+
+    if (String(sql).includes("UPDATE public.partners") && String(sql).includes("agreement_source_doc_path")) {
+      return { rows: [], rowCount: 1 } as never;
+    }
+
+    if (String(sql).includes("FROM public.zoho_sign_tokens")) {
+      return {
+        rows: [
+          {
+            id: "token-1",
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            api_domain: "https://sign.zoho.in",
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+
+    return { rows: [], rowCount: 1 } as never;
+  }) as typeof pool.query;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(String(input), init);
+    const url = request.url;
+
+    if (url.includes("api.cloudinary.com/v1_1/")) {
+      return new Response(
+        JSON.stringify({
+          public_id: "partners/partner-123/agreement-source",
+          secure_url: "https://res.cloudinary.com/example/raw/upload/partners/partner-123/agreement-source",
+          resource_type: "raw",
+          bytes: 4,
+        }),
+        { status: 200 },
+      );
+    }
+
+    if (url.includes("/api/v1/documents")) {
+      return new Response(
+        JSON.stringify({
+          documents: {
+            document_ids: [{ document_id: "doc-123" }],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    if (url.endsWith("/api/v1/requests") && request.method === "POST") {
+      requestBody = JSON.parse((await request.clone().text()) || "{}");
+      return new Response(JSON.stringify({ requests: { request_id: "req-123" } }), {
+        status: 200,
+      });
+    }
+
+    if (url.includes("/api/v1/requests/req-123") && !url.includes("/embedtoken")) {
+      return new Response(
+        JSON.stringify({
+          requests: {
+            actions: [{ action_id: "action-456", action_type: "SIGN" }],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    if (url.includes("/embedtoken")) {
+      return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
+        status: 200,
+      });
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const form = new FormData();
+    form.append("partnerId", "partner-123");
+    form.append("partnerName", "Partner Name");
+    form.append("partnerCompany", "Acme & Co");
+    form.append("agreementFile", new File([new Uint8Array([37, 80, 68, 70])], "agreement.pdf", {
+      type: "application/pdf",
+    }));
+
+    const request = new Request("http://localhost/api/integrations/zoho-sign/send-agreement", {
+      method: "POST",
+      body: form,
+    });
+
+    const response = await handleZohoSendAgreement(request);
+
+    expect(response.status).toBe(200);
+    expect((requestBody as { requests?: { actions?: Array<{ recipient_email?: string }> } })?.requests?.actions?.[0]?.recipient_email).toBe(
+      "owner@example.com",
+    );
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Zoho webhook completion moves the partner into signed_pending_review", async () => {

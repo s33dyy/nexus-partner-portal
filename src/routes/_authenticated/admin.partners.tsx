@@ -349,8 +349,8 @@ function AdminPartners() {
   };
 
   const sendAgreement = async () => {
-    if (!selected || !ownerEmail) {
-      toast.error("Owner email not found — cannot send agreement");
+    if (!selected) {
+      toast.error("Select a partner before sending the agreement");
       return;
     }
     if (!agreementDraftFile) {
@@ -361,7 +361,6 @@ function AdminPartners() {
     try {
       const formData = new FormData();
       formData.append("partnerId", selected.id);
-      formData.append("partnerEmail", ownerEmail);
       formData.append("partnerName", selected.legal_name ?? selected.company_name);
       formData.append("partnerCompany", selected.company_name);
       if (profile?.id) {
@@ -826,7 +825,7 @@ function AdminPartners() {
                             <Button
                               size="sm"
                               onClick={() => void sendAgreement()}
-                              disabled={sendingAgreement || !ownerEmail || !agreementDraftFile}
+                              disabled={sendingAgreement || !agreementDraftFile}
                             >
                               {sendingAgreement ? (
                                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
