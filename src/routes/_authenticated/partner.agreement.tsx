@@ -107,10 +107,11 @@ function AgreementPage() {
     setSigning(true);
     let openedWindow: Window | null = null;
     try {
-      openedWindow = window.open("", "_blank", "noopener,noreferrer");
+      openedWindow = window.open("about:blank", "_blank");
       if (!openedWindow) {
         throw new Error("Zoho Sign popup was blocked");
       }
+      openedWindow.opener = null;
 
       const response = await fetch("/api/integrations/zoho-sign/sign-url", {
         method: "POST",
@@ -125,7 +126,7 @@ function AgreementPage() {
       if (!data.signUrl) {
         throw new Error("Missing Zoho Sign URL");
       }
-      openedWindow.location.href = data.signUrl;
+      openedWindow.location.replace(data.signUrl);
       openedWindow = null;
     } catch (error) {
       if (openedWindow) {
