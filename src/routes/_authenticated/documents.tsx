@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 
@@ -71,6 +72,7 @@ function DocumentsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
+  const access = useRequireAccess('partial');
 
   function uniqueStrings(values: Array<string | null | undefined>) {
     return [

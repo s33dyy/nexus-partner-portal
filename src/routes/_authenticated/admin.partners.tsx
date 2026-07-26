@@ -88,10 +88,11 @@ const STATUS_FILTERS = [
   "all",
   "submitted",
   "under_review",
-  "need_more_info",
+  "partial_approval",
   "pending_agreement",
   "approved",
   "rejected",
+  "need_more_info",
 ] as const;
 
 const TIERS = ["registered", "silver", "gold", "platinum"] as const;
@@ -187,14 +188,20 @@ function AdminPartners() {
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
-  const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info") => {
+  const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info" | "partial_approval") => {
     if (!selected) return;
     setActing(true);
     try {
-      const patch =
-        decision === "approved"
-          ? { status: decision, tier: tierForTurnover(selected.annual_turnover) }
-          : { status: decision };
+      let patch: Partial<Partner>;
+      
+      if (decision === "approved") {
+        patch = { status: decision, tier: tierForTurnover(selected.annual_turnover) };
+      } else if (decision === "partial_approval") {
+        patch = { status: decision };
+      } else {
+        patch = { status: decision };
+      }
+      
       const { error } = await supabase.from("partners").update(patch).eq("id", selected.id);
       if (error) throw error;
 
@@ -232,12 +239,17 @@ function AdminPartners() {
         });
 
         // Add to news feed
+        const newsTitle = decision === "partial_approval" 
+          ? `Partner ${selected.company_name} partially approved (agreement pending)`
+          : `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`;
+        const newsCaption = decision === "partial_approval"
+          ? noteDraft.trim() || `The partner application for ${selected.company_name} was partially approved. Agreement will be sent next.`
+          : noteDraft.trim() || `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`;
+          
         await supabase.from("portal_news_posts").insert({
           id: globalThis.crypto.randomUUID(),
-          title: `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`,
-          caption:
-            noteDraft.trim() ||
-            `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`,
+          title: newsTitle,
+          caption: newsCaption,
           image_path: "",
           image_alt: "",
           posted_by_name: "Super Admin",
@@ -554,7 +566,14 @@ function AdminPartners() {
                 <Separator />
 
                 <div className="flex flex-wrap gap-2">
-                  {/* Approve button — always available */}
+                  {/* Grant Partial Access - grants portal access but agreement not sent */}
+                  <Button
+                    variant="outline"
+                    onClick={() => void decide("partial_approval")}
+                    disabled={acting || selected.status === "partial_approval" || selected.status === "pending_agreement" || selected.status === "approved"}
+                  >
+                    Grant Partial Access
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => void decide("under_review")}
@@ -582,12 +601,12 @@ function AdminPartners() {
                     ) : (
                       <CheckCircle2 className="mr-1 h-4 w-4" />
                     )}
-                    Approve
+                    Full Approve
                   </Button>
                 </div>
 
-                {/* Agreement section — shown when status is not rejected */}
-                {(selected.status !== "rejected" && selected.status !== "pending_partner_registration") && (
+                {/* Agreement section — shown when status is partial_approval or pending_agreement */}
+                {(selected.status === "partial_approval" || selected.status === "pending_agreement") && (
                   <>
                     <Separator />
                     <div className="space-y-3">
@@ -657,7 +676,7 @@ function AdminPartners() {
                           <Button
                             size="sm"
                             onClick={() => void sendAgreement()}
-                            disabled={sendingAgreement || !ownerEmail}
+                            disabled={sendingAgreement || !ownerEmail || selected.status !== "partial_approval"}
                           >
                             {sendingAgreement ? (
                               <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />

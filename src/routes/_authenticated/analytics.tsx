@@ -13,19 +13,22 @@ import {
   type DealRecord,
 } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   component: AnalyticsPage,
 });
 
 function AnalyticsPage() {
+  const { profile, hasRole } = useAuth();
+  useRequireAccess('full');
+  
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [catalog, setCatalog] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
-  const { profile, hasRole } = useAuth();
 
   const load = useCallback(async () => {
     setLoading(true);

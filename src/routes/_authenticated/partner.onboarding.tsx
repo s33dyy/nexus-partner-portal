@@ -134,8 +134,20 @@ function OnboardingPage() {
     navigate({ to: "/dashboard", replace: true });
   }, [hasRole, loading, navigate]);
 
+  // Redirect if already past onboarding stage
+  useEffect(() => {
+    if (profile?.partner_status === "partial_approval") {
+      navigate({ to: "/partner/agreement", replace: true });
+    } else if (profile?.partner_status === "pending_agreement") {
+      navigate({ to: "/partner/agreement", replace: true });
+    } else if (profile?.partner_status === "approved") {
+      navigate({ to: "/dashboard", replace: true });
+    }
+  }, [profile?.partner_status, navigate]);
+
   const status = profile?.partner_status ?? "pending_partner_registration";
-  const readOnly = status === "submitted" || status === "under_review" || status === "approved";
+  const readOnly = status === "submitted" || status === "under_review" || 
+                   status === "partial_approval" || status === "pending_agreement" || status === "approved";
   const regionFieldName = regionLookupField(form.country);
 
   // Load existing partner if any

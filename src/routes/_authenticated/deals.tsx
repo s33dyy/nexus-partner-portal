@@ -36,6 +36,7 @@ import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import {
@@ -176,6 +177,7 @@ function DealsPage() {
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
+  useRequireAccess('full');
 
   const load = useCallback(async () => {
     setLoading(true);
