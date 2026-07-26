@@ -1,18 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  ExternalLink,
   FileSignature,
-  FileUp,
   Loader2,
   Mail,
   RefreshCcw,
   ShieldCheck,
-  Trash2,
-  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -24,7 +20,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
-import { getStatusLabel } from "@/lib/partner-status";
 
 export const Route = createFileRoute("/_authenticated/partner/agreement")({
   component: AgreementPage,
@@ -46,9 +41,7 @@ function AgreementPage() {
   const navigate = useNavigate();
   const [partner, setPartner] = useState<Partner | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploadingFile, setUploadingFile] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadPartner = async () => {
     if (!user) return;
@@ -107,53 +100,6 @@ function AgreementPage() {
     toast.info("Status refreshed");
   };
 
-  const handleUpload = async (file: File) => {
-    if (!partner) return;
-    setUploadingFile(true);
-    try {
-      const ext = file.name.split(".").pop() ?? "pdf";
-      const path = `${partner.id}/signed-agreement_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("partner-documents")
-        .upload(path, file, { upsert: false, contentType: file.type });
-      if (upErr) throw upErr;
-
-      const { error: dbErr } = await supabase
-        .from("partners")
-        .update({
-          agreement_signed_doc_path: path,
-          agreement_provider: "manual",
-        })
-        .eq("id", partner.id);
-      if (dbErr) throw dbErr;
-
-      toast.success("Signed agreement uploaded. Awaiting admin confirmation.");
-      await loadPartner();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploadingFile(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
-
-  const removeUpload = async () => {
-    if (!partner?.agreement_signed_doc_path) return;
-    try {
-      await supabase.storage
-        .from("partner-documents")
-        .remove([partner.agreement_signed_doc_path]);
-      await supabase
-        .from("partners")
-        .update({ agreement_signed_doc_path: null })
-        .eq("id", partner.id);
-      toast.success("Uploaded file removed");
-      await loadPartner();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Remove failed");
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -171,7 +117,6 @@ function AgreementPage() {
       !!partner?.agreement_envelope_id ||
       !!partner?.agreement_sent_at);
   const isSigned = isSignedPendingReview || !!partner?.agreement_signed_at;
-  const hasManualUpload = !!partner?.agreement_signed_doc_path;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -306,82 +251,13 @@ function AgreementPage() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2 rounded-md border bg-amber-500/5 px-3 py-2 text-sm text-amber-700">
                 <AlertCircle className="h-4 w-4 shrink-0" />
-                Your partner profile has been partially approved. An admin will send the agreement
-                for digital signature via Zoho Sign shortly.
+                Your partner profile has been partially approved. A super admin will upload a fresh
+                PDF and send it for digital signature via Zoho Sign shortly.
               </div>
             </CardContent>
           )}
         </Card>
       </motion.div>
-
-      {/* Manual upload fallback */}
-      {isPendingAgreement && !isSigned && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Upload className="h-4 w-4 text-muted-foreground" />
-                Manual Upload (Fallback)
-              </CardTitle>
-              <CardDescription>
-                If you prefer to sign physically, download the agreement, sign it, scan/photograph
-                it, and upload the signed copy here. An admin will confirm receipt.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {hasManualUpload ? (
-                <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    <span>Signed copy uploaded — awaiting admin review</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void removeUpload()}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                    Remove
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    id="agreement-upload"
-                    className="hidden"
-                    accept=".pdf,image/png,image/jpeg"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void handleUpload(f);
-                    }}
-                  />
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={uploadingFile}
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    {uploadingFile ? (
-                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <FileUp className="mr-2 h-3.5 w-3.5" />
-                    )}
-                    Upload signed agreement
-                  </Button>
-                  <p className="text-xs text-muted-foreground">PDF, PNG or JPG · up to 10 MB</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
 
       {/* What happens next */}
       <Separator />
@@ -394,19 +270,19 @@ function AgreementPage() {
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               1
             </span>
-            Sign the agreement via the Zoho Sign email link, or upload a manually signed copy.
+            A super admin uploads a fresh agreement PDF and sends it through Zoho Sign.
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               2
             </span>
-            Your account is automatically activated once LIVEY receives the signed document.
+            You sign the document digitally from the Zoho Sign email link.
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               3
             </span>
-            You'll be redirected to the full partner dashboard automatically.
+            LIVEY reviews the signed agreement and then grants full portal access.
           </li>
         </ol>
       </div>
