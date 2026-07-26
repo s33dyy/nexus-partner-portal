@@ -1,3 +1,5 @@
+import { calculateDealRewardAllocations } from "@/lib/deal-collaboration";
+
 export const DEAL_WIN_REWARD_POINTS = 500;
 
 export const REWARD_TIERS = [
@@ -61,8 +63,22 @@ export type RewardRedemptionRecord = {
   updated_at: string;
 };
 
+type RewardQuery = {
+  select(columns?: string): RewardQuery;
+  count(): RewardQuery;
+  eq(column: string, value: unknown): RewardQuery;
+  maybeSingle(): Promise<{ data: { id: string } | null; error: null | Error }>;
+  insert(payload: Record<string, unknown>): Promise<{ error: unknown | null }>;
+};
+
 type RewardDbClient = {
-  from(table: string): any;
+  from(table: string): RewardQuery;
+};
+
+type DealRewardCollaborator = {
+  userId: string;
+  splitPercent: number;
+  sortOrder: number;
 };
 
 export function rewardTierForPoints(points: number): RewardTier {
@@ -109,35 +125,61 @@ export async function awardDealWinPoints(
     dealId: string;
     accountName: string;
     product: string;
-    userId: string | null;
+    dealAmount: string | number;
+    rewardRatePercent: number;
+    collaborators: DealRewardCollaborator[];
+    fallbackUserId?: string | null;
     partnerId: string | null;
     actorId: string | null;
   },
 ) {
-  const { data: existing, error: lookupError } = await db
-    .from("reward_point_events")
-    .select("id")
-    .eq("source_type", "deal_win")
-    .eq("source_id", input.dealId)
-    .maybeSingle();
-  if (lookupError) throw lookupError;
-  if (existing) return { created: false };
+  const collaborators =
+    input.collaborators.length > 0
+      ? input.collaborators
+      : input.fallbackUserId
+        ? [{ userId: input.fallbackUserId, splitPercent: 100, sortOrder: 0 }]
+        : [];
 
+  const allocations = calculateDealRewardAllocations({
+    dealId: input.dealId,
+    dealAmount: input.dealAmount,
+    rewardRatePercent: input.rewardRatePercent,
+    collaborators,
+  });
+
+  let created = 0;
+  let points = 0;
   const now = new Date().toISOString();
-  const payload = {
-    id: makeRewardId(),
-    user_id: input.userId,
-    partner_id: input.partnerId,
-    source_type: "deal_win",
-    source_id: input.dealId,
-    points_delta: DEAL_WIN_REWARD_POINTS,
-    reason: `${input.accountName} closed won for ${input.product}`,
-    approved_by: input.actorId,
-    approved_at: now,
-    is_seed: false,
-    created_at: now,
-  };
-  const { error: insertError } = await db.from("reward_point_events").insert(payload);
-  if (insertError) throw insertError;
-  return { created: true, points: DEAL_WIN_REWARD_POINTS };
+
+  for (const allocation of allocations) {
+    const { data: existing, error: lookupError } = await db
+      .from("reward_point_events")
+      .select("id")
+      .eq("source_type", "deal_win")
+      .eq("source_id", input.dealId)
+      .eq("user_id", allocation.userId)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    if (existing) continue;
+
+    const payload = {
+      id: makeRewardId(),
+      user_id: allocation.userId,
+      partner_id: input.partnerId,
+      source_type: "deal_win",
+      source_id: input.dealId,
+      points_delta: allocation.points,
+      reason: `${input.accountName} closed won for ${input.product}`,
+      approved_by: input.actorId,
+      approved_at: now,
+      is_seed: false,
+      created_at: now,
+    };
+    const { error: insertError } = await db.from("reward_point_events").insert(payload);
+    if (insertError) throw insertError;
+    created += 1;
+    points += allocation.points;
+  }
+
+  return { created, points };
 }

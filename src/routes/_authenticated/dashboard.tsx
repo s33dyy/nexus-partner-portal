@@ -27,6 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import { NewsFeedCard } from "@/components/news-feed-card";
 import { formatDateLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
 import { getAgreementCtaLabel } from "@/routes/_authenticated/partner.agreement";
@@ -88,11 +89,13 @@ function DashboardPage() {
     try {
       // Only load deals/customers if user has deal access (approved status)
       const hasDealAccess = access.canAccessDeals;
-      
-      let dealQuery = hasDealAccess ? supabase
-        .from("portal_deals")
-        .select("id, amount, stage, status")
-        .order("updated_at", { ascending: false }) : null;
+
+      let dealQuery = hasDealAccess
+        ? supabase
+            .from("portal_deals")
+            .select("id, amount, stage, status")
+            .order("updated_at", { ascending: false })
+        : null;
       let customerQuery = hasDealAccess ? supabase.from("portal_customers").select("id") : null;
       let partnerQuery = supabase
         .from("partners")
@@ -146,9 +149,11 @@ function DashboardPage() {
         rewardQuery,
       ];
 
-      const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes] = await Promise.all(
-        queries.map(q => q ?? Promise.resolve({ data: [], error: null })),
-      );
+      const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes, collaboratorRes] =
+        await Promise.all([
+          ...queries.map((q) => q ?? Promise.resolve({ data: [], error: null })),
+          supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
+        ]);
 
       if (
         dealsRes.error ||
@@ -156,7 +161,8 @@ function DashboardPage() {
         partnersRes.error ||
         newsRes.error ||
         notifRes.error ||
-        rewardRes.error
+        rewardRes.error ||
+        collaboratorRes.error
       ) {
         throw (
           dealsRes.error ??
@@ -164,12 +170,40 @@ function DashboardPage() {
           partnersRes.error ??
           newsRes.error ??
           notifRes.error ??
-          rewardRes.error
+          rewardRes.error ??
+          collaboratorRes.error
         );
       }
 
-      const dealRows =
-        (dealsRes.data as Array<{ amount: string; stage: string; status: string }> | null) ?? [];
+      const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(
+        (collaboratorRes.data as Array<{ deal_id: string; user_id: string }> | null) ?? [],
+      );
+      const dealRows = filterVisibleDeals(
+        (
+          (dealsRes.data as Array<{
+            id: string;
+            amount: string;
+            stage: string;
+            status: string;
+            user_id: string | null;
+            is_hidden_to_team: boolean;
+          }> | null) ?? []
+        ).map((deal) => ({
+          ...deal,
+          is_hidden_to_team: Boolean(deal.is_hidden_to_team),
+        })),
+        collaboratorIdsByDeal,
+        {
+          viewerUserId: profile?.id ?? null,
+          viewerRole: hasRole("super_admin")
+            ? "super_admin"
+            : hasRole("partner_admin")
+              ? "partner_admin"
+              : "partner_user",
+          isSuperAdmin: hasRole("super_admin"),
+          isPartnerAdmin: hasRole("partner_admin"),
+        },
+      );
       const customerRows = (customersRes.data as Array<{ id: string }> | null) ?? [];
       const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
       const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
@@ -301,7 +335,7 @@ function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id]);
+  }, [access.canAccessDeals, hasRole, profile?.id, profile?.partner_id, status]);
 
   useEffect(() => {
     void loadDashboard();
@@ -361,7 +395,9 @@ function DashboardPage() {
             <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="flex-1">
               <p className="font-medium">
-                {access.isSignedPendingReview ? "Agreement Under Review" : "Partner Agreement Required"}
+                {access.isSignedPendingReview
+                  ? "Agreement Under Review"
+                  : "Partner Agreement Required"}
               </p>
               <p className="text-sm text-muted-foreground">
                 {access.isPartialApproval &&
@@ -528,7 +564,15 @@ function DashboardPage() {
               <Step done label="Create your account" />
               {hasRole("partner_admin") ? (
                 <>
-                  <Step done={access.isPartialApproval || access.isPendingAgreement || access.isSignedPendingReview || access.isApproved} label="Submit partner registration" />
+                  <Step
+                    done={
+                      access.isPartialApproval ||
+                      access.isPendingAgreement ||
+                      access.isSignedPendingReview ||
+                      access.isApproved
+                    }
+                    label="Submit partner registration"
+                  />
                   <Step
                     done={
                       access.isPartialApproval ||
@@ -538,7 +582,12 @@ function DashboardPage() {
                     }
                     label="LIVEY partial approval"
                   />
-                  <Step done={access.isPendingAgreement || access.isSignedPendingReview || access.isApproved} label="Sign agreement" />
+                  <Step
+                    done={
+                      access.isPendingAgreement || access.isSignedPendingReview || access.isApproved
+                    }
+                    label="Sign agreement"
+                  />
                   <Step done={access.isApproved} label="Full approval" />
                 </>
               ) : (

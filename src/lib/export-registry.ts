@@ -1,5 +1,7 @@
 import { supabase } from "@/integrations/local/client";
 import type { CsvColumn } from "@/lib/csv-export";
+import { applyPartnerScope } from "@/lib/partner-scope";
+import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 
 export type ExportRole = "super_admin" | "partner_admin" | "partner_user";
 
@@ -80,6 +82,45 @@ async function loadTableCount(
   return Number.isFinite(count) ? count : 0;
 }
 
+async function loadVisibleDealRows(scope: ExportScope) {
+  let query = supabase.from("portal_deals").select("*");
+  query = applyPartnerScope(query, {
+    isSuperAdmin: scope.isSuperAdmin,
+    partnerId: scope.partnerId,
+    userId: scope.userId,
+  });
+
+  const [dealRes, collaboratorRes] = await Promise.all([
+    query,
+    supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
+  ]);
+
+  if (dealRes.error || collaboratorRes.error) {
+    throw dealRes.error ?? collaboratorRes.error;
+  }
+
+  const deals = (dealRes.data ?? []) as Array<{
+    id: string;
+    user_id: string | null;
+    is_hidden_to_team: boolean;
+    [key: string]: unknown;
+  }>;
+  const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(
+    (collaboratorRes.data ?? []) as Array<{ deal_id: string; user_id: string }>,
+  );
+
+  return filterVisibleDeals(deals, collaboratorIdsByDeal, {
+    viewerUserId: scope.userId,
+    viewerRole: scope.role,
+    isSuperAdmin: scope.isSuperAdmin,
+    isPartnerAdmin: scope.role === "partner_admin",
+  });
+}
+
+async function loadVisibleDealCount(scope: ExportScope) {
+  return (await loadVisibleDealRows(scope)).length;
+}
+
 export function resolveScopeFilters(
   scope: ExportScope,
   scopeMode: ScopeMode,
@@ -98,7 +139,9 @@ export function resolveScopeFilters(
   }
 
   if (scopeMode === "company") {
-    return [{ column: "company_name", value: requireScopeValue(scope.companyName, "company scope") }];
+    return [
+      { column: "company_name", value: requireScopeValue(scope.companyName, "company scope") },
+    ];
   }
 
   if (scopeMode === "partner-or-user") {
@@ -149,16 +192,14 @@ const ADMIN_ROLES: ExportRole[] = ["super_admin", "partner_admin"];
 const SUPER_ADMIN_ONLY: ExportRole[] = ["super_admin"];
 
 export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
-  dataset({
+  {
     id: "portal-deals",
-    table: "portal_deals",
     label: "Deals",
     description: "Registered opportunities and their current pipeline details.",
     group: "operational",
     filenameStem: "livey-deals",
     visibleTo: ALL_ROLES,
     routePath: "/deals",
-    scopeMode: "partner-or-user",
     columns: [
       { key: "id", header: "ID" },
       { key: "account_name", header: "Account" },
@@ -171,12 +212,16 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
       { key: "customer_budget", header: "Customer Budget" },
       { key: "country", header: "Country" },
       { key: "region", header: "Region" },
+      { key: "is_hidden_to_team", header: "Hidden To Team" },
+      { key: "reward_rate_percent", header: "Reward Rate %" },
       { key: "possible_close_date", header: "Possible Close Date" },
       { key: "close_date", header: "Close Date" },
       { key: "created_at", header: "Created At" },
       { key: "updated_at", header: "Updated At" },
     ],
-  }),
+    loadRows: loadVisibleDealRows,
+    loadCount: loadVisibleDealCount,
+  },
   dataset({
     id: "portal-customers",
     table: "portal_customers",

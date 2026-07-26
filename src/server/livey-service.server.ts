@@ -141,6 +141,18 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "notes",
     "user_id",
     "partner_id",
+    "is_hidden_to_team",
+    "reward_rate_percent",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  portal_deal_collaborators: [
+    "id",
+    "deal_id",
+    "user_id",
+    "split_percent",
+    "sort_order",
     "is_seed",
     "created_at",
     "updated_at",
@@ -857,7 +869,9 @@ export async function createWorkspaceUser(input: {
       input.company_name,
       input.partner_status ??
         (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
-      input.partner_id || (ctx.profile as { partner_id?: string | null } | null)?.partner_id || null,
+      input.partner_id ||
+        (ctx.profile as { partner_id?: string | null } | null)?.partner_id ||
+        null,
     ],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [

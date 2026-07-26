@@ -35,6 +35,19 @@ export type DealRecord = {
   notes: string;
   user_id: string | null;
   partner_id: string | null;
+  is_hidden_to_team: boolean;
+  reward_rate_percent: number;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DealCollaboratorRecord = {
+  id: string;
+  deal_id: string;
+  user_id: string;
+  split_percent: number;
+  sort_order: number;
   is_seed: boolean;
   created_at: string;
   updated_at: string;

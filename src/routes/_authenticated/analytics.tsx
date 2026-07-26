@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import {
   DEAL_STAGE_ORDER,
   type CatalogItemRecord,
@@ -21,8 +22,8 @@ export const Route = createFileRoute("/_authenticated/analytics")({
 
 function AnalyticsPage() {
   const { profile, hasRole } = useAuth();
-  useRequireAccess('full');
-  
+  useRequireAccess("full");
+
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [catalog, setCatalog] = useState<CatalogItemRecord[]>([]);
@@ -58,10 +59,33 @@ function AnalyticsPage() {
         customerQuery,
         supabase.from("portal_catalog_items").select("*").order("updated_at", { ascending: false }),
       ]);
-      if (dealRes.error || customerRes.error || catalogRes.error) {
-        throw dealRes.error ?? customerRes.error ?? catalogRes.error;
+      const collaboratorRes = await supabase
+        .from("portal_deal_collaborators")
+        .select("deal_id, user_id");
+
+      if (dealRes.error || customerRes.error || catalogRes.error || collaboratorRes.error) {
+        throw dealRes.error ?? customerRes.error ?? catalogRes.error ?? collaboratorRes.error;
       }
-      const dealRows = (dealRes.data as DealRecord[] | null) ?? [];
+      const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(
+        (collaboratorRes.data as Array<{ deal_id: string; user_id: string }> | null) ?? [],
+      );
+      const dealRows = filterVisibleDeals(
+        ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => ({
+          ...deal,
+          is_hidden_to_team: Boolean(deal.is_hidden_to_team),
+        })),
+        collaboratorIdsByDeal,
+        {
+          viewerUserId: profile?.id ?? null,
+          viewerRole: hasRole("super_admin")
+            ? "super_admin"
+            : hasRole("partner_admin")
+              ? "partner_admin"
+              : "partner_user",
+          isSuperAdmin: hasRole("super_admin"),
+          isPartnerAdmin: hasRole("partner_admin"),
+        },
+      );
       const customerRows = (customerRes.data as CustomerRecord[] | null) ?? [];
       const catalogRows = (catalogRes.data as CatalogItemRecord[] | null) ?? [];
       setDeals(dealRows);

@@ -29,6 +29,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
+import { normalizeDealCollaborators, type DealCollaboratorDraft } from "@/lib/deal-collaboration";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
@@ -56,9 +58,12 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 
 function PipelinePage() {
   const { profile, hasRole } = useAuth();
-  const access = useRequireAccess('full');
-  
+  const access = useRequireAccess("full");
+
   const [deals, setDeals] = useState<DealRecord[]>([]);
+  const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
+    Record<string, DealCollaboratorDraft[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -81,13 +86,51 @@ function PipelinePage() {
         userId: profile?.id ?? null,
       });
 
-      const { data, error } = await queryBuilder;
-      if (error) throw error;
-      const rows = (data as DealRecord[] | null) ?? [];
+      const [dealRes, collaboratorRes] = await Promise.all([
+        queryBuilder,
+        supabase
+          .from("portal_deal_collaborators")
+          .select("*")
+          .order("sort_order", { ascending: true }),
+      ]);
+      if (dealRes.error || collaboratorRes.error) throw dealRes.error ?? collaboratorRes.error;
+      const collaboratorRows =
+        (collaboratorRes.data as Array<{
+          deal_id: string;
+          user_id: string;
+          split_percent: number;
+          sort_order: number;
+        }> | null) ?? [];
+      const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(collaboratorRows);
+      const collaboratorMap = Object.fromEntries(
+        ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => {
+          const dealCollaborators = collaboratorRows.filter((row) => row.deal_id === deal.id);
+          return [deal.id, normalizeDealCollaborators(dealCollaborators)];
+        }),
+      ) as Record<string, DealCollaboratorDraft[]>;
+      const rows = filterVisibleDeals(
+        ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => ({
+          ...deal,
+          is_hidden_to_team: Boolean(deal.is_hidden_to_team),
+        })),
+        collaboratorIdsByDeal,
+        {
+          viewerUserId: profile?.id ?? null,
+          viewerRole: hasRole("super_admin")
+            ? "super_admin"
+            : hasRole("partner_admin")
+              ? "partner_admin"
+              : "partner_user",
+          isSuperAdmin: hasRole("super_admin"),
+          isPartnerAdmin: hasRole("partner_admin"),
+        },
+      );
       setDeals(rows);
+      setCollaboratorsByDealId(collaboratorMap);
       setSource(rows.length > 0 ? "database" : "empty");
     } catch {
       setDeals([]);
+      setCollaboratorsByDealId({});
       setSource("empty");
     } finally {
       setLoading(false);
@@ -220,7 +263,10 @@ function PipelinePage() {
             dealId: deal.id,
             accountName: deal.account_name,
             product: deal.product,
-            userId: deal.user_id,
+            dealAmount: deal.amount,
+            rewardRatePercent: Number(deal.reward_rate_percent) || 5,
+            collaborators: collaboratorsByDealId[deal.id] ?? [],
+            fallbackUserId: deal.user_id,
             partnerId: deal.partner_id,
             actorId: null,
           });

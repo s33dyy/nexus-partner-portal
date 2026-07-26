@@ -1,7 +1,22 @@
 import { expect, test } from "bun:test";
 
 import { supabase } from "@/integrations/local/client";
-import { EXPORT_DATASETS, listVisibleExportDatasets, resolveScopeFilters } from "@/lib/export-registry";
+import {
+  EXPORT_DATASETS,
+  listVisibleExportDatasets,
+  resolveScopeFilters,
+} from "@/lib/export-registry";
+
+type MockResult = { data: unknown; error: null };
+
+type MockQuery = PromiseLike<MockResult> & {
+  select(): MockQuery;
+  count(): MockQuery;
+  eq(column: string, value: unknown): MockQuery;
+  maybeSingle(): Promise<MockResult>;
+};
+
+type MockFrom = (table: string) => MockQuery;
 
 test("listVisibleExportDatasets hides admin-only exports from partner users", () => {
   const visible = listVisibleExportDatasets("partner_user").map((dataset) => dataset.id);
@@ -104,51 +119,153 @@ test("resolveScopeFilters scopes team exports by company name", () => {
   ).toThrow("Cannot export without company scope.");
 });
 
-test("dataset loadCount uses the dedicated count path", async () => {
-  const client = supabase as typeof supabase & { from: any };
-  const originalFrom = client.from;
+test("portal deals exports hide hidden deals from partner users", async () => {
+  const client = supabase as typeof supabase & { from: MockFrom };
+  const originalFrom: MockFrom = client.from;
   const calls: Array<{
     table: string;
     filters: Array<{ column: string; value: unknown }>;
+    operation: string;
   }> = [];
 
   client.from = ((table: string) => {
-    const state = { table, filters: [] as Array<{ column: string; value: unknown }> };
+    const state = {
+      table,
+      filters: [] as Array<{ column: string; value: unknown }>,
+      operation: "select",
+    };
     calls.push(state);
 
-    const query: any = {
+    const query: MockQuery = {
+      select() {
+        state.operation = "select";
+        return query;
+      },
       count() {
+        state.operation = "count";
         return query;
       },
       eq(column: string, value: unknown) {
         state.filters.push({ column, value });
         return query;
       },
-      then(onfulfilled: (value: { data: unknown; error: null }) => unknown, onrejected: (reason: unknown) => unknown) {
-        return Promise.resolve({ data: "7", error: null }).then(onfulfilled, onrejected);
+      maybeSingle() {
+        return Promise.resolve({ data: null, error: null });
+      },
+      then<TResult1 = MockResult, TResult2 = never>(
+        onfulfilled?: ((value: MockResult) => TResult1 | PromiseLike<TResult1>) | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ): Promise<TResult1 | TResult2> {
+        if (table === "portal_deals") {
+          return Promise.resolve({
+            data: [
+              {
+                id: "deal-visible",
+                account_name: "Visible",
+                contact_name: "Visible Client",
+                product: "Camera",
+                stage: "won",
+                status: "won",
+                quantity: 1,
+                amount: "1000",
+                customer_budget: null,
+                country: "India",
+                region: "West",
+                is_hidden_to_team: false,
+                reward_rate_percent: 5,
+                possible_close_date: null,
+                close_date: "2026-07-26",
+                created_at: "2026-07-26T00:00:00Z",
+                updated_at: "2026-07-26T00:00:00Z",
+                partner_id: "partner-123",
+                user_id: "user-456",
+              },
+              {
+                id: "deal-hidden",
+                account_name: "Hidden",
+                contact_name: "Hidden Client",
+                product: "Mic",
+                stage: "won",
+                status: "won",
+                quantity: 1,
+                amount: "1000",
+                customer_budget: null,
+                country: "India",
+                region: "West",
+                is_hidden_to_team: true,
+                reward_rate_percent: 5,
+                possible_close_date: null,
+                close_date: "2026-07-26",
+                created_at: "2026-07-26T00:00:00Z",
+                updated_at: "2026-07-26T00:00:00Z",
+                partner_id: "partner-123",
+                user_id: "user-999",
+              },
+            ],
+            error: null,
+          }).then(onfulfilled, onrejected);
+        }
+
+        if (table === "portal_deal_collaborators") {
+          return Promise.resolve({
+            data: [
+              { deal_id: "deal-hidden", user_id: "user-456" },
+              { deal_id: "deal-visible", user_id: "user-456" },
+            ],
+            error: null,
+          }).then(onfulfilled, onrejected);
+        }
+
+        return Promise.resolve({ data: [], error: null }).then(onfulfilled, onrejected);
       },
     };
 
     return query;
-  }) as any;
+  }) as MockFrom;
 
   try {
     const dataset = EXPORT_DATASETS.find((entry) => entry.id === "portal-deals");
     expect(dataset).toBeDefined();
 
-    const count = await dataset!.loadCount({
-      role: "partner_admin",
+    const rows = await dataset!.loadRows({
+      role: "partner_user",
       isSuperAdmin: false,
       partnerId: "partner-123",
       userId: "user-456",
       companyName: "Techilla",
     });
 
-    expect(count).toBe(7);
+    expect(rows.map((row) => row.id)).toEqual(["deal-visible", "deal-hidden"]);
+
+    const count = await dataset!.loadCount({
+      role: "partner_user",
+      isSuperAdmin: false,
+      partnerId: "partner-123",
+      userId: "user-456",
+      companyName: "Techilla",
+    });
+
+    expect(count).toBe(2);
     expect(calls).toEqual([
       {
         table: "portal_deals",
         filters: [{ column: "partner_id", value: "partner-123" }],
+        operation: "select",
+      },
+      {
+        table: "portal_deal_collaborators",
+        filters: [],
+        operation: "select",
+      },
+      {
+        table: "portal_deals",
+        filters: [{ column: "partner_id", value: "partner-123" }],
+        operation: "select",
+      },
+      {
+        table: "portal_deal_collaborators",
+        filters: [],
+        operation: "select",
       },
     ]);
   } finally {
