@@ -24,7 +24,12 @@ function normalizeAgreementText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
-export function resolveZohoEmbedHost(): string {
+export function resolveZohoEmbedHost(request?: Request): string {
+  const requestOrigin = request?.headers.get("origin")?.trim();
+  if (requestOrigin && /^https?:\/\//i.test(requestOrigin)) {
+    return requestOrigin;
+  }
+
   const configuredHost = process.env.ZOHO_SIGN_EMBED_HOST?.trim();
   if (configuredHost) return configuredHost;
 

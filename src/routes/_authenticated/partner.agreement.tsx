@@ -234,7 +234,7 @@ function AgreementPage() {
                 <FileSignature className="h-4 w-4" />
                 <AlertTitle>Open Zoho Sign</AlertTitle>
                 <AlertDescription>
-                  Click the button below to fetch a fresh signing URL and open it in a new tab.
+                  Click the button below to fetch a fresh signing URL and open it in this tab.
                 </AlertDescription>
               </Alert>
 
@@ -296,7 +296,7 @@ function AgreementPage() {
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               2
             </span>
-            You click Sign with Zoho Sign to open a fresh signing tab and complete the signature.
+            You click Sign with Zoho Sign to open a fresh signing view in this tab and complete the signature.
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">

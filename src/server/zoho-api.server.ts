@@ -473,7 +473,7 @@ export async function handleZohoSignUrl(request: Request) {
 
     const signUrl = await getEmbeddedSigningUrl(
       partner.agreement_envelope_id,
-      resolveZohoEmbedHost(),
+      resolveZohoEmbedHost(request),
     );
 
     return new Response(JSON.stringify({ signUrl }), {
