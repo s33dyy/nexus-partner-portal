@@ -199,7 +199,7 @@ async function storeSourceAgreementUpload(input: {
   file: File;
 }) {
   const sourceFilePath = buildPartnerAgreementSourceFilePath(input.partnerId);
-  await uploadDocumentBlob({
+  const uploadedBlob = await uploadDocumentBlob({
     bucket: "partner-documents",
     filePath: sourceFilePath,
     fileName: input.file.name || "agreement.pdf",
@@ -207,6 +207,7 @@ async function storeSourceAgreementUpload(input: {
     file: input.file,
     isSeed: false,
   });
+  const storedFilePath = uploadedBlob.path;
 
   await pool.query(
     `DELETE FROM public.partner_documents
@@ -230,7 +231,7 @@ async function storeSourceAgreementUpload(input: {
       input.partnerId,
       input.uploadedBy,
       input.file.name || "agreement.pdf",
-      sourceFilePath,
+      storedFilePath,
       input.file.type || "application/pdf",
       input.file.size,
     ],
@@ -241,10 +242,10 @@ async function storeSourceAgreementUpload(input: {
      SET agreement_source_doc_path = $1,
          updated_at = now()
      WHERE id = $2`,
-    [sourceFilePath, input.partnerId],
+    [storedFilePath, input.partnerId],
   );
 
-  return sourceFilePath;
+  return storedFilePath;
 }
 
 export async function handleZohoSendAgreement(request: Request) {
