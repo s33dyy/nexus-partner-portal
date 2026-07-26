@@ -81,7 +81,20 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
       return new Response(
         JSON.stringify({
           code: 0,
-          requests: { request_id: "req-123" },
+          requests: {
+            request_id: "req-123",
+            actions: [{ action_id: "action-123", action_type: "SIGN" }],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    if (String(input).includes("/api/v1/requests/req-123/submit")) {
+      return new Response(
+        JSON.stringify({
+          status: "success",
+          requests: { request_status: "pending" },
         }),
         { status: 200 },
       );
@@ -102,6 +115,9 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
     });
 
     expect(result.requestId).toBe("req-123");
+
+    const submitCall = fetchCalls.find((entry) => entry.url.endsWith("/api/v1/requests/req-123/submit"));
+    expect(submitCall).toBeDefined();
 
     const requestCall = fetchCalls.find(
       (entry) => entry.url.endsWith("/api/v1/requests") && !!entry.init?.body,

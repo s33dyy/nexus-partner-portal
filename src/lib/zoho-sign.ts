@@ -325,7 +325,12 @@ export async function sendAgreement(opts: {
     body: JSON.stringify(requestPayload),
   });
   const reqData = (await reqRes.json()) as {
-    requests?: { request_id?: string };
+    requests?: {
+      request_id?: string;
+      actions?: Array<{
+        action_id?: string;
+      }>;
+    };
     message?: string;
     code?: number;
     error_param?: string;
@@ -342,6 +347,44 @@ export async function sendAgreement(opts: {
     throw new Error(`Zoho Sign request creation failed: ${JSON.stringify(reqData)}`);
   }
   requestId = reqData.requests.request_id;
+
+  const createdActionId = reqData.requests.actions?.[0]?.action_id;
+  if (!createdActionId) {
+    throw new Error("Zoho Sign request creation did not return an action_id");
+  }
+
+  const submitPayload = {
+    requests: {
+      actions: [
+        {
+          action_id: createdActionId,
+          action_type: "SIGN",
+          recipient_name: opts.partnerName,
+          recipient_email: opts.partnerEmail,
+          fields: requestPayload.requests.actions[0]?.fields,
+        },
+      ],
+    },
+  };
+
+  const submitBody = new FormData();
+  submitBody.append("data", JSON.stringify(submitPayload));
+
+  const submitRes = await fetch(`${apiDomain}/api/v1/requests/${requestId}/submit`, {
+    method: "POST",
+    headers: {
+      Authorization: `Zoho-oauthtoken ${token}`,
+    },
+    body: submitBody,
+  });
+  const submitData = (await submitRes.json()) as {
+    status?: string;
+    message?: string;
+    requests?: { request_status?: string };
+  };
+  if (!submitRes.ok || submitData.status === "failure") {
+    throw new Error(`Zoho Sign submit request failed: ${JSON.stringify(submitData)}`);
+  }
 
   return { requestId, signingUrl };
 }

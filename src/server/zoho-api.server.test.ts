@@ -125,9 +125,25 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
 
     if (url.endsWith("/api/v1/requests") && request.method === "POST") {
       requestBody = JSON.parse((await request.clone().text()) || "{}");
-      return new Response(JSON.stringify({ requests: { request_id: "req-123" } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          requests: {
+            request_id: "req-123",
+            actions: [{ action_id: "action-456", action_type: "SIGN" }],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    if (url.includes("/api/v1/requests/req-123/submit")) {
+      return new Response(
+        JSON.stringify({
+          status: "success",
+          requests: { request_status: "pending" },
+        }),
+        { status: 200 },
+      );
     }
 
     if (url.includes("/api/v1/requests/req-123") && !url.includes("/embedtoken")) {
