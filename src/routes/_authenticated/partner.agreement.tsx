@@ -24,6 +24,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { getStatusLabel } from "@/lib/partner-status";
 
 export const Route = createFileRoute("/_authenticated/partner/agreement")({
   component: AgreementPage,
@@ -155,7 +156,8 @@ function AgreementPage() {
     );
   }
 
-  const isSent = !!partner?.agreement_envelope_id || !!partner?.agreement_sent_at;
+  const isPartialApproval = partner?.status === 'partial_approval';
+  const isPendingAgreement = partner?.status === 'pending_agreement' || !!partner?.agreement_envelope_id || !!partner?.agreement_sent_at;
   const isSigned = !!partner?.agreement_signed_at;
   const hasManualUpload = !!partner?.agreement_signed_doc_path;
 
@@ -180,36 +182,44 @@ function AgreementPage() {
           className={
             isSigned
               ? "border-emerald-500/40 bg-emerald-500/5"
-              : isSent
+              : isPendingAgreement
                 ? "border-primary/30 bg-primary/5"
-                : "border-amber-500/40 bg-amber-500/5"
+                : isPartialApproval
+                  ? "border-amber-500/40 bg-amber-500/5"
+                  : "border-amber-500/40 bg-amber-500/5"
           }
         >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               {isSigned ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              ) : isSent ? (
+              ) : isPendingAgreement ? (
                 <Clock className="h-5 w-5 text-primary" />
+              ) : isPartialApproval ? (
+                <AlertCircle className="h-5 w-5 text-amber-600" />
               ) : (
                 <AlertCircle className="h-5 w-5 text-amber-600" />
               )}
               {isSigned
                 ? "Agreement Signed"
-                : isSent
+                : isPendingAgreement
                   ? "Agreement Sent — Awaiting Your Signature"
-                  : "Agreement Not Yet Sent"}
+                  : isPartialApproval
+                    ? "Agreement Pending — Awaiting Admin to Send"
+                    : "Agreement Not Yet Available"}
             </CardTitle>
             <CardDescription>
               {isSigned
                 ? "Your signed agreement has been received. Your account will be fully activated shortly."
-                : isSent
+                : isPendingAgreement
                   ? "LIVEY has sent a partner agreement to your email. Please sign it to activate your account."
-                  : "An agreement will be sent to your registered email once an admin initiates it."}
+                  : isPartialApproval
+                    ? "Your partner profile has been partially approved. An admin will send the agreement for digital signature shortly."
+                    : "An agreement will be sent to your registered email once an admin initiates it."}
             </CardDescription>
           </CardHeader>
 
-          {isSent && !isSigned && (
+          {isPendingAgreement && !isSigned && (
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
                 {partner?.agreement_sent_at && (
@@ -260,11 +270,21 @@ function AgreementPage() {
               </div>
             </CardContent>
           )}
+
+          {isPartialApproval && (
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 rounded-md border bg-amber-500/5 px-3 py-2 text-sm text-amber-700">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                Your partner profile has been partially approved. An admin will send the agreement
+                for digital signature via Zoho Sign shortly.
+              </div>
+            </CardContent>
+          )}
         </Card>
       </motion.div>
 
       {/* Manual upload fallback */}
-      {isSent && !isSigned && (
+      {isPendingAgreement && !isSigned && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}

@@ -26,6 +26,7 @@ import {
 } from "@/lib/portal-records";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
@@ -54,6 +55,9 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 ];
 
 function PipelinePage() {
+  const { profile, hasRole } = useAuth();
+  const access = useRequireAccess('full');
+  
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,7 +66,6 @@ function PipelinePage() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
-  const { profile, hasRole } = useAuth();
 
   const load = useCallback(async () => {
     setLoading(true);

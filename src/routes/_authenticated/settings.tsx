@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { getRouteApi } from "@tanstack/react-router";
@@ -50,6 +51,8 @@ function SettingsPage() {
     : hasRole("partner_admin")
       ? "partner_admin"
       : "partner_user";
+
+  useRequireAccess('partial');
 
   const scope = useMemo<ExportScope>(
     () => ({

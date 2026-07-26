@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  AlertCircle,
   ArrowRight,
   Building2,
   BarChart3,
@@ -30,6 +31,8 @@ import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
+import { getStatusLabel, getStatusProgress } from "@/lib/partner-status";
 
 type PartnerSpotlight = {
   id: string;
@@ -62,6 +65,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function DashboardPage() {
   const { profile, roles, hasRole } = useAuth();
+  const access = usePartnerAccess();
   const status = profile?.partner_status ?? "pending_partner_registration";
   const isPending = status === "pending_partner_registration";
   const showPartnerOnboarding = hasRole("partner_admin") && isPending;
@@ -81,11 +85,14 @@ function DashboardPage() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      let dealQuery = supabase
+      // Only load deals/customers if user has deal access (approved status)
+      const hasDealAccess = access.canAccessDeals;
+      
+      let dealQuery = hasDealAccess ? supabase
         .from("portal_deals")
         .select("id, amount, stage, status")
-        .order("updated_at", { ascending: false });
-      let customerQuery = supabase.from("portal_customers").select("id");
+        .order("updated_at", { ascending: false }) : null;
+      let customerQuery = hasDealAccess ? supabase.from("portal_customers").select("id") : null;
       let partnerQuery = supabase
         .from("partners")
         .select("id, company_name, tier, status, annual_turnover, business_focus, created_at")
@@ -99,16 +106,20 @@ function DashboardPage() {
         .select("id, user_id, partner_id, points_delta, reason, created_at")
         .order("created_at", { ascending: false });
 
-      dealQuery = applyPartnerScope(dealQuery, {
-        isSuperAdmin: hasRole("super_admin"),
-        partnerId: profile?.partner_id ?? null,
-        userId: profile?.id ?? null,
-      });
-      customerQuery = applyPartnerScope(customerQuery, {
-        isSuperAdmin: hasRole("super_admin"),
-        partnerId: profile?.partner_id ?? null,
-        userId: profile?.id ?? null,
-      });
+      if (dealQuery) {
+        dealQuery = applyPartnerScope(dealQuery, {
+          isSuperAdmin: hasRole("super_admin"),
+          partnerId: profile?.partner_id ?? null,
+          userId: profile?.id ?? null,
+        });
+      }
+      if (customerQuery) {
+        customerQuery = applyPartnerScope(customerQuery, {
+          isSuperAdmin: hasRole("super_admin"),
+          partnerId: profile?.partner_id ?? null,
+          userId: profile?.id ?? null,
+        });
+      }
       notificationQuery = applyPartnerScope(notificationQuery, {
         isSuperAdmin: hasRole("super_admin"),
         partnerId: profile?.partner_id ?? null,
@@ -125,15 +136,17 @@ function DashboardPage() {
         partnerQuery = partnerQuery.eq("owner_user_id", profile.id);
       }
 
+      const queries = [
+        dealQuery,
+        customerQuery,
+        partnerQuery,
+        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+        notificationQuery,
+        rewardQuery,
+      ];
+
       const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes] = await Promise.all(
-        [
-          dealQuery,
-          customerQuery,
-          partnerQuery,
-          supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
-          notificationQuery,
-          rewardQuery,
-        ],
+        queries.map(q => q ?? Promise.resolve({ data: [], error: null })),
       );
 
       if (
@@ -203,7 +216,8 @@ function DashboardPage() {
         0,
       );
 
-      setMetrics([
+      // Build metrics based on access level
+      const fullMetrics: DashboardMetric[] = [
         {
           id: "pipeline",
           label: "Pipeline value",
@@ -239,7 +253,33 @@ function DashboardPage() {
           hint: `${rewardTier} tier · ${rewardProgressState.pointsToNext} to next`,
           tone: "success",
         },
-      ]);
+      ];
+
+      const partialMetrics: DashboardMetric[] = [
+        {
+          id: "rewards",
+          label: "Reward Points",
+          value: String(rewardPoints),
+          hint: `${rewardTier} tier · ${rewardProgressState.pointsToNext} to next`,
+          tone: "success",
+        },
+        {
+          id: "news",
+          label: "News Posts",
+          value: String(combinedNews.length),
+          hint: "Latest LIVEY updates",
+          tone: "info",
+        },
+        {
+          id: "profile",
+          label: "Profile Status",
+          value: getStatusLabel(status),
+          hint: `${getStatusProgress(status)}% complete`,
+          tone: "primary",
+        },
+      ];
+
+      setMetrics(access.hasDealAccess ? fullMetrics : partialMetrics);
       setNewsPosts(combinedNews);
       setSpotlights(partnerRows.slice(0, 3));
       setSource(
@@ -314,28 +354,19 @@ function DashboardPage() {
         </div>
       </div>
 
-      {showPartnerOnboarding && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Building2 className="h-5 w-5" />
-            </div>
+      {access.isPartialApproval && (
+        <Card className="border-amber-500/40 bg-amber-500/5 mb-6">
+          <CardContent className="flex items-center gap-4 p-4">
+            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="flex-1">
-              <div className="text-base font-medium">Complete your partner registration</div>
-              <div className="text-sm text-muted-foreground">
-                Step 2 of 2 — submit your business details and documents to unlock deal
-                registration, pipeline, and tier benefits.
-              </div>
-              <div className="mt-3 flex items-center gap-3">
-                <Progress value={50} className="h-1.5 w-48" />
-                <span className="text-xs text-muted-foreground">50% complete</span>
-              </div>
+              <p className="font-medium">Partner Agreement Required</p>
+              <p className="text-sm text-muted-foreground">
+                Your partner profile has been partially approved. Please sign the agreement 
+                to unlock full portal access including deal registration and pipeline.
+              </p>
             </div>
-            <Button asChild>
-              <Link to="/partner/onboarding">
-                Continue registration
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+            <Button asChild variant="default">
+              <Link to="/partner/agreement">Sign Agreement</Link>
             </Button>
           </CardContent>
         </Card>
@@ -374,7 +405,7 @@ function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <div>
                 <CardTitle className="text-base">News feed</CardTitle>
-              <CardDescription>
+                <CardDescription>
                   LIVEY updates, with images when they exist and text-only cards when they do not.
                 </CardDescription>
               </div>
@@ -443,7 +474,7 @@ function DashboardPage() {
               <Row label="Company" value={profile?.company_name ?? "—"} />
               <Row label="Phone" value={profile?.phone ?? "—"} />
               <Row label="Role" value={roleLabel} />
-              <Row label="Status" value={statusLabel[status]} />
+              <Row label="Status" value={getStatusLabel(status)} />
             </CardContent>
           </Card>
 
@@ -452,17 +483,28 @@ function DashboardPage() {
               <CardTitle className="text-base">Quick actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <QuickAction to="/deals" icon={Handshake} label="Register a deal" />
-              <QuickAction to="/pipeline" icon={Sparkles} label="Open pipeline" />
-              <QuickAction to="/customers" icon={Users} label="Reserve a customer" />
-              <QuickAction to="/analytics" icon={BarChart3} label="View analytics" />
-              <QuickAction to="/rewards" icon={Trophy} label="View rewards" />
-              <QuickAction to="/documents" icon={FileText} label="Upload documents" />
+              {access.canAccessDeals && (
+                <>
+                  <QuickAction to="/deals" icon={Handshake} label="Register a deal" />
+                  <QuickAction to="/pipeline" icon={Sparkles} label="Open pipeline" />
+                  <QuickAction to="/customers" icon={Users} label="Reserve a customer" />
+                  <QuickAction to="/analytics" icon={BarChart3} label="View analytics" />
+                </>
+              )}
+              {access.canAccessRewards && (
+                <QuickAction to="/rewards" icon={Trophy} label="View rewards" />
+              )}
+              {access.canAccessDocuments && (
+                <QuickAction to="/documents" icon={FileText} label="Upload documents" />
+              )}
               {hasRole("partner_admin") && (
                 <QuickAction to="/partner/onboarding" icon={Building2} label="Partner onboarding" />
               )}
               {hasRole("super_admin") && (
                 <QuickAction to="/admin/news" icon={Megaphone} label="Publish news" />
+              )}
+              {access.canAccessSettings && (
+                <QuickAction to="/settings" icon={FileText} label="Settings" />
               )}
             </CardContent>
           </Card>
@@ -477,8 +519,10 @@ function DashboardPage() {
               <Step done label="Create your account" />
               {hasRole("partner_admin") ? (
                 <>
-                  <Step label="Submit partner registration" />
-                  <Step label="LIVEY approval" />
+                  <Step done={access.isPartialApproval || access.isApproved} label="Submit partner registration" />
+                  <Step done={access.isPartialApproval} label="LIVEY partial approval" />
+                  <Step done={access.isPendingAgreement || access.isApproved} label="Sign agreement" />
+                  <Step done={access.isApproved} label="Full approval" />
                 </>
               ) : (
                 <>
@@ -499,9 +543,11 @@ const statusLabel: Record<string, string> = {
   pending_partner_registration: "Partner Registration Pending",
   submitted: "Application Submitted",
   under_review: "Under Review",
-  need_more_info: "Info Requested",
+  partial_approval: "Partially Approved (Agreement Pending)",
+  pending_agreement: "Agreement Sent",
   approved: "Approved",
   rejected: "Rejected",
+  need_more_info: "Info Requested",
 };
 
 function Kpi({

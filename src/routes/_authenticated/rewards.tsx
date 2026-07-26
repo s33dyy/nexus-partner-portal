@@ -40,6 +40,7 @@ import {
   type RewardRedemptionRecord,
 } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/rewards")({
@@ -66,6 +67,8 @@ const REWARD_REDEMPTION_EXPORT_COLUMNS: CsvColumn[] = [
 
 function RewardsPage() {
   const { profile, hasRole } = useAuth();
+  const access = useRequireAccess('partial');
+  
   const [catalog, setCatalog] = useState<RewardCatalogRecord[]>([]);
   const [events, setEvents] = useState<RewardPointEventRecord[]>([]);
   const [redemptions, setRedemptions] = useState<RewardRedemptionRecord[]>([]);

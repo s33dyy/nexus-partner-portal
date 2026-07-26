@@ -30,6 +30,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
+import { getStatusLabel, getStatusProgress } from "@/lib/partner-status";
 
 type Profile = {
   id: string;
@@ -197,8 +198,8 @@ function PartnerPage() {
   }, [load]);
 
   const status = profile?.partner_status ?? partner?.status ?? "pending_partner_registration";
-  const progress =
-    status === "approved" ? 100 : status === "submitted" ? 75 : status === "under_review" ? 55 : 30;
+  const progress = getStatusProgress(status);
+  const statusLabel = getStatusLabel(status);
   const isOnboardingChild = pathname === "/partner/onboarding";
   const isPartnerChild = pathname !== "/partner";
 
@@ -537,7 +538,9 @@ const statusLabel: Record<string, string> = {
   pending_partner_registration: "Partner Registration Pending",
   submitted: "Application Submitted",
   under_review: "Under Review",
-  need_more_info: "Info Requested",
+  partial_approval: "Partially Approved (Agreement Pending)",
+  pending_agreement: "Agreement Sent",
   approved: "Approved",
   rejected: "Rejected",
+  need_more_info: "Info Requested",
 };

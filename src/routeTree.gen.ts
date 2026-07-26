@@ -31,6 +31,7 @@ import { Route as AuthenticatedAdminNewsRouteImport } from './routes/_authentica
 import { Route as AuthenticatedAdminPartnersRouteImport } from './routes/_authenticated/admin.partners'
 import { Route as AuthenticatedAdminRewardsRouteImport } from './routes/_authenticated/admin.rewards'
 import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authenticated/admin.users'
+import { Route as AuthenticatedPartnerAgreementRouteImport } from './routes/_authenticated/partner.agreement'
 import { Route as AuthenticatedPartnerOnboardingRouteImport } from './routes/_authenticated/partner.onboarding'
 import { Route as AuthenticatedPartnerTeamRouteImport } from './routes/_authenticated/partner.team'
 
@@ -147,6 +148,12 @@ const AuthenticatedAdminUsersRoute = AuthenticatedAdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedPartnerAgreementRoute =
+  AuthenticatedPartnerAgreementRouteImport.update({
+    id: '/agreement',
+    path: '/agreement',
+    getParentRoute: () => AuthenticatedPartnerRoute,
+  } as any)
 const AuthenticatedPartnerOnboardingRoute =
   AuthenticatedPartnerOnboardingRouteImport.update({
     id: '/onboarding',
@@ -182,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
+  '/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/partner/team': typeof AuthenticatedPartnerTeamRoute
 }
@@ -207,6 +215,7 @@ export interface FileRoutesByTo {
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
+  '/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/partner/team': typeof AuthenticatedPartnerTeamRoute
 }
@@ -234,6 +243,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/_authenticated/admin/rewards': typeof AuthenticatedAdminRewardsRoute
   '/_authenticated/admin/users': typeof AuthenticatedAdminUsersRoute
+  '/_authenticated/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/_authenticated/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
   '/_authenticated/partner/team': typeof AuthenticatedPartnerTeamRoute
 }
@@ -261,6 +271,7 @@ export interface FileRouteTypes {
     | '/admin/partners'
     | '/admin/rewards'
     | '/admin/users'
+    | '/partner/agreement'
     | '/partner/onboarding'
     | '/partner/team'
   fileRoutesByTo: FileRoutesByTo
@@ -286,6 +297,7 @@ export interface FileRouteTypes {
     | '/admin/partners'
     | '/admin/rewards'
     | '/admin/users'
+    | '/partner/agreement'
     | '/partner/onboarding'
     | '/partner/team'
   id:
@@ -312,6 +324,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/partners'
     | '/_authenticated/admin/rewards'
     | '/_authenticated/admin/users'
+    | '/_authenticated/partner/agreement'
     | '/_authenticated/partner/onboarding'
     | '/_authenticated/partner/team'
   fileRoutesById: FileRoutesById
@@ -479,6 +492,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminUsersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/partner/agreement': {
+      id: '/_authenticated/partner/agreement'
+      path: '/agreement'
+      fullPath: '/partner/agreement'
+      preLoaderRoute: typeof AuthenticatedPartnerAgreementRouteImport
+      parentRoute: typeof AuthenticatedPartnerRoute
+    }
     '/_authenticated/partner/onboarding': {
       id: '/_authenticated/partner/onboarding'
       path: '/onboarding'
@@ -497,11 +517,13 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedPartnerRouteChildren {
+  AuthenticatedPartnerAgreementRoute: typeof AuthenticatedPartnerAgreementRoute
   AuthenticatedPartnerOnboardingRoute: typeof AuthenticatedPartnerOnboardingRoute
   AuthenticatedPartnerTeamRoute: typeof AuthenticatedPartnerTeamRoute
 }
 
 const AuthenticatedPartnerRouteChildren: AuthenticatedPartnerRouteChildren = {
+  AuthenticatedPartnerAgreementRoute: AuthenticatedPartnerAgreementRoute,
   AuthenticatedPartnerOnboardingRoute: AuthenticatedPartnerOnboardingRoute,
   AuthenticatedPartnerTeamRoute: AuthenticatedPartnerTeamRoute,
 }

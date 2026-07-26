@@ -25,6 +25,7 @@ import { toDateInputValue } from "@/lib/date-utils";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { type CustomerRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
 
 type CustomerForm = {
   company_name: string;
@@ -85,6 +86,9 @@ export const Route = createFileRoute("/_authenticated/customers")({
 });
 
 function CustomersPage() {
+  const { profile, hasRole } = useAuth();
+  const access = useRequireAccess('full');
+  
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -96,7 +100,6 @@ function CustomersPage() {
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const { profile, hasRole } = useAuth();
 
   const load = async () => {
     setLoading(true);
