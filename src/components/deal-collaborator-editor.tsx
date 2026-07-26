@@ -104,6 +104,7 @@ export function DealCollaboratorEditor({
     0,
   );
   const maxReached = orderedCollaborators.length >= 4;
+  const hasAssignableMembers = availableToAdd.length > 0;
 
   return (
     <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
@@ -161,36 +162,45 @@ export function DealCollaboratorEditor({
 
       {allowEditCollaborators ? (
         <div className="space-y-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end">
-            <Field className="flex-1" label="Add collaborator">
-              <select
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={selectedMemberId}
-                onChange={(event) => setSelectedMemberId(event.target.value)}
-                disabled={disabled || maxReached || availableToAdd.length === 0}
+          {hasAssignableMembers ? (
+            <div className="flex flex-col gap-3 md:flex-row md:items-end">
+              <Field className="flex-1" label="Add collaborator">
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={selectedMemberId}
+                  onChange={(event) => setSelectedMemberId(event.target.value)}
+                  disabled={disabled || maxReached}
+                >
+                  <option value="">Choose a team member</option>
+                  {availableToAdd.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.full_name} · {member.email}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addCollaborator}
+                disabled={disabled || maxReached || !selectedMemberId}
               >
-                <option value="">Choose a team member</option>
-                {availableToAdd.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name} · {member.email}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={addCollaborator}
-              disabled={disabled || maxReached || !selectedMemberId}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add
-            </Button>
-          </div>
+                <Plus className="mr-2 h-4 w-4" />
+                Add
+              </Button>
+            </div>
+          ) : (
+            <div className="rounded-md border bg-background/80 p-4 text-sm text-muted-foreground">
+              No teammates are available to invite yet. You can still create this deal, and it will
+              use the creator as the sole reward recipient until team members are added.
+            </div>
+          )}
 
           {orderedCollaborators.length === 0 ? (
             <div className="rounded-md border border-dashed bg-background/60 p-4 text-sm text-muted-foreground">
-              Add at least one collaborator to define the reward split.
+              {hasAssignableMembers
+                ? "Add at least one collaborator to define the reward split."
+                : "This deal will be created with a creator-only reward split."}
             </div>
           ) : (
             <div className="space-y-2">
@@ -241,12 +251,14 @@ export function DealCollaboratorEditor({
             </div>
           )}
 
-          <div className="text-xs text-muted-foreground">
-            Preset splits:{" "}
-            {buildPresetCollaboratorSplits(
-              Math.min(Math.max(orderedCollaborators.length, 1), 4),
-            ).join(" / ")}
-          </div>
+          {hasAssignableMembers || orderedCollaborators.length > 0 ? (
+            <div className="text-xs text-muted-foreground">
+              Preset splits:{" "}
+              {buildPresetCollaboratorSplits(
+                Math.min(Math.max(orderedCollaborators.length, 1), 4),
+              ).join(" / ")}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
