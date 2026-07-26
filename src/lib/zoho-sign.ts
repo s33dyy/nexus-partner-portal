@@ -221,7 +221,7 @@ export async function sendAgreement(opts: {
           verify_recipient: false,
           fields: {
             text_fields: [],
-            signature_fields: [
+            image_fields: [
               {
                 field_name: "Signature",
                 field_type_name: "Signature",

@@ -20,7 +20,7 @@ test("zoho agreement naming helpers are deterministic and partner-specific", asy
   );
 });
 
-test("zoho sign request payload includes a single document with document_order", async () => {
+test("zoho sign request payload uses image_fields for the signature field", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
   process.env.ZOHO_SIGN_CLIENT_ID ??= "client-id";
   process.env.ZOHO_SIGN_CLIENT_SECRET ??= "client-secret";
@@ -101,11 +101,17 @@ test("zoho sign request payload includes a single document with document_order",
     expect(requestCall).toBeDefined();
 
     const requestBody = JSON.parse(String(requestCall?.init?.body)) as {
-      requests?: { document_ids?: Array<{ document_id?: string; document_order?: number }> };
+      requests?: {
+        document_ids?: Array<{ document_id?: string; document_order?: number }>;
+        actions?: Array<{ fields?: { image_fields?: Array<{ field_type_name?: string }> } }>;
+      };
     };
     expect(requestBody.requests?.document_ids?.[0]).toMatchObject({
       document_id: "doc-123",
       document_order: 0,
+    });
+    expect(requestBody.requests?.actions?.[0]?.fields?.image_fields?.[0]).toMatchObject({
+      field_type_name: "Signature",
     });
   } finally {
     pool.query = originalQuery as typeof pool.query;
