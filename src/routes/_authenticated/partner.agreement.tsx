@@ -115,11 +115,11 @@ function AgreementPage() {
       if (!response.ok) {
         throw new Error("Unable to start Zoho Sign");
       }
-      const data = (await response.json()) as { signingUrl?: string };
-      if (!data.signingUrl) {
+      const data = (await response.json()) as { signUrl?: string };
+      if (!data.signUrl) {
         throw new Error("Missing Zoho Sign URL");
       }
-      const opened = window.open(data.signingUrl, "_blank", "noopener,noreferrer");
+      const opened = window.open(data.signUrl, "_blank", "noopener,noreferrer");
       if (!opened) {
         throw new Error("Zoho Sign popup was blocked");
       }

@@ -320,7 +320,7 @@ function AdminPartners() {
           ? `Partner ${selected.company_name} partially approved (agreement pending)`
           : `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`;
         const newsCaption = decision === "partial_approval"
-          ? noteDraft.trim() || `The partner application for ${selected.company_name} was partially approved. Agreement will be sent next.`
+          ? noteDraft.trim() || `The partner application for ${selected.company_name} was partially approved. Agreement will be prepared next.`
           : noteDraft.trim() || `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`;
           
         await supabase.from("portal_news_posts").insert({
@@ -378,7 +378,7 @@ function AdminPartners() {
         requestStatus?: string;
       };
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to send agreement");
-      toast.success("Agreement uploaded and sent via Zoho Sign");
+      toast.success("Agreement prepared in Zoho Sign");
       setAgreementRequestStatus(data.requestStatus ?? "pending");
       await loadPartnerDetails(selected.id);
       await load();
@@ -804,7 +804,7 @@ function AdminPartners() {
                       {selected.status === "partial_approval" && (
                         <div className="space-y-3 rounded-md border bg-background/70 p-3">
                           <div className="text-sm text-muted-foreground">
-                            Upload a fresh PDF for this partner before sending the Zoho Sign request.
+                            Upload a fresh PDF for this partner before preparing the Zoho Sign request.
                           </div>
                           <div className="space-y-2">
                             <Input
@@ -832,7 +832,7 @@ function AdminPartners() {
                               ) : (
                                 <Upload className="mr-1 h-3.5 w-3.5" />
                               )}
-                              Upload &amp; Send Agreement
+                              Upload &amp; Prepare Agreement
                             </Button>
                             <Button
                               size="sm"
@@ -850,7 +850,7 @@ function AdminPartners() {
                           </div>
                           {ownerEmail && (
                             <div className="text-xs text-muted-foreground">
-                              Will be sent to <strong>{ownerEmail}</strong>
+                              Recipient on record: <strong>{ownerEmail}</strong>
                             </div>
                           )}
                         </div>
@@ -860,7 +860,7 @@ function AdminPartners() {
                         <div className="space-y-2 rounded-md border bg-primary/5 p-3">
                           <div className="flex items-center gap-2 text-sm text-primary">
                             <FileSignature className="h-4 w-4 shrink-0" />
-                            Agreement sent via{" "}
+                            Agreement prepared via{" "}
                             {selected.agreement_provider === "zohosign" ? "Zoho Sign" : selected.agreement_provider}
                           </div>
                           <div className="flex flex-wrap gap-2">
