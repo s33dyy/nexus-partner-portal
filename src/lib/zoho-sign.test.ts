@@ -65,12 +65,6 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
       );
     }
 
-    if (String(input).includes("/api/v1/requests/req-123/actions/action-123/embedtoken")) {
-      return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123" }), {
-        status: 200,
-      });
-    }
-
     if (String(input).includes("/api/v1/requests/req-123") && !String(input).includes("/embedtoken")) {
       return new Response(
         JSON.stringify({
@@ -130,6 +124,9 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
     expect(requestBody.requests?.actions?.[0]).toMatchObject({
       action_type: "SIGN",
       is_embedded: true,
+      signing_order: 0,
+      verify_recipient: true,
+      verification_type: "EMAIL",
     });
   } finally {
     pool.query = originalQuery as typeof pool.query;

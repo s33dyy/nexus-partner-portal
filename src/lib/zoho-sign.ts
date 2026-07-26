@@ -203,16 +203,16 @@ async function fetchEmbeddedSigningUrl(
     throw new Error(`Zoho Sign request details lookup failed: ${JSON.stringify(detailsData)}`);
   }
 
-  const embedTokenUrl = new URL(
-    `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`,
-  );
-  embedTokenUrl.searchParams.set("host", host);
+  const embedTokenUrl = `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`;
+  const body = new FormData();
+  body.append("host", host);
 
-  const urlRes = await fetch(embedTokenUrl.toString(), {
+  const urlRes = await fetch(embedTokenUrl, {
     method: "POST",
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
     },
+    body,
   });
   const urlData = (await urlRes.json()) as { sign_url?: string; message?: string };
   if (!urlRes.ok || !urlData.sign_url) {
@@ -274,8 +274,9 @@ export async function sendAgreement(opts: {
           action_type: "SIGN",
           is_embedded: true,
           private_notes: "Please review and sign the LIVEY Partner Agreement.",
-          signing_order: 1,
-          verify_recipient: false,
+          signing_order: 0,
+          verify_recipient: true,
+          verification_type: "EMAIL",
           fields: {
             text_fields: [],
             image_fields: [
@@ -327,14 +328,6 @@ export async function sendAgreement(opts: {
     throw new Error(`Zoho Sign request creation failed: ${JSON.stringify(reqData)}`);
   }
   requestId = reqData.requests.request_id;
-
-  // Try to fetch the embedded signing URL
-  try {
-    signingUrl = await fetchEmbeddedSigningUrl(requestId);
-  } catch {
-    // Signing URL is optional — the portal can request a fresh one later.
-    signingUrl = null;
-  }
 
   return { requestId, signingUrl };
 }
