@@ -124,6 +124,10 @@ const EMPTY_FORM: DealForm = {
   reward_rate_percent: 5,
 };
 
+function normalizeCompanyName(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
 function dealToEditForm(deal: DealRecord): DealEditForm {
   return {
     account_name: deal.account_name,
@@ -271,8 +275,11 @@ function DealsPage() {
       );
 
       const companyName = profile?.company_name ?? null;
+      const companyKey = normalizeCompanyName(companyName);
       const members = ((memberResult.data as TeamMemberRecord[] | null) ?? []).filter((member) =>
-        hasRole("super_admin") || !companyName ? true : member.company_name === companyName,
+        hasRole("super_admin") || !companyKey
+          ? true
+          : normalizeCompanyName(member.company_name) === companyKey,
       );
 
       setDeals(visibleRows);
@@ -568,6 +575,19 @@ function DealsPage() {
     if (insertError) throw insertError;
   };
 
+  const persistCollaboratorsSafely = async (
+    dealId: string,
+    collaborators: DealCollaboratorDraft[],
+  ) => {
+    try {
+      await replaceCollaborators(dealId, collaborators);
+      return true;
+    } catch (error) {
+      console.error("Failed to save deal collaborators", error);
+      return false;
+    }
+  };
+
   const createDeal = async () => {
     const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
     const accountName = isPartnerUser
@@ -622,7 +642,7 @@ function DealsPage() {
       };
       const { error } = await supabase.from("portal_deals").insert(payload);
       if (error) throw error;
-      await replaceCollaborators(payload.id, draftCollaborators);
+      const collaboratorsSaved = await persistCollaboratorsSafely(payload.id, draftCollaborators);
 
       await publishDealActivity({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
@@ -639,6 +659,8 @@ function DealsPage() {
       });
 
       toast.success("Deal created");
+      if (!collaboratorsSaved)
+        console.error("Deal was created, but collaborator assignments could not be saved.");
       setDraft(EMPTY_FORM);
       setDraftCollaborators([]);
       await load();
@@ -708,7 +730,7 @@ function DealsPage() {
         .eq("id", selectedDeal.id);
       if (error) throw error;
       if (!selectedDealCollaboratorEditingLocked) {
-        await replaceCollaborators(selectedDeal.id, selectedDealCollaborators);
+        await persistCollaboratorsSafely(selectedDeal.id, selectedDealCollaborators);
       }
       toast.success("Deal details updated");
       setSelectedDealEditing(false);

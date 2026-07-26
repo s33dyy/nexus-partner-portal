@@ -237,6 +237,19 @@ function AdminDealsPage() {
     if (insertError) throw insertError;
   };
 
+  const persistCollaboratorsSafely = async (
+    dealId: string,
+    collaborators: DealCollaboratorDraft[],
+  ) => {
+    try {
+      await replaceCollaborators(dealId, collaborators);
+      return true;
+    } catch (error) {
+      console.error("Failed to save deal collaborators", error);
+      return false;
+    }
+  };
+
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Deal approvals" roleLabel="Super Admin" />;
   }
@@ -285,7 +298,7 @@ function AdminDealsPage() {
         .eq("id", selectedDeal.id);
       if (error) throw error;
       if (!reviewCollaboratorEditingLocked) {
-        await replaceCollaborators(selectedDeal.id, reviewCollaborators);
+        await persistCollaboratorsSafely(selectedDeal.id, reviewCollaborators);
       }
       if (status) {
         await publishDealActivity(

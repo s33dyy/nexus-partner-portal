@@ -80,7 +80,7 @@ function PartnerTeamPage() {
         .order("updated_at", { ascending: false });
       if (error) throw error;
       const rows = ((data as TeamMemberRecord[] | null) ?? []).filter(
-        (row) => row.company_name === companyName,
+        (row) => normalizeCompanyName(row.company_name) === normalizeCompanyName(companyName),
       );
       setMembers(rows);
       setSource(rows.length > 0 ? "database" : "empty");
@@ -116,7 +116,12 @@ function PartnerTeamPage() {
   }, [members, query]);
 
   const addMember = async () => {
-    if (!draft.full_name.trim() || !draft.email.trim() || !draft.role_title.trim() || !draft.password?.trim()) {
+    if (
+      !draft.full_name.trim() ||
+      !draft.email.trim() ||
+      !draft.role_title.trim() ||
+      !draft.password?.trim()
+    ) {
       toast.error("Name, email, password, and role title are required");
       return;
     }
@@ -128,10 +133,10 @@ function PartnerTeamPage() {
         phone: draft.phone.trim(),
         company_name: companyName,
         password: draft.password.trim(),
-        role: draft.portal_role as any,
+        role: draft.portal_role as "partner_user" | "partner_admin",
         partner_status: "approved",
       });
-      
+
       if (userError) throw userError;
 
       const payload = {
@@ -351,7 +356,9 @@ function PartnerTeamPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Invite teammate</CardTitle>
-              <CardDescription>Add a live record for a new partner user or partner admin.</CardDescription>
+              <CardDescription>
+                Add a live record for a new partner user or partner admin.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
@@ -449,6 +456,10 @@ function PartnerTeamPage() {
       </div>
     </div>
   );
+}
+
+function normalizeCompanyName(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
 }
 
 function Metric({ label, value, hint }: { label: string; value: string; hint: string }) {
