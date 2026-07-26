@@ -8,6 +8,7 @@ import {
   handleZohoWebhook,
   handleZohoSendAgreement,
   handleZohoResyncAgreement,
+  handleZohoSignUrl,
 } from "./server/zoho-api.server";
 
 type ServerEntry = {
@@ -71,6 +72,9 @@ export default {
       }
       if (url.pathname === "/api/integrations/zoho-sign/resync-agreement") {
         return await handleZohoResyncAgreement(request);
+      }
+      if (url.pathname === "/api/integrations/zoho-sign/sign-url") {
+        return await handleZohoSignUrl(request);
       }
 
       const handler = await getServerEntry();

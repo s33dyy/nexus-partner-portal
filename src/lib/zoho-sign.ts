@@ -171,6 +171,57 @@ export type SendAgreementResult = {
   signingUrl: string | null;
 };
 
+type ZohoRequestDetailsResponse = {
+  requests?: {
+    actions?: Array<{
+      action_id?: string;
+      action_type?: string;
+    }>;
+  };
+};
+
+async function fetchEmbeddedSigningUrl(requestId: string): Promise<string> {
+  const { token } = await getValidAccessToken();
+
+  // Zoho Sign API always uses sign.zoho.in for India DC (not the token's api_domain)
+  const apiDomain = process.env.ZOHO_SIGN_API_URL ?? "https://sign.zoho.in";
+
+  const detailsRes = await fetch(`${apiDomain}/api/v1/requests/${requestId}`, {
+    headers: { Authorization: `Zoho-oauthtoken ${token}` },
+  });
+  const detailsData = (await detailsRes.json()) as ZohoRequestDetailsResponse & {
+    message?: string;
+  };
+  const actionId =
+    detailsData.requests?.actions?.find((action) => action.action_type === "SIGN")?.action_id ??
+    detailsData.requests?.actions?.[0]?.action_id;
+
+  if (!detailsRes.ok || !actionId) {
+    throw new Error(`Zoho Sign request details lookup failed: ${JSON.stringify(detailsData)}`);
+  }
+
+  const urlRes = await fetch(
+    `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${token}`,
+      },
+    },
+  );
+  const urlData = (await urlRes.json()) as { sign_url?: string; message?: string };
+  if (!urlRes.ok || !urlData.sign_url) {
+    throw new Error(`Zoho Sign embedded token failed: ${JSON.stringify(urlData)}`);
+  }
+
+  return urlData.sign_url;
+}
+
+/** Fetch a fresh embedded signing URL for an existing Zoho Sign request. */
+export async function getEmbeddedSigningUrl(requestId: string): Promise<string> {
+  return await fetchEmbeddedSigningUrl(requestId);
+}
+
 /** Create a signing request in Zoho Sign and return the request ID + signing URL. */
 export async function sendAgreement(opts: {
   partnerId: string;
@@ -216,6 +267,7 @@ export async function sendAgreement(opts: {
           recipient_name: opts.partnerName,
           recipient_email: opts.partnerEmail,
           action_type: "SIGN",
+          is_embedded: true,
           private_notes: "Please review and sign the LIVEY Partner Agreement.",
           signing_order: 1,
           verify_recipient: false,
@@ -273,23 +325,9 @@ export async function sendAgreement(opts: {
 
   // Try to fetch the embedded signing URL
   try {
-    const urlRes = await fetch(
-      `${apiDomain}/api/v1/requests/${requestId}/embeddedurl`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recipient_email: opts.partnerEmail,
-        }),
-      },
-    );
-    const urlData = (await urlRes.json()) as { sign_url?: string };
-    signingUrl = urlData.sign_url ?? null;
+    signingUrl = await fetchEmbeddedSigningUrl(requestId);
   } catch {
-    // Signing URL is optional — partner can use the emailed link
+    // Signing URL is optional — the portal can request a fresh one later.
     signingUrl = null;
   }
 

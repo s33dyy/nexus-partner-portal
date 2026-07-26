@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import {
   buildPartnerAgreementSourceFilePath,
+  getEmbeddedSigningUrl,
   exchangeAuthCode,
   getRequestStatus,
   sendAgreement,
   verifyZohoWebhookSignature,
   REDIRECT_URI,
 } from "@/lib/zoho-sign";
-import { removeDocumentBlobs, uploadDocumentBlob } from "@/server/livey-service.server";
+import { getAuthContext, removeDocumentBlobs, uploadDocumentBlob } from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
 
 const CLIENT_ID = process.env.ZOHO_SIGN_CLIENT_ID ?? "";
@@ -405,6 +406,72 @@ export async function handleZohoResyncAgreement(request: Request) {
   } catch (err) {
     console.error("[ZohoSign resync-agreement] error:", err);
     const msg = err instanceof Error ? err.message : "Failed to resync agreement";
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+export async function handleZohoSignUrl(request: Request) {
+  try {
+    const cookieHeader = request.headers.get("cookie") ?? "";
+    const cookies = Object.fromEntries(
+      cookieHeader.split(";").map((c) => {
+        const [k, ...v] = c.trim().split("=");
+        return [k.trim(), v.join("=")];
+      }),
+    );
+    const sessionToken = cookies["livey_session"];
+    const { profile } = await getAuthContext(sessionToken);
+    if (!profile?.id) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!profile.partner_id) {
+      return new Response(JSON.stringify({ error: "Partner context is required" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const partnerRes = await pool.query<{
+      id: string;
+      agreement_envelope_id: string | null;
+    }>(
+      `SELECT id, agreement_envelope_id
+       FROM public.partners
+       WHERE id = $1
+       LIMIT 1`,
+      [profile.partner_id],
+    );
+    const partner = partnerRes.rows[0];
+    if (!partner) {
+      return new Response(JSON.stringify({ error: "Partner not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!partner.agreement_envelope_id) {
+      return new Response(JSON.stringify({ error: "Agreement request not found" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const signUrl = await getEmbeddedSigningUrl(partner.agreement_envelope_id);
+
+    return new Response(JSON.stringify({ signUrl }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("[ZohoSign sign-url] error:", err);
+    const msg = err instanceof Error ? err.message : "Failed to load signing URL";
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

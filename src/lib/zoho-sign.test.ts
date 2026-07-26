@@ -65,10 +65,22 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
       );
     }
 
-    if (String(input).includes("/api/v1/requests/req-123/embeddedurl")) {
+    if (String(input).includes("/api/v1/requests/req-123/actions/action-123/embedtoken")) {
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123" }), {
         status: 200,
       });
+    }
+
+    if (String(input).includes("/api/v1/requests/req-123") && !String(input).includes("/embedtoken")) {
+      return new Response(
+        JSON.stringify({
+          requests: {
+            request_id: "req-123",
+            actions: [{ action_id: "action-123", action_type: "SIGN" }],
+          },
+        }),
+        { status: 200 },
+      );
     }
 
     if (String(input).includes("/api/v1/requests")) {
@@ -97,7 +109,9 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
 
     expect(result.requestId).toBe("req-123");
 
-    const requestCall = fetchCalls.find((entry) => entry.url.includes("/api/v1/requests"));
+    const requestCall = fetchCalls.find(
+      (entry) => entry.url.endsWith("/api/v1/requests") && !!entry.init?.body,
+    );
     expect(requestCall).toBeDefined();
 
     const requestBody = JSON.parse(String(requestCall?.init?.body)) as {
@@ -112,6 +126,10 @@ test("zoho sign request payload uses image_fields for the signature field", asyn
     });
     expect(requestBody.requests?.actions?.[0]?.fields?.image_fields?.[0]).toMatchObject({
       field_type_name: "Signature",
+    });
+    expect(requestBody.requests?.actions?.[0]).toMatchObject({
+      action_type: "SIGN",
+      is_embedded: true,
     });
   } finally {
     pool.query = originalQuery as typeof pool.query;
