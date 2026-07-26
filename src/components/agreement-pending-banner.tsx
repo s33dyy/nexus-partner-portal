@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getAgreementCtaLabel } from "@/routes/_authenticated/partner.agreement";
 
 /**
  * Shown as a persistent top banner for partners in the pre-signature agreement workflow.
@@ -21,8 +22,9 @@ export function AgreementPendingBanner() {
   
   const message =
     status === 'partial_approval'
-      ? 'Your partner profile has been partially approved. A super admin will upload and send the agreement through Zoho Sign.'
-      : 'Your Zoho Sign agreement has been sent. Please sign it to continue.';
+      ? 'Your partner profile has been partially approved. Open the agreement page to launch Zoho Sign in a new tab.'
+      : 'Your agreement is ready. Open the agreement page and click the sign button to continue.';
+  const ctaLabel = getAgreementCtaLabel(status);
   
   return (
     <div className="flex items-center justify-between gap-3 border-b bg-amber-500/10 px-4 py-2.5">
@@ -32,7 +34,7 @@ export function AgreementPendingBanner() {
         <span className="text-muted-foreground">{message}</span>
       </div>
       <Button size="sm" variant="default" asChild className="shrink-0">
-        <Link to="/partner/agreement">Open Agreement</Link>
+        <Link to="/partner/agreement">{ctaLabel}</Link>
       </Button>
     </div>
   );

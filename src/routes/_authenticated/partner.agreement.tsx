@@ -6,8 +6,6 @@ import {
   Clock,
   FileSignature,
   Loader2,
-  Mail,
-  RefreshCcw,
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -47,12 +45,18 @@ export function hasRealtimeSupport(
   return typeof (client as { channel?: unknown }).channel === "function";
 }
 
+export function getAgreementCtaLabel(status: string) {
+  return status === "partial_approval" || status === "pending_agreement"
+    ? "Sign with Zoho Sign"
+    : "Open Agreement";
+}
+
 function AgreementPage() {
   const { user, profile, refresh } = useAuth();
   const navigate = useNavigate();
   const [partner, setPartner] = useState<Partner | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [signing, setSigning] = useState(false);
 
   const loadPartner = async () => {
     if (!user) return;
@@ -99,12 +103,33 @@ function AgreementPage() {
     }
   }, [profile?.partner_status, navigate]);
 
-  const handleCheckStatus = async () => {
-    setRefreshing(true);
-    await loadPartner();
-    await refresh();
-    setRefreshing(false);
-    toast.info("Status refreshed");
+  const handleSignWithZohoSign = async () => {
+    setSigning(true);
+    try {
+      const response = await fetch("/api/integrations/zoho-sign/sign-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (!response.ok) {
+        throw new Error("Unable to start Zoho Sign");
+      }
+      const data = (await response.json()) as { signingUrl?: string };
+      if (!data.signingUrl) {
+        throw new Error("Missing Zoho Sign URL");
+      }
+      const opened = window.open(data.signingUrl, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        throw new Error("Zoho Sign popup was blocked");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to open Zoho Sign right now.",
+      );
+    } finally {
+      setSigning(false);
+    }
   };
 
   if (loading) {
@@ -124,6 +149,7 @@ function AgreementPage() {
       !!partner?.agreement_envelope_id ||
       !!partner?.agreement_sent_at);
   const isSigned = isSignedPendingReview || !!partner?.agreement_signed_at;
+  const agreementCtaLabel = getAgreementCtaLabel(partner?.status ?? "");
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -185,10 +211,10 @@ function AgreementPage() {
                 : isSigned
                   ? "Your signed agreement has been received. Your account will be fully activated shortly."
                 : isPendingAgreement
-                  ? "LIVEY has sent a partner agreement to your email. Please sign it to activate your account."
+                  ? "Your agreement is ready. Use the button below to open Zoho Sign in a new tab and sign digitally."
                   : isPartialApproval
-                    ? "Your partner profile has been partially approved. An admin will send the agreement for digital signature shortly."
-                    : "An agreement will be sent to your registered email once an admin initiates it."}
+                    ? "Your partner profile has been partially approved. A super admin has prepared your agreement for Zoho Sign."
+                    : "An agreement will appear here once a super admin prepares it for Zoho Sign."}
             </CardDescription>
           </CardHeader>
 
@@ -208,27 +234,17 @@ function AgreementPage() {
               </div>
 
               <Alert>
-                <Mail className="h-4 w-4" />
-                <AlertTitle>Check your email</AlertTitle>
+                <FileSignature className="h-4 w-4" />
+                <AlertTitle>Open Zoho Sign</AlertTitle>
                 <AlertDescription>
-                  A signing request was sent to <strong>{profile?.email}</strong>. Click the link
-                  in that email to open the agreement and sign digitally.
+                  Click the button below to fetch a fresh signing URL and open it in a new tab.
                 </AlertDescription>
               </Alert>
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCheckStatus}
-                  disabled={refreshing}
-                >
-                  {refreshing ? (
-                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="mr-2 h-3.5 w-3.5" />
-                  )}
-                  Check status
+                <Button onClick={handleSignWithZohoSign} disabled={signing}>
+                  {signing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  {agreementCtaLabel}
                 </Button>
               </div>
             </CardContent>
@@ -259,7 +275,7 @@ function AgreementPage() {
               <div className="flex items-center gap-2 rounded-md border bg-amber-500/5 px-3 py-2 text-sm text-amber-700">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 Your partner profile has been partially approved. A super admin will upload a fresh
-                PDF and send it for digital signature via Zoho Sign shortly.
+                PDF and prepare it for Zoho Sign.
               </div>
             </CardContent>
           )}
@@ -277,13 +293,13 @@ function AgreementPage() {
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               1
             </span>
-            A super admin uploads a fresh agreement PDF and sends it through Zoho Sign.
+            A super admin uploads a fresh agreement PDF and prepares it through Zoho Sign.
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
               2
             </span>
-            You sign the document digitally from the Zoho Sign email link.
+            You click Sign with Zoho Sign to open a fresh signing tab and complete the signature.
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">

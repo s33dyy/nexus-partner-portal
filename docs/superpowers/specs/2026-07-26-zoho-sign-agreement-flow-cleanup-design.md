@@ -1,6 +1,6 @@
 # LIVEY Partner Portal Zoho Sign Agreement Flow Cleanup Design
 
-**Goal:** Fix the partner agreement workflow so super admins upload a fresh agreement PDF per partner, send it through Zoho Sign, partners complete digital signing with basic portal access only, and super admins perform the final approval after signing.
+**Goal:** Fix the partner agreement workflow so super admins upload a fresh agreement PDF per partner, create an embedded Zoho Sign request without email delivery, partners complete digital signing from a direct in-app button with basic portal access only, and super admins perform the final approval after signing.
 
 **Architecture:** Keep Zoho Sign as the only signing provider, but make the agreement lifecycle a first-class shared workflow instead of a loose collection of UI states. The source of truth stays in Postgres through `profiles.partner_status` and `partners.status`, with one additional review state after Zoho completion so super admins can confirm the signed return before full access opens. Admin-only sending moves to the partner approval sheet, while partner-facing screens become read-only status and signing surfaces with no manual upload fallback.
 
@@ -50,7 +50,7 @@ The important distinction is that Zoho completion does not immediately unlock fu
 4. Super admin uploads a fresh PDF for that partner and sends it through Zoho Sign.
 5. The backend stores the upload metadata and creates the Zoho request.
 6. Partner status moves to `pending_agreement`.
-7. The partner opens the agreement via Zoho Sign and signs digitally.
+7. The partner opens the agreement from a `Sign with Zoho Sign` button in the portal, which opens Zoho Sign in a new tab, and signs digitally.
 8. Zoho webhook updates the partner to `signed_pending_review`.
 9. Super admin opens the partner record, reviews the signed agreement, and marks the partner `approved`.
 10. Full portal access is unlocked only after that final approval.
@@ -86,10 +86,11 @@ The important distinction is that Zoho completion does not immediately unlock fu
 ### Partner Signing Path
 
 1. Partner sees a banner and agreement page while access is limited.
-2. Partner only sees Zoho Sign status, refresh actions, and agreement progress.
-3. Partner signs through Zoho Sign.
-4. Webhook marks the record as signed and pending review.
-5. Partner can stay in the portal with basic access while waiting for super admin approval.
+2. Partner only sees Zoho Sign status, a direct `Sign with Zoho Sign` button, and agreement progress.
+3. Clicking the button opens Zoho Sign in a new tab for an embedded signing session.
+4. The partner signs through Zoho Sign.
+5. Webhook marks the record as signed and pending review.
+6. Partner can stay in the portal with basic access while waiting for super admin approval.
 
 ### Final Approval Path
 
@@ -144,7 +145,8 @@ Route guards and helper hooks must treat `partial_approval`, `pending_agreement`
 ## UI Cleanup
 
 - Remove the partner-facing manual upload card and related copy from the agreement page.
-- Replace any language that says the partner can upload the signed agreement themselves.
+- Replace any language that says the partner can upload the signed agreement themselves or check an email link.
+- Replace the email-link CTA with a direct `Sign with Zoho Sign` button that opens a new tab.
 - Make the agreement page clearly show the current status:
   - partially approved
   - agreement sent

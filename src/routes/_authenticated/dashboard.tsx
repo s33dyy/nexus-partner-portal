@@ -29,6 +29,7 @@ import { formatDateLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
+import { getAgreementCtaLabel } from "@/routes/_authenticated/partner.agreement";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
@@ -364,16 +365,16 @@ function DashboardPage() {
               </p>
               <p className="text-sm text-muted-foreground">
                 {access.isPartialApproval &&
-                  "Your partner profile has been partially approved. A super admin will upload and send the agreement through Zoho Sign."}
+                  "Your partner profile has been partially approved. Open the agreement page to sign with Zoho Sign."}
                 {access.isPendingAgreement &&
-                  "Your Zoho Sign agreement has been sent. Please sign it to continue."}
+                  "Your Zoho Sign agreement is ready. Open the agreement page to launch the sign button."}
                 {access.isSignedPendingReview &&
                   "Zoho Sign has completed the signature. The super admin is reviewing the signed agreement before granting full access."}
               </p>
             </div>
             {!access.isSignedPendingReview && (
               <Button asChild variant="default">
-                <Link to="/partner/agreement">Open Agreement</Link>
+                <Link to="/partner/agreement">{getAgreementCtaLabel(status)}</Link>
               </Button>
             )}
           </CardContent>
