@@ -1,5 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { exchangeAuthCode, verifyZohoWebhookSignature, sendAgreement, REDIRECT_URI } from "@/lib/zoho-sign";
+import {
+  buildPartnerAgreementSourceFilePath,
+  exchangeAuthCode,
+  getRequestStatus,
+  sendAgreement,
+  verifyZohoWebhookSignature,
+  REDIRECT_URI,
+} from "@/lib/zoho-sign";
+import { removeDocumentBlobs, uploadDocumentBlob } from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
 
 const CLIENT_ID = process.env.ZOHO_SIGN_CLIENT_ID ?? "";
@@ -118,23 +126,9 @@ export async function handleZohoWebhook(request: Request) {
       const partner = partnerRes.rows[0];
 
       if (partner) {
-        await pool.query(
-          `UPDATE public.partners
-           SET status = 'approved',
-               agreement_signed_at = now(),
-               updated_at = now()
-           WHERE id = $1`,
-          [partner.id],
-        );
-        await pool.query(
-          `UPDATE public.profiles
-           SET partner_status = 'approved',
-               updated_at = now()
-           WHERE partner_id = $1`,
-          [partner.id],
-        );
+        await markPartnerSignedPendingReview(partner.id);
         console.log(
-          `[ZohoSign webhook] Partner ${partner.id} approved after signing (requestId=${requestId})`,
+          `[ZohoSign webhook] Partner ${partner.id} moved to signed_pending_review (requestId=${requestId})`,
         );
       } else {
         console.warn(`[ZohoSign webhook] No partner found for requestId=${requestId}`);
@@ -148,27 +142,157 @@ export async function handleZohoWebhook(request: Request) {
   return new Response("OK", { status: 200 });
 }
 
+export function parseZohoSendAgreementFormData(formData: FormData) {
+  const partnerId = String(formData.get("partnerId") ?? "").trim();
+  const partnerEmail = String(formData.get("partnerEmail") ?? "").trim();
+  const partnerName = String(formData.get("partnerName") ?? "").trim();
+  const partnerCompany = String(formData.get("partnerCompany") ?? "").trim();
+  const uploadedBy = String(formData.get("uploadedBy") ?? "").trim() || null;
+  const fileValue = formData.get("agreementFile") ?? formData.get("file");
+
+  if (!partnerId) throw new Error("partnerId is required");
+  if (!partnerEmail) throw new Error("partnerEmail is required");
+  if (!partnerName) throw new Error("partnerName is required");
+  if (!partnerCompany) throw new Error("partnerCompany is required");
+  if (!(fileValue instanceof File)) {
+    throw new Error("A PDF file upload is required");
+  }
+  const isPdf =
+    fileValue.type === "application/pdf" || fileValue.name.toLowerCase().endsWith(".pdf");
+  if (!isPdf) {
+    throw new Error("The uploaded agreement file must be a PDF");
+  }
+
+  return {
+    partnerId,
+    partnerEmail,
+    partnerName,
+    partnerCompany,
+    uploadedBy,
+    agreementFile: fileValue,
+  };
+}
+
+async function markPartnerSignedPendingReview(partnerId: string) {
+  await pool.query(
+    `UPDATE public.partners
+     SET status = 'signed_pending_review',
+         agreement_signed_at = COALESCE(agreement_signed_at, now()),
+         updated_at = now()
+     WHERE id = $1
+       AND status <> 'approved'`,
+    [partnerId],
+  );
+  await pool.query(
+    `UPDATE public.profiles
+     SET partner_status = 'signed_pending_review',
+         updated_at = now()
+     WHERE partner_id = $1
+       AND partner_status <> 'approved'`,
+    [partnerId],
+  );
+}
+
+async function storeSourceAgreementUpload(input: {
+  partnerId: string;
+  uploadedBy: string;
+  file: File;
+}) {
+  const sourceFilePath = buildPartnerAgreementSourceFilePath(input.partnerId);
+  await uploadDocumentBlob({
+    bucket: "partner-documents",
+    filePath: sourceFilePath,
+    fileName: input.file.name || "agreement.pdf",
+    mimeType: input.file.type || "application/pdf",
+    file: input.file,
+    isSeed: false,
+  });
+
+  await pool.query(
+    `DELETE FROM public.partner_documents
+     WHERE partner_id = $1 AND doc_type = 'agreement_source'`,
+    [input.partnerId],
+  );
+
+  await pool.query(
+    `INSERT INTO public.partner_documents (
+       partner_id,
+       uploaded_by,
+       doc_type,
+       file_name,
+       file_path,
+       mime_type,
+       size_bytes,
+       is_seed
+     )
+     VALUES ($1, $2, 'agreement_source', $3, $4, $5, $6, false)`,
+    [
+      input.partnerId,
+      input.uploadedBy,
+      input.file.name || "agreement.pdf",
+      sourceFilePath,
+      input.file.type || "application/pdf",
+      input.file.size,
+    ],
+  );
+
+  await pool.query(
+    `UPDATE public.partners
+     SET agreement_source_doc_path = $1,
+         updated_at = now()
+     WHERE id = $2`,
+    [sourceFilePath, input.partnerId],
+  );
+
+  return sourceFilePath;
+}
+
 export async function handleZohoSendAgreement(request: Request) {
-  let body: any;
+  let body: ReturnType<typeof parseZohoSendAgreementFormData>;
   try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+    body = parseZohoSendAgreementFormData(await request.formData());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Invalid multipart form data";
+    return new Response(JSON.stringify({ error: msg }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const { partnerId, partnerEmail, partnerName, partnerCompany } = body;
-  if (!partnerId || !partnerEmail) {
-    return new Response(JSON.stringify({ error: "partnerId and partnerEmail are required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const { partnerId, partnerEmail, partnerName, partnerCompany, uploadedBy, agreementFile } = body;
 
   try {
-    const result = await sendAgreement({ partnerEmail, partnerName, partnerCompany });
+    const partnerRes = await pool.query<{ id: string; owner_user_id: string }>(
+      `SELECT id, owner_user_id FROM public.partners WHERE id = $1 LIMIT 1`,
+      [partnerId],
+    );
+    const partner = partnerRes.rows[0];
+    if (!partner) {
+      return new Response(JSON.stringify({ error: "Partner not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const sourceFilePath = await storeSourceAgreementUpload({
+      partnerId,
+      uploadedBy: uploadedBy ?? partner.owner_user_id,
+      file: agreementFile,
+    });
+
+    let result: Awaited<ReturnType<typeof sendAgreement>>;
+    try {
+      result = await sendAgreement({
+        partnerId,
+        partnerEmail,
+        partnerName,
+        partnerCompany,
+        sourceFile: agreementFile,
+      });
+    } catch (err) {
+      await removeDocumentBlobs([sourceFilePath]).catch(() => {});
+      throw err;
+    }
 
     await pool.query(
       `UPDATE public.partners
@@ -194,12 +318,92 @@ export async function handleZohoSendAgreement(request: Request) {
         success: true,
         requestId: result.requestId,
         signingUrl: result.signingUrl,
+        sourceFilePath,
+        requestStatus: "pending",
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {
     console.error("[ZohoSign send-agreement] error:", err);
     const msg = err instanceof Error ? err.message : "Failed to send agreement";
+    return new Response(JSON.stringify({ error: msg }), {
+      status: err instanceof Error && err.message === "Partner not found" ? 404 : 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+export async function handleZohoResyncAgreement(request: Request) {
+  let body: { partnerId?: string };
+  try {
+    body = (await request.json()) as { partnerId?: string };
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const partnerId = String(body.partnerId ?? "").trim();
+  if (!partnerId) {
+    return new Response(JSON.stringify({ error: "partnerId is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  try {
+    const partnerRes = await pool.query<{
+      id: string;
+      agreement_envelope_id: string | null;
+      status: string;
+    }>(
+      `SELECT id, agreement_envelope_id, status
+       FROM public.partners
+       WHERE id = $1
+       LIMIT 1`,
+      [partnerId],
+    );
+    const partner = partnerRes.rows[0];
+    if (!partner) {
+      return new Response(JSON.stringify({ error: "Partner not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!partner.agreement_envelope_id) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          requestStatus: null,
+          partnerStatus: partner.status,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const requestStatus = await getRequestStatus(partner.agreement_envelope_id);
+    if (requestStatus === "completed") {
+      await markPartnerSignedPendingReview(partnerId);
+    }
+
+    const refreshed = await pool.query<{ status: string }>(
+      `SELECT status FROM public.partners WHERE id = $1 LIMIT 1`,
+      [partnerId],
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        requestStatus,
+        partnerStatus: refreshed.rows[0]?.status ?? partner.status,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  } catch (err) {
+    console.error("[ZohoSign resync-agreement] error:", err);
+    const msg = err instanceof Error ? err.message : "Failed to resync agreement";
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

@@ -20,35 +20,21 @@ export const REDIRECT_URI =
   process.env.ZOHO_SIGN_REDIRECT_URI ??
   "https://systemforgelabs.xyz/api/integrations/zoho-sign/callback";
 
-// Simple HTML agreement used when no Zoho template ID is configured
-const DUMMY_AGREEMENT_HTML = `
-<html><body style="font-family:sans-serif;max-width:700px;margin:40px auto;padding:0 20px">
-<h1 style="font-size:24px">LIVEY Partner Agreement</h1>
-<p><strong>Effective Date:</strong> {{date}}</p>
-<hr/>
-<p>This Partner Agreement ("Agreement") is entered into between <strong>LIVEY Technologies</strong>
-("Company") and the undersigned partner entity ("Partner").</p>
-<h2 style="font-size:18px">1. Appointment</h2>
-<p>The Company appoints Partner as a non-exclusive reseller/referral partner for LIVEY products
-and services in the territory agreed upon.</p>
-<h2 style="font-size:18px">2. Partner Obligations</h2>
-<p>Partner shall (a) actively promote LIVEY products; (b) maintain qualified sales and technical
-staff; (c) comply with LIVEY's brand and marketing guidelines.</p>
-<h2 style="font-size:18px">3. Compensation</h2>
-<p>Partner will receive commission as per the tier schedule communicated separately by LIVEY.</p>
-<h2 style="font-size:18px">4. Term &amp; Termination</h2>
-<p>This Agreement is valid for one (1) year and automatically renews unless terminated with 30
-days' written notice by either party.</p>
-<h2 style="font-size:18px">5. Confidentiality</h2>
-<p>Both parties agree to keep each other's proprietary information confidential.</p>
-<h2 style="font-size:18px">6. Governing Law</h2>
-<p>This Agreement is governed by the laws of India.</p>
-<br/><br/>
-<p>By signing below, Partner agrees to all terms and conditions above.</p>
-<br/>
-<p>____________________________<br/>Partner Signature<br/>Name: ___________________<br/>Date: ___________________</p>
-</body></html>
-`;
+function normalizeAgreementText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+export function buildZohoAgreementRequestName(opts: {
+  partnerId: string;
+  partnerCompany: string;
+}): string {
+  const company = normalizeAgreementText(opts.partnerCompany) || "Partner";
+  return `LIVEY Partner Agreement — ${company} (${opts.partnerId})`;
+}
+
+export function buildPartnerAgreementSourceFilePath(partnerId: string): string {
+  return `partners/${partnerId}/agreement-source.pdf`;
+}
 
 // ─── Token management ────────────────────────────────────────────────────────
 
@@ -187,157 +173,104 @@ export type SendAgreementResult = {
 
 /** Create a signing request in Zoho Sign and return the request ID + signing URL. */
 export async function sendAgreement(opts: {
+  partnerId: string;
   partnerEmail: string;
   partnerName: string;
   partnerCompany: string;
+  sourceFile: File;
 }): Promise<SendAgreementResult> {
   const { token } = await getValidAccessToken();
 
   // Zoho Sign API always uses sign.zoho.in for India DC (not the token's api_domain)
   const apiDomain = process.env.ZOHO_SIGN_API_URL ?? "https://sign.zoho.in";
 
-  const templateId = process.env.ZOHO_SIGN_TEMPLATE_ID;
-
   let requestId: string;
   let signingUrl: string | null = null;
 
-  if (templateId) {
-    // Use a pre-built Zoho Sign template
-    const payload = {
-      templates: {
-        field_data: {
-          field_text_data: {
-            "Partner Name": opts.partnerName,
-            "Partner Company": opts.partnerCompany,
-            Date: new Date().toLocaleDateString("en-IN"),
+  const uploadRes = await fetch(`${apiDomain}/api/v1/documents`, {
+    method: "POST",
+    headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    body: (() => {
+      const formData = new FormData();
+      formData.append("file", opts.sourceFile, opts.sourceFile.name || "partner-agreement.pdf");
+      return formData;
+    })(),
+  });
+  const uploadData = (await uploadRes.json()) as {
+    documents?: { document_ids?: Array<{ document_id?: string }> };
+    message?: string;
+  };
+  if (!uploadRes.ok || !uploadData.documents?.document_ids?.[0]?.document_id)
+    throw new Error(`Zoho Sign document upload failed: ${JSON.stringify(uploadData)}`);
+  const docId = uploadData.documents.document_ids[0].document_id!;
+
+  // Step 2: create a signing request from the uploaded PDF
+  const requestPayload = {
+    requests: {
+      request_name: buildZohoAgreementRequestName({
+        partnerId: opts.partnerId,
+        partnerCompany: opts.partnerCompany,
+      }),
+      actions: [
+        {
+          recipient_name: opts.partnerName,
+          recipient_email: opts.partnerEmail,
+          action_type: "SIGN",
+          private_notes: "Please review and sign the LIVEY Partner Agreement.",
+          signing_order: 1,
+          verify_recipient: false,
+          fields: {
+            text_fields: [],
+            signature_fields: [
+              {
+                field_name: "Signature",
+                field_type_name: "Signature",
+                document_id: docId,
+                abs_width: 200,
+                abs_height: 40,
+                x_coord: 100,
+                y_coord: 600,
+                page_no: 1,
+              },
+            ],
           },
         },
-        actions: [
-          {
-            recipient_name: opts.partnerName,
-            recipient_email: opts.partnerEmail,
-            action_type: "SIGN",
-            private_notes: "Please review and sign the LIVEY Partner Agreement.",
-            signing_order: 1,
-            verify_recipient: false,
-          },
-        ],
-        notes: "LIVEY Partner Agreement — please sign at your earliest convenience.",
-      },
-    };
+      ],
+      notes: "LIVEY Partner Agreement — please sign at your earliest convenience.",
+      expiration_days: 30,
+      is_sequential: true,
+      reminder_period: 3,
+      document_ids: [{ document_id: docId }],
+      // document_order causes Zoho API bug (code 9008) - omit and let API infer
+    },
+  };
 
-    const res = await fetch(
-      `${apiDomain}/api/v1/templates/${templateId}/createdocument`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      },
-    );
-    const data = (await res.json()) as {
-      requests?: { request_id?: string };
-      status?: string;
-      message?: string;
-    };
-    if (!res.ok || !data.requests?.request_id)
-      throw new Error(`Zoho Sign template request failed: ${JSON.stringify(data)}`);
-    requestId = data.requests.request_id;
-  } else {
-    // No template — create document from HTML content
-    const agreementHtml = DUMMY_AGREEMENT_HTML.replace(
-      "{{date}}",
-      new Date().toLocaleDateString("en-IN"),
-    );
-    const htmlBlob = new Blob([agreementHtml], { type: "text/html" });
-
-    // Step 1: upload the document
-    const formData = new FormData();
-    formData.append("file", htmlBlob, "partner-agreement.html");
-
-    const uploadRes = await fetch(`${apiDomain}/api/v1/documents`, {
-      method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      body: formData,
-    });
-    const uploadData = (await uploadRes.json()) as {
-      documents?: { document_ids?: Array<{ document_id?: string }> };
-      message?: string;
-    };
-    if (!uploadRes.ok || !uploadData.documents?.document_ids?.[0]?.document_id)
-      throw new Error(`Zoho Sign document upload failed: ${JSON.stringify(uploadData)}`);
-    const docId = uploadData.documents.document_ids[0].document_id!;
-
-    // Step 2: create a signing request
-    // NOTE: Zoho Sign API has a known bug where `document_order` validation fails
-    // even when correctly provided (error code 9008). The template path avoids this.
-    const requestPayload = {
-      requests: {
-        request_name: `LIVEY Partner Agreement — ${opts.partnerCompany}`,
-        actions: [
-          {
-            recipient_name: opts.partnerName,
-            recipient_email: opts.partnerEmail,
-            action_type: "SIGN",
-            private_notes: "Please review and sign the LIVEY Partner Agreement.",
-            signing_order: 1,
-            verify_recipient: false,
-            fields: {
-              text_fields: [],
-              signature_fields: [
-                {
-                  field_name: "Signature",
-                  field_type_name: "Signature",
-                  document_id: docId,
-                  abs_width: 200,
-                  abs_height: 40,
-                  x_coord: 100,
-                  y_coord: 600,
-                  page_no: 1,
-                },
-              ],
-            },
-          },
-        ],
-        notes: "LIVEY Partner Agreement — please sign at your earliest convenience.",
-        expiration_days: 30,
-        is_sequential: true,
-        reminder_period: 3,
-        document_ids: [{ document_id: docId }],
-        // document_order causes Zoho API bug (code 9008) - omit and let API infer
-      },
-    };
-
-    const reqRes = await fetch(`${apiDomain}/api/v1/requests`, {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-oauthtoken ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestPayload),
-    });
-    const reqData = (await reqRes.json()) as {
-      requests?: { request_id?: string };
-      message?: string;
-      code?: number;
-      error_param?: string;
-    };
-    if (!reqRes.ok || !reqData.requests?.request_id) {
-      // Zoho API bug: document_order validation fails with code 9008 even when correctly provided
-      if (reqData.code === 9008 && reqData.error_param === "document_order") {
-        throw new Error(
-          "Zoho Sign API bug: document_order validation fails (code 9008). " +
-            "Workaround: Set ZOHO_SIGN_TEMPLATE_ID in environment to use a pre-built Zoho Sign template, " +
-            "which uses a different API endpoint that avoids this bug. " +
-            `Original error: ${reqData.message}`,
-        );
-      }
-      throw new Error(`Zoho Sign request creation failed: ${JSON.stringify(reqData)}`);
+  const reqRes = await fetch(`${apiDomain}/api/v1/requests`, {
+    method: "POST",
+    headers: {
+      Authorization: `Zoho-oauthtoken ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestPayload),
+  });
+  const reqData = (await reqRes.json()) as {
+    requests?: { request_id?: string };
+    message?: string;
+    code?: number;
+    error_param?: string;
+  };
+  if (!reqRes.ok || !reqData.requests?.request_id) {
+    // Zoho API bug: document_order validation fails with code 9008 even when correctly provided
+    if (reqData.code === 9008 && reqData.error_param === "document_order") {
+      throw new Error(
+        "Zoho Sign API bug: document_order validation fails (code 9008). " +
+          "Workaround: ensure Zoho Sign request creation uses a single uploaded PDF document. " +
+          `Original error: ${reqData.message}`,
+      );
     }
-    requestId = reqData.requests.request_id;
+    throw new Error(`Zoho Sign request creation failed: ${JSON.stringify(reqData)}`);
   }
+  requestId = reqData.requests.request_id;
 
   // Try to fetch the embedded signing URL
   try {
