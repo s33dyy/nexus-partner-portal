@@ -707,7 +707,7 @@ function AdminDealsPage() {
                         rewardRatePercent={reviewDraft.reward_rate_percent}
                         showRewardRate
                         allowEditRewardRate={!reviewCollaboratorEditingLocked}
-                        allowEditCollaborators={false}
+                        allowEditCollaborators={!reviewCollaboratorEditingLocked}
                         disabled={saving || reviewCollaboratorEditingLocked}
                         onCollaboratorsChange={setReviewCollaborators}
                         onHiddenToTeamChange={(hidden) =>
