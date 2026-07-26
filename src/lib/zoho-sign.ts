@@ -263,12 +263,12 @@ export async function sendAgreement(opts: {
       body: formData,
     });
     const uploadData = (await uploadRes.json()) as {
-      documents?: Array<{ document_id?: string }>;
+      documents?: { document_ids?: Array<{ document_id?: string }> };
       message?: string;
     };
-    if (!uploadRes.ok || !uploadData.documents?.[0]?.document_id)
+    if (!uploadRes.ok || !uploadData.documents?.document_ids?.[0]?.document_id)
       throw new Error(`Zoho Sign document upload failed: ${JSON.stringify(uploadData)}`);
-    const docId = uploadData.documents[0].document_id!;
+    const docId = uploadData.documents.document_ids[0].document_id!;
 
     // Step 2: create a signing request
     const requestPayload = {
