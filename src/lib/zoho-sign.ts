@@ -304,7 +304,7 @@ export async function sendAgreement(opts: {
         is_sequential: true,
         reminder_period: 3,
         document_ids: [{ document_id: docId }],
-        document_order: [{ document_id: docId, page_no: 1 }],
+        document_order: [docId],
       },
     };
 
