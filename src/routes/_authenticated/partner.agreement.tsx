@@ -36,6 +36,17 @@ type Partner = {
   status: string;
 };
 
+export function hasRealtimeSupport(
+  client: typeof supabase,
+): client is typeof supabase & {
+  channel: (name: string) => {
+    on: (...args: unknown[]) => { subscribe: () => unknown };
+  };
+  removeChannel: (channel: unknown) => Promise<unknown>;
+} {
+  return typeof (client as { channel?: unknown }).channel === "function";
+}
+
 function AgreementPage() {
   const { user, profile, refresh } = useAuth();
   const navigate = useNavigate();
@@ -63,12 +74,8 @@ function AgreementPage() {
   // Real-time subscription — auto-refresh when partner row changes
   useEffect(() => {
     if (!partner?.id) return;
-    const realtime = supabase as typeof supabase & {
-      channel: (name: string) => {
-        on: (...args: unknown[]) => { subscribe: () => unknown };
-      };
-      removeChannel: (channel: unknown) => Promise<unknown>;
-    };
+    if (!hasRealtimeSupport(supabase)) return;
+    const realtime = supabase;
     const channel = realtime
       .channel(`partner-agreement-${partner.id}`)
       .on(
