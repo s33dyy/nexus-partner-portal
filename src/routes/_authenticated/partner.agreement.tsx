@@ -105,14 +105,7 @@ function AgreementPage() {
 
   const handleSignWithZohoSign = async () => {
     setSigning(true);
-    let openedWindow: Window | null = null;
     try {
-      openedWindow = window.open("about:blank", "_blank");
-      if (!openedWindow) {
-        throw new Error("Zoho Sign popup was blocked");
-      }
-      openedWindow.opener = null;
-
       const response = await fetch("/api/integrations/zoho-sign/sign-url", {
         method: "POST",
         headers: {
@@ -126,12 +119,8 @@ function AgreementPage() {
       if (!data.signUrl) {
         throw new Error("Missing Zoho Sign URL");
       }
-      openedWindow.location.replace(data.signUrl);
-      openedWindow = null;
+      window.location.assign(data.signUrl);
     } catch (error) {
-      if (openedWindow) {
-        openedWindow.close();
-      }
       toast.error(
         error instanceof Error ? error.message : "Unable to open Zoho Sign right now.",
       );
