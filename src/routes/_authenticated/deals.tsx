@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +41,13 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import {
+  buildDealCollaboratorPayloads,
+  isDealCollaboratorEditingLocked,
+  normalizeDealCollaborators,
+  type DealCollaboratorDraft,
+} from "@/lib/deal-collaboration";
+import { canViewDeal } from "@/lib/deal-visibility";
+import {
   DEAL_STAGE_ORDER,
   nextDealStage,
   nextDealStatus,
@@ -47,6 +55,7 @@ import {
   requiresSuperAdminApproval,
   type DealRecord,
   type DealStage,
+  type TeamMemberRecord,
 } from "@/lib/portal-records";
 
 type DealForm = {
@@ -69,6 +78,8 @@ type DealForm = {
   source: string;
   last_touch: string;
   notes: string;
+  is_hidden_to_team: boolean;
+  reward_rate_percent: number;
 };
 
 type DealEditForm = {
@@ -85,6 +96,8 @@ type DealEditForm = {
   probability: number;
   source: string;
   notes: string;
+  is_hidden_to_team: boolean;
+  reward_rate_percent: number;
 };
 
 const EMPTY_FORM: DealForm = {
@@ -107,6 +120,8 @@ const EMPTY_FORM: DealForm = {
   source: "Partner referral",
   last_touch: "New",
   notes: "",
+  is_hidden_to_team: false,
+  reward_rate_percent: 5,
 };
 
 function dealToEditForm(deal: DealRecord): DealEditForm {
@@ -124,6 +139,8 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     probability: deal.probability,
     source: deal.source,
     notes: deal.notes,
+    is_hidden_to_team: deal.is_hidden_to_team,
+    reward_rate_percent: Number(deal.reward_rate_percent) || 5,
   };
 }
 
@@ -158,6 +175,10 @@ export const Route = createFileRoute("/_authenticated/deals")({
 
 function DealsPage() {
   const [deals, setDeals] = useState<DealRecord[]>([]);
+  const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
+    Record<string, DealCollaboratorDraft[]>
+  >({});
+  const [teamMembers, setTeamMembers] = useState<TeamMemberRecord[]>([]);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -167,51 +188,113 @@ function DealsPage() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
+  const [draftCollaborators, setDraftCollaborators] = useState<DealCollaboratorDraft[]>([]);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [selectedDealOpen, setSelectedDealOpen] = useState(false);
   const [selectedDealEditing, setSelectedDealEditing] = useState(false);
   const [selectedDealDraft, setSelectedDealDraft] = useState<DealEditForm | null>(null);
+  const [selectedDealCollaborators, setSelectedDealCollaborators] = useState<
+    DealCollaboratorDraft[]
+  >([]);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
   const [clientCreateSeed, setClientCreateSeed] = useState("");
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
-  useRequireAccess('full');
+  useRequireAccess("full");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase
+      let dealQuery = supabase
         .from("portal_deals")
         .select("*")
         .order("updated_at", { ascending: false });
 
-      query = applyPartnerScope(query, {
+      dealQuery = applyPartnerScope(dealQuery, {
         isSuperAdmin: hasRole("super_admin"),
         partnerId: profile?.partner_id ?? null,
         userId: profile?.id ?? null,
       });
 
-      const { data, error } = await query;
-      if (error) throw error;
-      const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
+      const [dealResult, collaboratorResult, memberResult] = await Promise.all([
+        dealQuery,
+        supabase
+          .from("portal_deal_collaborators")
+          .select("*")
+          .order("sort_order", { ascending: true }),
+        supabase.from("portal_team_members").select("*").order("full_name", { ascending: true }),
+      ]);
+
+      if (dealResult.error) throw dealResult.error;
+      if (collaboratorResult.error) throw collaboratorResult.error;
+      if (memberResult.error) throw memberResult.error;
+
+      const rows = ((dealResult.data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
         possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
       }));
-      setDeals(rows);
+
+      const collaboratorMap = Object.fromEntries(
+        rows.map((deal) => {
+          const collaboratorRows = (
+            (collaboratorResult.data as Array<{
+              deal_id: string;
+              user_id: string;
+              split_percent: number;
+              sort_order: number;
+            }> | null) ?? []
+          ).filter((row) => row.deal_id === deal.id);
+          return [deal.id, normalizeDealCollaborators(collaboratorRows)];
+        }),
+      ) as Record<string, DealCollaboratorDraft[]>;
+
+      const viewerContext = {
+        viewerUserId: profile?.id ?? null,
+        viewerRole: hasRole("super_admin")
+          ? ("super_admin" as const)
+          : hasRole("partner_admin")
+            ? ("partner_admin" as const)
+            : ("partner_user" as const),
+        isSuperAdmin: hasRole("super_admin"),
+        isPartnerAdmin: hasRole("partner_admin"),
+      };
+
+      const visibleRows = rows.filter((deal) =>
+        canViewDeal(deal, {
+          ...viewerContext,
+          collaboratorUserIds:
+            collaboratorMap[deal.id]?.map((collaborator) => collaborator.userId) ?? [],
+        }),
+      );
+
+      const companyName = profile?.company_name ?? null;
+      const members = ((memberResult.data as TeamMemberRecord[] | null) ?? []).filter((member) =>
+        hasRole("super_admin") || !companyName ? true : member.company_name === companyName,
+      );
+
+      setDeals(visibleRows);
+      setCollaboratorsByDealId(collaboratorMap);
+      setTeamMembers(members);
       setSource(rows.length > 0 ? "database" : "empty");
-      setSelectedId((current) => current ?? rows[0]?.id ?? null);
+      setSelectedId((current) =>
+        current && visibleRows.some((deal) => deal.id === current)
+          ? current
+          : (visibleRows[0]?.id ?? null),
+      );
     } catch {
       setDeals([]);
+      setCollaboratorsByDealId({});
+      setTeamMembers([]);
       setSource("empty");
       setSelectedId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id]);
+  }, [hasRole, profile?.company_name, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
@@ -346,17 +429,24 @@ function DealsPage() {
   );
   const canEditSelectedDeal =
     hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
+  const selectedDealCollaboratorEditingLocked = selectedDeal
+    ? isDealCollaboratorEditingLocked(selectedDeal)
+    : false;
+  const selectedDealCollaboratorsForPayout =
+    selectedDeal && selectedDealCollaborators.length > 0 ? selectedDealCollaborators : [];
 
   useEffect(() => {
     if (!selectedDeal) {
       setSelectedDealDraft(null);
+      setSelectedDealCollaborators([]);
       setSelectedDealEditing(false);
       return;
     }
 
     setSelectedDealDraft(dealToEditForm(selectedDeal));
+    setSelectedDealCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
     setSelectedDealEditing(false);
-  }, [selectedDeal]);
+  }, [collaboratorsByDealId, selectedDeal]);
 
   const filteredDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -464,6 +554,20 @@ function DealsPage() {
     ]);
   };
 
+  const replaceCollaborators = async (dealId: string, collaborators: DealCollaboratorDraft[]) => {
+    const { error: deleteError } = await supabase
+      .from("portal_deal_collaborators")
+      .delete()
+      .eq("deal_id", dealId);
+    if (deleteError) throw deleteError;
+
+    const payload = buildDealCollaboratorPayloads(dealId, collaborators);
+    if (payload.length === 0) return;
+
+    const { error: insertError } = await supabase.from("portal_deal_collaborators").insert(payload);
+    if (insertError) throw insertError;
+  };
+
   const createDeal = async () => {
     const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
     const accountName = isPartnerUser
@@ -509,6 +613,8 @@ function DealsPage() {
         close_date: draft.possible_close_date || draft.close_date || now.slice(0, 10),
         status: autoApproved ? "approved" : "submitted",
         probability: Number(draft.probability) || 0,
+        is_hidden_to_team: draft.is_hidden_to_team,
+        reward_rate_percent: Number(draft.reward_rate_percent) || 5,
         user_id: profile?.id,
         is_seed: false,
         created_at: now,
@@ -516,6 +622,7 @@ function DealsPage() {
       };
       const { error } = await supabase.from("portal_deals").insert(payload);
       if (error) throw error;
+      await replaceCollaborators(payload.id, draftCollaborators);
 
       await publishDealActivity({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
@@ -533,6 +640,7 @@ function DealsPage() {
 
       toast.success("Deal created");
       setDraft(EMPTY_FORM);
+      setDraftCollaborators([]);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create deal");
@@ -592,11 +700,16 @@ function DealsPage() {
           probability: Math.min(100, Math.max(0, Number(selectedDealDraft.probability) || 0)),
           source,
           notes,
+          is_hidden_to_team: selectedDealDraft.is_hidden_to_team,
+          reward_rate_percent: Number(selectedDealDraft.reward_rate_percent) || 5,
           last_touch: "Deal details updated",
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedDeal.id);
       if (error) throw error;
+      if (!selectedDealCollaboratorEditingLocked) {
+        await replaceCollaborators(selectedDeal.id, selectedDealCollaborators);
+      }
       toast.success("Deal details updated");
       setSelectedDealEditing(false);
       await load();
@@ -660,7 +773,10 @@ function DealsPage() {
           dealId: selectedDeal.id,
           accountName: selectedDeal.account_name,
           product: selectedDeal.product,
-          userId: selectedDeal.user_id,
+          dealAmount: selectedDeal.amount,
+          rewardRatePercent: Number(selectedDeal.reward_rate_percent) || 5,
+          collaborators: selectedDealCollaboratorsForPayout,
+          fallbackUserId: selectedDeal.user_id,
           partnerId: selectedDeal.partner_id,
           actorId: profile?.id ?? null,
         });
@@ -721,7 +837,10 @@ function DealsPage() {
           dealId: selectedDeal.id,
           accountName: selectedDeal.account_name,
           product: selectedDeal.product,
-          userId: selectedDeal.user_id,
+          dealAmount: selectedDeal.amount,
+          rewardRatePercent: Number(selectedDeal.reward_rate_percent) || 5,
+          collaborators: selectedDealCollaboratorsForPayout,
+          fallbackUserId: selectedDeal.user_id,
           partnerId: selectedDeal.partner_id,
           actorId: profile?.id ?? null,
         });
@@ -1162,6 +1281,23 @@ function DealsPage() {
                   placeholder="Why this deal matters..."
                 />
               </div>
+              <DealCollaboratorEditor
+                title="Collaborators"
+                collaborators={draftCollaborators}
+                availableMembers={teamMembers}
+                hiddenToTeam={draft.is_hidden_to_team}
+                rewardRatePercent={draft.reward_rate_percent}
+                showRewardRate
+                allowEditRewardRate={hasRole("super_admin")}
+                disabled={creating}
+                onCollaboratorsChange={setDraftCollaborators}
+                onHiddenToTeamChange={(hidden) =>
+                  setDraft((current) => ({ ...current, is_hidden_to_team: hidden }))
+                }
+                onRewardRateChange={(percent) =>
+                  setDraft((current) => ({ ...current, reward_rate_percent: percent }))
+                }
+              />
               <Button onClick={() => void createDeal()} disabled={creating}>
                 {creating ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1193,6 +1329,9 @@ function DealsPage() {
                         if (!selectedDealDraft) return;
                         if (selectedDealEditing) {
                           setSelectedDealDraft(dealToEditForm(selectedDeal));
+                          setSelectedDealCollaborators(
+                            collaboratorsByDealId[selectedDeal.id] ?? [],
+                          );
                           setSelectedDealEditing(false);
                           return;
                         }
@@ -1368,6 +1507,43 @@ function DealsPage() {
                         <Meta label="Probability" value={`${selectedDeal.probability}%`} />
                       </div>
                     )}
+                    <DealCollaboratorEditor
+                      title="Visibility & collaborators"
+                      collaborators={selectedDealCollaborators}
+                      availableMembers={teamMembers}
+                      hiddenToTeam={
+                        selectedDealDraft?.is_hidden_to_team ?? selectedDeal.is_hidden_to_team
+                      }
+                      rewardRatePercent={
+                        selectedDealDraft?.reward_rate_percent ?? selectedDeal.reward_rate_percent
+                      }
+                      showRewardRate
+                      allowEditRewardRate={
+                        selectedDealEditing &&
+                        hasRole("super_admin") &&
+                        !selectedDealCollaboratorEditingLocked
+                      }
+                      allowEditCollaborators={
+                        selectedDealEditing && !selectedDealCollaboratorEditingLocked
+                      }
+                      disabled={
+                        saving ||
+                        selectedDealCollaboratorEditingLocked ||
+                        !selectedDealEditing ||
+                        !canEditSelectedDeal
+                      }
+                      onCollaboratorsChange={setSelectedDealCollaborators}
+                      onHiddenToTeamChange={(hidden) =>
+                        setSelectedDealDraft((current) =>
+                          current ? { ...current, is_hidden_to_team: hidden } : current,
+                        )
+                      }
+                      onRewardRateChange={(percent) =>
+                        setSelectedDealDraft((current) =>
+                          current ? { ...current, reward_rate_percent: percent } : current,
+                        )
+                      }
+                    />
                     <Separator />
                     <div className="space-y-2">
                       <Label>Quick note</Label>

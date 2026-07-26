@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, RefreshCw, Search, ShieldCheck, XCircle } from "
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,8 +25,14 @@ import { supabase } from "@/integrations/local/client";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import {
+  buildDealCollaboratorPayloads,
+  isDealCollaboratorEditingLocked,
+  normalizeDealCollaborators,
+  type DealCollaboratorDraft,
+} from "@/lib/deal-collaboration";
 import { awardDealWinPoints } from "@/lib/rewards";
-import { DEAL_STAGE_ORDER, type DealRecord } from "@/lib/portal-records";
+import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
 
@@ -36,6 +43,10 @@ export const Route = createFileRoute("/_authenticated/admin/deals")({
 function AdminDealsPage() {
   const { profile, hasRole } = useAuth();
   const [deals, setDeals] = useState<DealRecord[]>([]);
+  const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
+    Record<string, DealCollaboratorDraft[]>
+  >({});
+  const [teamMembers, setTeamMembers] = useState<TeamMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -45,6 +56,7 @@ function AdminDealsPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [note, setNote] = useState("");
   const [reviewDraft, setReviewDraft] = useState<DealRecord | null>(null);
+  const [reviewCollaborators, setReviewCollaborators] = useState<DealCollaboratorDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
   const [clientCreateSeed, setClientCreateSeed] = useState("");
@@ -58,21 +70,48 @@ function AdminDealsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("portal_deals")
-        .select("*")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
+      const [dealResult, collaboratorResult, memberResult] = await Promise.all([
+        supabase.from("portal_deals").select("*").order("updated_at", { ascending: false }),
+        supabase
+          .from("portal_deal_collaborators")
+          .select("*")
+          .order("sort_order", { ascending: true }),
+        supabase.from("portal_team_members").select("*").order("full_name", { ascending: true }),
+      ]);
+      if (dealResult.error) throw dealResult.error;
+      if (collaboratorResult.error) throw collaboratorResult.error;
+      if (memberResult.error) throw memberResult.error;
+
+      const data = dealResult.data;
       const rows = ((data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
         possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
       }));
+
+      const collaboratorMap = Object.fromEntries(
+        rows.map((deal) => {
+          const collaboratorRows = (
+            (collaboratorResult.data as Array<{
+              deal_id: string;
+              user_id: string;
+              split_percent: number;
+              sort_order: number;
+            }> | null) ?? []
+          ).filter((row) => row.deal_id === deal.id);
+          return [deal.id, normalizeDealCollaborators(collaboratorRows)];
+        }),
+      ) as Record<string, DealCollaboratorDraft[]>;
+
       setDeals(rows);
+      setCollaboratorsByDealId(collaboratorMap);
+      setTeamMembers(((memberResult.data as TeamMemberRecord[] | null) ?? []).slice());
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
       setDeals([]);
+      setCollaboratorsByDealId({});
+      setTeamMembers([]);
       setSource("empty");
       setSelectedId(null);
     } finally {
@@ -104,16 +143,21 @@ function AdminDealsPage() {
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
   );
+  const reviewCollaboratorEditingLocked = reviewDraft
+    ? isDealCollaboratorEditingLocked(reviewDraft)
+    : false;
 
   useEffect(() => {
     if (!selectedDeal) {
       setReviewDraft(null);
+      setReviewCollaborators([]);
       setNote("");
       return;
     }
     setReviewDraft(selectedDeal);
+    setReviewCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
     setNote(selectedDeal.notes);
-  }, [selectedDeal]);
+  }, [collaboratorsByDealId, selectedDeal]);
 
   const metrics = useMemo(() => {
     const queue = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
@@ -179,6 +223,20 @@ function AdminDealsPage() {
     ]);
   };
 
+  const replaceCollaborators = async (dealId: string, collaborators: DealCollaboratorDraft[]) => {
+    const { error: deleteError } = await supabase
+      .from("portal_deal_collaborators")
+      .delete()
+      .eq("deal_id", dealId);
+    if (deleteError) throw deleteError;
+
+    const payload = buildDealCollaboratorPayloads(dealId, collaborators);
+    if (payload.length === 0) return;
+
+    const { error: insertError } = await supabase.from("portal_deal_collaborators").insert(payload);
+    if (insertError) throw insertError;
+  };
+
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Deal approvals" roleLabel="Super Admin" />;
   }
@@ -210,6 +268,8 @@ function AdminDealsPage() {
             reviewDraft.close_date || reviewDraft.possible_close_date || selectedDeal.close_date,
           source: reviewDraft.source,
           notes: note.trim() || reviewDraft.notes,
+          is_hidden_to_team: reviewDraft.is_hidden_to_team,
+          reward_rate_percent: Number(reviewDraft.reward_rate_percent) || 5,
           status: status ?? reviewDraft.status,
           stage:
             status === "approved"
@@ -224,6 +284,9 @@ function AdminDealsPage() {
         })
         .eq("id", selectedDeal.id);
       if (error) throw error;
+      if (!reviewCollaboratorEditingLocked) {
+        await replaceCollaborators(selectedDeal.id, reviewCollaborators);
+      }
       if (status) {
         await publishDealActivity(
           selectedDeal,
@@ -250,7 +313,10 @@ function AdminDealsPage() {
               dealId: selectedDeal.id,
               accountName: selectedDeal.account_name,
               product: selectedDeal.product,
-              userId: selectedDeal.user_id,
+              dealAmount: selectedDeal.amount,
+              rewardRatePercent: Number(reviewDraft.reward_rate_percent) || 5,
+              collaborators: reviewCollaborators,
+              fallbackUserId: selectedDeal.user_id,
               partnerId: selectedDeal.partner_id,
               actorId: (await supabase.auth.getUser()).data.user?.id ?? null,
             });
@@ -633,6 +699,28 @@ function AdminDealsPage() {
                           />
                         </div>
                       </div>
+                      <DealCollaboratorEditor
+                        title="Collaborators"
+                        collaborators={reviewCollaborators}
+                        availableMembers={teamMembers}
+                        hiddenToTeam={reviewDraft.is_hidden_to_team}
+                        rewardRatePercent={reviewDraft.reward_rate_percent}
+                        showRewardRate
+                        allowEditRewardRate={!reviewCollaboratorEditingLocked}
+                        allowEditCollaborators={false}
+                        disabled={saving || reviewCollaboratorEditingLocked}
+                        onCollaboratorsChange={setReviewCollaborators}
+                        onHiddenToTeamChange={(hidden) =>
+                          setReviewDraft((current) =>
+                            current ? { ...current, is_hidden_to_team: hidden } : current,
+                          )
+                        }
+                        onRewardRateChange={(percent) =>
+                          setReviewDraft((current) =>
+                            current ? { ...current, reward_rate_percent: percent } : current,
+                          )
+                        }
+                      />
                     </div>
                   ) : null}
                   <Field label="Admin note">
