@@ -240,8 +240,7 @@ export async function sendAgreement(opts: {
       expiration_days: 30,
       is_sequential: true,
       reminder_period: 3,
-      document_ids: [{ document_id: docId }],
-      // document_order causes Zoho API bug (code 9008) - omit and let API infer
+      document_ids: [{ document_id: docId, document_order: 0 }],
     },
   };
 
