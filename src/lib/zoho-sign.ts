@@ -180,7 +180,10 @@ type ZohoRequestDetailsResponse = {
   };
 };
 
-async function fetchEmbeddedSigningUrl(requestId: string): Promise<string> {
+async function fetchEmbeddedSigningUrl(
+  requestId: string,
+  host: string,
+): Promise<string> {
   const { token } = await getValidAccessToken();
 
   // Zoho Sign API always uses sign.zoho.in for India DC (not the token's api_domain)
@@ -200,15 +203,17 @@ async function fetchEmbeddedSigningUrl(requestId: string): Promise<string> {
     throw new Error(`Zoho Sign request details lookup failed: ${JSON.stringify(detailsData)}`);
   }
 
-  const urlRes = await fetch(
+  const embedTokenUrl = new URL(
     `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-oauthtoken ${token}`,
-      },
-    },
   );
+  embedTokenUrl.searchParams.set("host", host);
+
+  const urlRes = await fetch(embedTokenUrl.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Zoho-oauthtoken ${token}`,
+    },
+  });
   const urlData = (await urlRes.json()) as { sign_url?: string; message?: string };
   if (!urlRes.ok || !urlData.sign_url) {
     throw new Error(`Zoho Sign embedded token failed: ${JSON.stringify(urlData)}`);
@@ -218,8 +223,8 @@ async function fetchEmbeddedSigningUrl(requestId: string): Promise<string> {
 }
 
 /** Fetch a fresh embedded signing URL for an existing Zoho Sign request. */
-export async function getEmbeddedSigningUrl(requestId: string): Promise<string> {
-  return await fetchEmbeddedSigningUrl(requestId);
+export async function getEmbeddedSigningUrl(requestId: string, host: string): Promise<string> {
+  return await fetchEmbeddedSigningUrl(requestId, host);
 }
 
 /** Create a signing request in Zoho Sign and return the request ID + signing URL. */

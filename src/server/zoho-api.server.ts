@@ -470,7 +470,10 @@ export async function handleZohoSignUrl(request: Request) {
       });
     }
 
-    const signUrl = await getEmbeddedSigningUrl(partner.agreement_envelope_id);
+    const signUrl = await getEmbeddedSigningUrl(
+      partner.agreement_envelope_id,
+      new URL(request.url).origin,
+    );
 
     return new Response(JSON.stringify({ signUrl }), {
       status: 200,

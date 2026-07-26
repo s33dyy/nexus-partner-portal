@@ -325,7 +325,10 @@ test("Zoho sign-url endpoint returns a fresh embedded signing URL for the curren
   }) as typeof pool.query;
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken")) {
+    if (
+      String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken") &&
+      String(input).includes("host=http%3A%2F%2Flocalhost")
+    ) {
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
         status: 200,
       });
@@ -480,7 +483,10 @@ test("Zoho sign-url endpoint falls back to the authenticated user as partner own
   }) as typeof pool.query;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken")) {
+    if (
+      String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken") &&
+      String(input).includes("host=http%3A%2F%2Flocalhost")
+    ) {
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
         status: 200,
       });
