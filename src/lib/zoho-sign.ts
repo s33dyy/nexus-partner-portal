@@ -191,7 +191,10 @@ export async function sendAgreement(opts: {
   partnerName: string;
   partnerCompany: string;
 }): Promise<SendAgreementResult> {
-  const { token, apiDomain } = await getValidAccessToken();
+  const { token } = await getValidAccessToken();
+
+  // Zoho Sign API always uses sign.zoho.in for India DC (not the token's api_domain)
+  const apiDomain = process.env.ZOHO_SIGN_API_URL ?? "https://sign.zoho.in";
 
   const templateId = process.env.ZOHO_SIGN_TEMPLATE_ID;
 
@@ -348,7 +351,11 @@ export async function sendAgreement(opts: {
 
 /** Get the current status of a Zoho Sign request. */
 export async function getRequestStatus(requestId: string): Promise<string> {
-  const { token, apiDomain } = await getValidAccessToken();
+  const { token } = await getValidAccessToken();
+
+  // Zoho Sign API always uses sign.zoho.in for India DC
+  const apiDomain = process.env.ZOHO_SIGN_API_URL ?? "https://sign.zoho.in";
+
   const res = await fetch(`${apiDomain}/api/v1/requests/${requestId}`, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
   });
