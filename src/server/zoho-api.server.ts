@@ -445,22 +445,15 @@ export async function handleZohoSignUrl(request: Request) {
       });
     }
 
-    if (!profile.partner_id) {
-      return new Response(JSON.stringify({ error: "Partner context is required" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
     const partnerRes = await pool.query<{
       id: string;
       agreement_envelope_id: string | null;
     }>(
       `SELECT id, agreement_envelope_id
        FROM public.partners
-       WHERE id = $1
+      WHERE id = $1 OR owner_user_id = $2
        LIMIT 1`,
-      [profile.partner_id],
+      [profile.partner_id, profile.id],
     );
     const partner = partnerRes.rows[0];
     if (!partner) {

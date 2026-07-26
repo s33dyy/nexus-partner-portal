@@ -105,25 +105,32 @@ function AgreementPage() {
 
   const handleSignWithZohoSign = async () => {
     setSigning(true);
+    let openedWindow: Window | null = null;
     try {
+      openedWindow = window.open("", "_blank", "noopener,noreferrer");
+      if (!openedWindow) {
+        throw new Error("Zoho Sign popup was blocked");
+      }
+
       const response = await fetch("/api/integrations/zoho-sign/sign-url", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
       });
+      const data = (await response.json()) as { signUrl?: string; error?: string };
       if (!response.ok) {
-        throw new Error("Unable to start Zoho Sign");
+        throw new Error(data.error ?? "Unable to start Zoho Sign");
       }
-      const data = (await response.json()) as { signUrl?: string };
       if (!data.signUrl) {
         throw new Error("Missing Zoho Sign URL");
       }
-      const opened = window.open(data.signUrl, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        throw new Error("Zoho Sign popup was blocked");
-      }
+      openedWindow.location.href = data.signUrl;
+      openedWindow = null;
     } catch (error) {
+      if (openedWindow) {
+        openedWindow.close();
+      }
       toast.error(
         error instanceof Error ? error.message : "Unable to open Zoho Sign right now.",
       );
