@@ -5,6 +5,7 @@ import {
   exchangeAuthCode,
   getRequestStatus,
   sendAgreement,
+  resolveZohoEmbedHost,
   verifyZohoWebhookSignature,
   REDIRECT_URI,
 } from "@/lib/zoho-sign";
@@ -472,7 +473,7 @@ export async function handleZohoSignUrl(request: Request) {
 
     const signUrl = await getEmbeddedSigningUrl(
       partner.agreement_envelope_id,
-      new URL(request.url).origin,
+      resolveZohoEmbedHost(),
     );
 
     return new Response(JSON.stringify({ signUrl }), {

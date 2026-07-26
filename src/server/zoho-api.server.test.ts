@@ -235,6 +235,7 @@ test("Zoho sign-url endpoint returns a fresh embedded signing URL for the curren
   process.env.DATABASE_URL ??= "postgres://localhost/test";
   process.env.ZOHO_SIGN_CLIENT_ID ??= "client-id";
   process.env.ZOHO_SIGN_CLIENT_SECRET ??= "client-secret";
+  process.env.ZOHO_SIGN_EMBED_HOST ??= "https://systemforgelabs.xyz";
 
   const { default: server } = await import("@/server");
   const { pool } = await import("@/server/postgres.server");
@@ -386,7 +387,7 @@ test("Zoho sign-url endpoint returns a fresh embedded signing URL for the curren
           String(entry.sql).includes("WHERE id = $1"),
       ),
     ).toBe(true);
-    expect(embedTokenHost).toBe("http://localhost");
+    expect(embedTokenHost).toBe("https://systemforgelabs.xyz");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;
@@ -397,6 +398,7 @@ test("Zoho sign-url endpoint falls back to the authenticated user as partner own
   process.env.DATABASE_URL ??= "postgres://localhost/test";
   process.env.ZOHO_SIGN_CLIENT_ID ??= "client-id";
   process.env.ZOHO_SIGN_CLIENT_SECRET ??= "client-secret";
+  process.env.ZOHO_SIGN_EMBED_HOST ??= "https://systemforgelabs.xyz";
 
   const { default: server } = await import("@/server");
   const { pool } = await import("@/server/postgres.server");
@@ -531,7 +533,7 @@ test("Zoho sign-url endpoint falls back to the authenticated user as partner own
     expect(response.status).toBe(200);
     const data = (await response.json()) as { signUrl?: string };
     expect(data.signUrl).toBe("https://sign.zoho.in/sign/req-123/fresh");
-    expect(embedTokenHost).toBe("http://localhost");
+    expect(embedTokenHost).toBe("https://systemforgelabs.xyz");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;

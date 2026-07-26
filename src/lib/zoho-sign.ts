@@ -24,6 +24,18 @@ function normalizeAgreementText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
+export function resolveZohoEmbedHost(): string {
+  const configuredHost = process.env.ZOHO_SIGN_EMBED_HOST?.trim();
+  if (configuredHost) return configuredHost;
+
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  if (railwayDomain) {
+    return railwayDomain.startsWith("http") ? railwayDomain : `https://${railwayDomain}`;
+  }
+
+  return "https://systemforgelabs.xyz";
+}
+
 export function buildZohoAgreementRequestName(opts: {
   partnerId: string;
   partnerCompany: string;
@@ -180,10 +192,7 @@ type ZohoRequestDetailsResponse = {
   };
 };
 
-async function fetchEmbeddedSigningUrl(
-  requestId: string,
-  host: string,
-): Promise<string> {
+async function fetchEmbeddedSigningUrl(requestId: string, host: string): Promise<string> {
   const { token } = await getValidAccessToken();
 
   // Zoho Sign API always uses sign.zoho.in for India DC (not the token's api_domain)
