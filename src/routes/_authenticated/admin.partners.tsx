@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ShieldCheck,
@@ -65,6 +65,7 @@ type Partner = {
   agreement_envelope_id: string | null;
   agreement_sent_at: string | null;
   agreement_signed_at: string | null;
+  agreement_source_doc_path: string | null;
   agreement_signed_doc_path: string | null;
   agreement_provider: string | null;
 };
@@ -74,6 +75,7 @@ type Doc = {
   doc_type: string;
   file_name: string;
   file_path: string;
+  created_at: string;
 };
 
 type Note = {
@@ -90,6 +92,7 @@ const STATUS_FILTERS = [
   "under_review",
   "partial_approval",
   "pending_agreement",
+  "signed_pending_review",
   "approved",
   "rejected",
   "need_more_info",
@@ -126,8 +129,33 @@ function tierForTurnover(band: string | null): (typeof TIERS)[number] {
   return "registered";
 }
 
+function inferAgreementRequestStatus(partner: Partner | null): string | null {
+  if (!partner?.agreement_envelope_id && !partner?.agreement_sent_at && !partner?.agreement_signed_at) {
+    return null;
+  }
+
+  if (partner.status === "signed_pending_review" || partner.agreement_signed_at) {
+    return "completed";
+  }
+
+  if (partner.status === "pending_agreement" || partner.status === "partial_approval") {
+    return "pending";
+  }
+
+  return "unknown";
+}
+
+function formatAgreementRequestStatus(status: string | null): string {
+  if (!status) return "Not sent";
+  return {
+    pending: "Pending signature",
+    completed: "Signed and awaiting review",
+    unknown: "Unknown",
+  }[status] ?? status.replace(/_/g, " ");
+}
+
 function AdminPartners() {
-  const { hasRole } = useAuth();
+  const { hasRole, profile } = useAuth();
   const [partners, setPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -138,7 +166,11 @@ function AdminPartners() {
   const [noteDraft, setNoteDraft] = useState("");
   const [acting, setActing] = useState(false);
   const [sendingAgreement, setSendingAgreement] = useState(false);
+  const [resyncingAgreement, setResyncingAgreement] = useState(false);
+  const [agreementRequestStatus, setAgreementRequestStatus] = useState<string | null>(null);
+  const [agreementDraftFile, setAgreementDraftFile] = useState<File | null>(null);
   const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
+  const agreementFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,30 +186,49 @@ function AdminPartners() {
     void load();
   }, [load]);
 
-  const openPartner = async (p: Partner) => {
-    setSelected(p);
+  const loadPartnerDetails = useCallback(async (partnerId: string) => {
+    const partnerRes = await supabase
+      .from("partners")
+      .select("*")
+      .eq("id", partnerId)
+      .maybeSingle();
+    const partnerData = partnerRes.data as Partner | null;
+    if (!partnerData) {
+      setSelected(null);
+      setAgreementRequestStatus(null);
+      return;
+    }
+
     setDocs([]);
     setNotes([]);
     setOwnerEmail(null);
+    setAgreementDraftFile(null);
+    if (agreementFileRef.current) {
+      agreementFileRef.current.value = "";
+    }
     const [{ data: d }, { data: n }, { data: profileData }] = await Promise.all([
       supabase
         .from("partner_documents")
-        .select("id, doc_type, file_name, file_path")
-        .eq("partner_id", p.id),
+        .select("id, doc_type, file_name, file_path, created_at")
+        .eq("partner_id", partnerId)
+        .order("created_at", { ascending: false }),
       supabase
         .from("partner_review_notes")
         .select("*")
-        .eq("partner_id", p.id)
+        .eq("partner_id", partnerId)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("profiles")
-        .select("email")
-        .eq("id", p.owner_user_id)
-        .maybeSingle(),
+      supabase.from("profiles").select("email").eq("id", partnerData.owner_user_id).maybeSingle(),
     ]);
+    setSelected(partnerData);
+    setAgreementRequestStatus(inferAgreementRequestStatus(partnerData));
     setDocs((d as Doc[]) ?? []);
     setNotes((n as Note[]) ?? []);
     setOwnerEmail((profileData as { email?: string } | null)?.email ?? null);
+  }, []);
+
+  const openPartner = async (p: Partner) => {
+    setSelected(p);
+    await loadPartnerDetails(p.id);
   };
 
   const openDoc = async (doc: Doc) => {
@@ -276,27 +327,70 @@ function AdminPartners() {
       toast.error("Owner email not found — cannot send agreement");
       return;
     }
+    if (!agreementDraftFile) {
+      toast.error("Please upload a PDF before sending the agreement");
+      return;
+    }
     setSendingAgreement(true);
     try {
+      const formData = new FormData();
+      formData.append("partnerId", selected.id);
+      formData.append("partnerEmail", ownerEmail);
+      formData.append("partnerName", selected.legal_name ?? selected.company_name);
+      formData.append("partnerCompany", selected.company_name);
+      if (profile?.id) {
+        formData.append("uploadedBy", profile.id);
+      }
+      formData.append("agreementFile", agreementDraftFile);
+
       const res = await fetch("/api/integrations/zoho-sign/send-agreement", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          partnerId: selected.id,
-          partnerEmail: ownerEmail,
-          partnerName: selected.legal_name ?? selected.company_name,
-          partnerCompany: selected.company_name,
-        }),
+        body: formData,
       });
-      const data = (await res.json()) as { success?: boolean; error?: string };
+      const data = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        requestStatus?: string;
+      };
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to send agreement");
-      toast.success("Partner agreement sent via Zoho Sign!");
-      setSelected(null);
+      toast.success("Agreement uploaded and sent via Zoho Sign");
+      setAgreementRequestStatus(data.requestStatus ?? "pending");
+      await loadPartnerDetails(selected.id);
       await load();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to send agreement");
     } finally {
       setSendingAgreement(false);
+    }
+  };
+
+  const resyncAgreement = async () => {
+    if (!selected) return;
+    setResyncingAgreement(true);
+    try {
+      const res = await fetch("/api/integrations/zoho-sign/resync-agreement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerId: selected.id }),
+      });
+      const data = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        requestStatus?: string | null;
+        partnerStatus?: string;
+      };
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to refresh agreement");
+      setAgreementRequestStatus(data.requestStatus ?? null);
+      await loadPartnerDetails(selected.id);
+      toast.success(
+        data.requestStatus === "completed"
+          ? "Agreement marked signed and awaiting review"
+          : "Agreement status refreshed",
+      );
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to refresh agreement");
+    } finally {
+      setResyncingAgreement(false);
     }
   };
 
@@ -705,6 +799,7 @@ function StatusBadge({ status }: { status: string }) {
     under_review: "bg-amber-500/10 text-amber-600 border-amber-500/20",
     need_more_info: "bg-orange-500/10 text-orange-600 border-orange-500/20",
     pending_agreement: "bg-violet-500/10 text-violet-600 border-violet-500/20",
+    signed_pending_review: "bg-sky-500/10 text-sky-600 border-sky-500/20",
     approved: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
     rejected: "bg-red-500/10 text-red-600 border-red-500/20",
     pending_partner_registration: "bg-muted text-muted-foreground",

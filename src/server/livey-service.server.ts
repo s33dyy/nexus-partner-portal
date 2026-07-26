@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 
 import { pool } from "@/server/postgres.server";
+import type { PartnerStatus } from "@/lib/partner-status";
 import {
   deleteFromCloudinary,
   hasCloudinaryConfig,
@@ -13,14 +14,7 @@ import {
 } from "@/server/cloudinary.server";
 
 export type AppRole = "super_admin" | "partner_admin" | "partner_user";
-export type PartnerStatus =
-  | "pending_partner_registration"
-  | "submitted"
-  | "under_review"
-  | "need_more_info"
-  | "pending_agreement"
-  | "approved"
-  | "rejected";
+export type { PartnerStatus };
 
 export type LocalUser = {
   id: string;
@@ -93,6 +87,12 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "business_focus",
     "status",
     "tier",
+    "agreement_envelope_id",
+    "agreement_sent_at",
+    "agreement_signed_at",
+    "agreement_source_doc_path",
+    "agreement_signed_doc_path",
+    "agreement_provider",
     "is_seed",
     "created_at",
     "updated_at",

@@ -18,10 +18,9 @@ export function usePartnerAccess() {
   
   const status = profile?.partner_status ?? 'pending_partner_registration';
   const isSuperAdmin = hasRole('super_admin');
-  const isPartnerAdmin = hasRole('partner_admin');
   
-  // Admins always have full access
-  if (isSuperAdmin || isPartnerAdmin) {
+  // Super admins always have full access; partner accounts follow workflow status.
+  if (isSuperAdmin) {
     return {
       loading,
       status,
@@ -42,12 +41,14 @@ export function usePartnerAccess() {
       statusLabel: getStatusLabel(status),
       isPartialApproval: false,
       isPendingAgreement: false,
+      isSignedPendingReview: false,
       isApproved: true,
     };
   }
   
   const isPartialApproval = status === 'partial_approval';
   const isPendingAgreement = status === 'pending_agreement';
+  const isSignedPendingReview = status === 'signed_pending_review';
   const isApproved = status === 'approved';
   const hasPartial = hasPartialAccess(status);
   const hasFull = hasFullAccess(status);
@@ -67,11 +68,12 @@ export function usePartnerAccess() {
     canAccessSettings: hasPartial || hasFull,
     canAccessNews: hasPartial || hasFull,
     canAccessPartnerOnboarding: !hasPartial && !hasFull, // Only before partial approval
-    canAccessPartnerAgreement: isPendingAgreement || isPartialApproval,
+    canAccessPartnerAgreement: isPendingAgreement || isPartialApproval || isSignedPendingReview,
     canAccessAdmin: false,
     statusLabel: getStatusLabel(status),
     isPartialApproval,
     isPendingAgreement,
+    isSignedPendingReview,
     isApproved,
   };
 }
@@ -89,9 +91,19 @@ export function useRequireAccess(required: 'partial' | 'full' = 'partial') {
       : access.accessLevel === 'full';
       
     if (!hasAccess) {
-      if (access.status === 'pending_partner_registration' || access.status === 'submitted' || access.status === 'under_review') {
+      if (
+        access.status === 'pending_partner_registration' ||
+        access.status === 'submitted' ||
+        access.status === 'under_review' ||
+        access.status === 'need_more_info'
+      ) {
         navigate({ to: '/partner/onboarding', replace: true });
-      } else if (access.status === 'partial_approval' && required === 'full') {
+      } else if (
+        (access.status === 'partial_approval' ||
+          access.status === 'pending_agreement' ||
+          access.status === 'signed_pending_review') &&
+        required === 'full'
+      ) {
         navigate({ to: '/partner/agreement', replace: true });
       } else if (access.status === 'rejected') {
         navigate({ to: '/dashboard', replace: true });

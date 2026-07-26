@@ -25,7 +25,9 @@ const statusLabel: Record<string, string> = {
   submitted: "Application Submitted",
   under_review: "Under Review",
   need_more_info: "Info Requested",
+  partial_approval: "Partial Approval",
   pending_agreement: "Agreement Pending",
+  signed_pending_review: "Signed - Awaiting Review",
   approved: "Approved Partner",
   rejected: "Application Rejected",
 };
@@ -35,7 +37,9 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
   submitted: "secondary",
   under_review: "secondary",
   need_more_info: "destructive",
+  partial_approval: "secondary",
   pending_agreement: "secondary",
+  signed_pending_review: "secondary",
   approved: "default",
   rejected: "destructive",
 };
@@ -83,13 +87,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigate({ to: "/auth", replace: true });
   };
 
-  const isPendingAgreement = status === "pending_agreement";
+  const isAgreementAttention =
+    status === "partial_approval" ||
+    status === "pending_agreement" ||
+    status === "signed_pending_review";
 
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        {isPendingAgreement && <AgreementPendingBanner />}
+        {isAgreementAttention && <AgreementPendingBanner />}
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">
           <SidebarTrigger />
           <div className="relative hidden md:flex flex-1 max-w-md">

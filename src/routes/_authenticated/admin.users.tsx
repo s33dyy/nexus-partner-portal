@@ -24,6 +24,7 @@ import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
 import { cn } from "@/lib/utils";
 import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
+import { PARTNER_STATUSES, type PartnerStatus } from "@/lib/partner-status";
 
 type Profile = {
   id: string;
@@ -32,7 +33,7 @@ type Profile = {
   phone: string | null;
   company_name: string | null;
   partner_id: string | null;
-  partner_status: string;
+  partner_status: PartnerStatus;
   is_seed: boolean;
   created_at: string;
 };
@@ -47,14 +48,7 @@ type UserRow = Profile & {
 };
 
 const ROLE_OPTIONS = ["partner_admin", "partner_user"] as const;
-const PARTNER_STATUS_OPTIONS = [
-  "pending_partner_registration",
-  "submitted",
-  "under_review",
-  "need_more_info",
-  "approved",
-  "rejected",
-] as const;
+const PARTNER_STATUS_OPTIONS = [...PARTNER_STATUSES] as const;
 
 const USER_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "full_name", header: "Full Name" },
@@ -82,7 +76,7 @@ function AdminUsersPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftRole, setDraftRole] = useState("partner_user");
-  const [draftStatus, setDraftStatus] = useState("approved");
+  const [draftStatus, setDraftStatus] = useState<PartnerStatus>("approved");
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState({
     full_name: "",
@@ -177,7 +171,7 @@ function AdminUsersPage() {
         is_seed: selectedUser.is_seed,
       });
       if (insertRes.error) throw insertRes.error;
-      const nextStatus = draftRole === "partner_user" ? "approved" : draftStatus;
+      const nextStatus = draftStatus;
       const profileRes = await supabase
         .from("profiles")
         .update({ partner_status: nextStatus, updated_at: new Date().toISOString() })
@@ -195,6 +189,14 @@ function AdminUsersPage() {
 
   const approveUser = async () => {
     if (!selectedUser || selectedUser.roles.includes("super_admin")) return;
+    if (
+      selectedUser.partner_id &&
+      selectedUser.partner_status !== "signed_pending_review" &&
+      selectedUser.partner_status !== "approved"
+    ) {
+      toast.error("Use Partner Approvals after the agreement is signed.");
+      return;
+    }
     if (selectedUser.partner_status === "approved") return;
     setSaving(true);
     try {
@@ -206,9 +208,9 @@ function AdminUsersPage() {
 
       if (selectedUser.partner_id) {
         const partnerRes = await supabase
-          .from("partners")
-          .update({ status: "approved" })
-          .eq("id", selectedUser.partner_id);
+        .from("partners")
+        .update({ status: "approved" })
+        .eq("id", selectedUser.partner_id);
         if (partnerRes.error) throw partnerRes.error;
       }
 
@@ -537,7 +539,7 @@ function AdminUsersPage() {
                     fieldName={LOOKUP_FIELDS.partnerStatus}
                     label="Partner status"
                     value={draftStatus}
-                    onValueChange={setDraftStatus}
+                    onValueChange={(value) => setDraftStatus(value as PartnerStatus)}
                     options={[...PARTNER_STATUS_OPTIONS]}
                   />
                 </Field>
@@ -548,6 +550,10 @@ function AdminUsersPage() {
                   onClick={() => void approveUser()}
                   disabled={
                     saving ||
+                    (selectedUser.partner_id
+                      ? selectedUser.partner_status !== "signed_pending_review" &&
+                        selectedUser.partner_status !== "approved"
+                      : false) ||
                     selectedUser.partner_status === "approved" ||
                     selectedUser.roles.includes("super_admin")
                   }

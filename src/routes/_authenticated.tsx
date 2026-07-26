@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { UnderReviewPage } from "@/components/under-review-page";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
+import { hasPartialAccess } from "@/lib/partner-status";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -26,28 +27,19 @@ function Gate({ children }: { children: React.ReactNode }) {
   const { loading, session, profile, hasRole } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const status = profile?.partner_status ?? "pending_partner_registration";
 
   // Partners who are under_review have no portal access at all
-  const isUnderReview =
-    hasRole("partner_admin") &&
-    profile?.partner_status === "under_review" &&
-    !hasRole("super_admin");
+  const isUnderReview = hasRole("partner_admin") && status === "under_review" && !hasRole("super_admin");
 
-  // Partners with pending_agreement get partial portal access (with a banner).
-  // They can navigate freely — no redirect needed.
-  const isPendingAgreement =
-    hasRole("partner_admin") &&
-    profile?.partner_status === "pending_agreement" &&
-    !hasRole("super_admin");
-
-  // Partners who haven't started onboarding (or are need_more_info/rejected/submitted)
-  // must complete onboarding first.
+  // Partners who haven't reached basic portal access must complete onboarding first.
   const needsOnboarding =
     hasRole("partner_admin") &&
     !hasRole("super_admin") &&
-    profile?.partner_status !== "approved" &&
-    profile?.partner_status !== "under_review" &&
-    profile?.partner_status !== "pending_agreement";
+    (status === "pending_partner_registration" ||
+      status === "submitted" ||
+      status === "under_review" ||
+      status === "need_more_info");
 
   useEffect(() => {
     if (!loading && !session) {
@@ -83,6 +75,6 @@ function Gate({ children }: { children: React.ReactNode }) {
     return <UnderReviewPage />;
   }
 
-  // pending_agreement partners pass through — AppShell will show the banner
+  // Basic-access partners pass through — AppShell will show the appropriate banner
   return <>{children}</>;
 }

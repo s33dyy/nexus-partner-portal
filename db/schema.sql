@@ -16,6 +16,7 @@ BEGIN
     'under_review',
     'need_more_info',
     'pending_agreement',
+    'signed_pending_review',
     'approved',
     'rejected'
   );
@@ -24,10 +25,11 @@ EXCEPTION
 END
 $$;
 
--- Add pending_agreement to existing enum if the type already exists (idempotent)
+-- Add workflow statuses to existing enum if the type already exists (idempotent)
 DO $$
 BEGIN
   ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'pending_agreement' AFTER 'need_more_info';
+  ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'signed_pending_review' AFTER 'pending_agreement';
 EXCEPTION
   WHEN others THEN NULL;
 END
@@ -98,6 +100,7 @@ CREATE TABLE IF NOT EXISTS partners (
   agreement_envelope_id TEXT,
   agreement_sent_at TIMESTAMPTZ,
   agreement_signed_at TIMESTAMPTZ,
+  agreement_source_doc_path TEXT,
   agreement_signed_doc_path TEXT,
   agreement_provider TEXT DEFAULT 'zohosign',
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
@@ -110,6 +113,7 @@ DO $$ BEGIN
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_envelope_id TEXT;
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_sent_at TIMESTAMPTZ;
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_signed_at TIMESTAMPTZ;
+  ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_source_doc_path TEXT;
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_signed_doc_path TEXT;
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_provider TEXT DEFAULT 'zohosign';
 EXCEPTION WHEN others THEN NULL;

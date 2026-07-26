@@ -7,6 +7,7 @@ export const PARTNER_STATUSES = [
   'under_review',
   'partial_approval',
   'pending_agreement',
+  'signed_pending_review',
   'approved',
   'rejected',
   'need_more_info',
@@ -18,6 +19,7 @@ export type PartnerStatus = (typeof PARTNER_STATUSES)[number];
 export const PARTIAL_ACCESS_STATUSES: PartnerStatus[] = [
   'partial_approval',
   'pending_agreement',
+  'signed_pending_review',
   'approved',
 ];
 
@@ -37,6 +39,7 @@ export const DOCUMENT_UPLOAD_STATUSES: PartnerStatus[] = [
   'under_review',
   'partial_approval',
   'pending_agreement',
+  'signed_pending_review',
   'approved',
 ];
 
@@ -68,6 +71,7 @@ export function getStatusLabel(status: string): string {
     under_review: 'Under Review',
     partial_approval: 'Partially Approved (Agreement Pending)',
     pending_agreement: 'Agreement Sent',
+    signed_pending_review: 'Signed - Awaiting Review',
     approved: 'Approved',
     rejected: 'Rejected',
     need_more_info: 'More Info Requested',

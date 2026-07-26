@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth, type AppRole } from "@/hooks/use-auth";
 import { BrandLogo } from "@/components/brand-logo";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
 
 type Item = {
   title: string;
@@ -40,11 +41,14 @@ type Item = {
 };
 
 const workspace: Item[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Deals", url: "/deals", icon: Handshake },
   { title: "Pipeline", url: "/pipeline", icon: Kanban },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
+];
+
+const portal: Item[] = [
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Documents", url: "/documents", icon: FileText },
 ];
 
@@ -70,18 +74,19 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { roles, hasRole, profile } = useAuth();
+  const access = usePartnerAccess();
 
   const visible = (items: Item[]) =>
     items.filter((i) => !i.roles || i.roles.some((r) => roles.includes(r)));
-  const isApprovedPartner = profile?.partner_status === "approved";
-  const isPendingAgreement = profile?.partner_status === "pending_agreement";
-  const canSeeWorkspace = hasRole("super_admin") || isApprovedPartner || isPendingAgreement;
+  const isPartnerAdmin = hasRole("partner_admin");
+  const canSeeWorkspace = hasRole("super_admin") || access.canAccessDeals;
+  const canSeePortalBasics = access.canAccessDashboard && !canSeeWorkspace;
 
   // Agreement page only visible to partners awaiting signature
   const partnerAdminItems: Item[] = [
     { title: "Company Profile", url: "/partner", icon: Building2, roles: ["partner_admin"] },
     { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
-    ...(isPendingAgreement
+    ...(access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding
       ? [
           {
             title: "Sign Agreement",
@@ -140,13 +145,16 @@ export function AppSidebar() {
 
       <SidebarContent>
         {renderGroup("Rewards", visible(shared))}
-        {!canSeeWorkspace && hasRole("partner_admin")
+        {canSeePortalBasics && isPartnerAdmin
+          ? renderGroup("Portal", portal)
+          : null}
+        {!canSeeWorkspace && isPartnerAdmin
           ? renderGroup("Getting started", [
               { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },
             ])
           : null}
         {canSeeWorkspace ? renderGroup("Workspace", workspace) : null}
-        {canSeeWorkspace && hasRole("partner_admin")
+        {isPartnerAdmin && (access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding || canSeeWorkspace)
           ? renderGroup("Company", partnerAdminItems)
           : null}
         {hasRole("super_admin") && renderGroup("Administration", admin)}

@@ -7,7 +7,6 @@ import {
   Clock, 
   FileSignature 
 } from "lucide-react";
-import { getStatusLabel } from "@/lib/partner-status";
 
 interface PartnerAccessBadgeProps {
   status: string;
@@ -15,12 +14,13 @@ interface PartnerAccessBadgeProps {
 }
 
 export function PartnerAccessBadge({ status, size = 'md' }: PartnerAccessBadgeProps) {
-  const configs: Record<string, { icon: React.ComponentType; variant: 'default' | 'secondary' | 'outline' | 'destructive'; label: string }> = {
+  const configs: Record<string, { icon: React.ComponentType<{ className?: string }>; variant: 'default' | 'secondary' | 'outline' | 'destructive'; label: string }> = {
     pending_partner_registration: { icon: Lock, variant: 'secondary', label: 'Registration Required' },
     submitted: { icon: Clock, variant: 'outline', label: 'Submitted' },
     under_review: { icon: Clock, variant: 'outline', label: 'Under Review' },
-    partial_approval: { icon: ShieldCheck, variant: 'default', label: 'Partial Access' },
-    pending_agreement: { icon: FileSignature, variant: 'default', label: 'Agreement Pending' },
+    partial_approval: { icon: ShieldCheck, variant: 'secondary', label: 'Basic Access' },
+    pending_agreement: { icon: FileSignature, variant: 'secondary', label: 'Basic Access' },
+    signed_pending_review: { icon: FileSignature, variant: 'secondary', label: 'Basic Access' },
     approved: { icon: ShieldCheck, variant: 'default', label: 'Full Access' },
     rejected: { icon: AlertCircle, variant: 'destructive', label: 'Rejected' },
     need_more_info: { icon: AlertCircle, variant: 'outline', label: 'More Info Needed' },

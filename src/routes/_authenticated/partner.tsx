@@ -30,7 +30,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
-import { getStatusLabel, getStatusProgress } from "@/lib/partner-status";
+import { getStatusProgress } from "@/lib/partner-status";
 
 type Profile = {
   id: string;
@@ -149,12 +149,24 @@ function PartnerPage() {
       setDocs(docRows);
       setNotes(noteRows);
       setNewsPosts(newsRows);
+      const STATUS_LABELS: Record<string, string> = {
+        pending_partner_registration: "Partner Registration Pending",
+        submitted: "Application Submitted",
+        under_review: "Under Review",
+        partial_approval: "Partially Approved (Agreement Pending)",
+        pending_agreement: "Agreement Sent",
+        signed_pending_review: "Signed Pending Review",
+        approved: "Approved",
+        rejected: "Rejected",
+        need_more_info: "Info Requested",
+      };
+
       setMetrics([
         {
           id: "status",
           label: "Status",
           value:
-            statusLabel[
+            STATUS_LABELS[
               profileRow?.partner_status ?? partnerRow?.status ?? "pending_partner_registration"
             ],
           hint: "Current registration state",
@@ -199,7 +211,7 @@ function PartnerPage() {
 
   const status = profile?.partner_status ?? partner?.status ?? "pending_partner_registration";
   const progress = getStatusProgress(status);
-  const statusLabel = getStatusLabel(status);
+  const isReadOnly = status === "submitted" || status === "approved" || status === "signed_pending_review";
   const isOnboardingChild = pathname === "/partner/onboarding";
   const isPartnerChild = pathname !== "/partner";
 
@@ -355,10 +367,7 @@ function PartnerPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => void submitForReview()}
-                    disabled={updating || status === "submitted" || status === "approved"}
-                  >
+                  <Button onClick={() => void submitForReview()} disabled={updating || isReadOnly}>
                     {updating ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -430,7 +439,11 @@ function PartnerPage() {
                 )
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  <div>Review notes stay in a popup until your partner profile is approved.</div>
+                  <div>
+                    {status === "signed_pending_review"
+                      ? "Review notes stay in a popup while your signed agreement is under final review."
+                      : "Review notes stay in a popup until your partner profile is approved."}
+                  </div>
                   <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
                     <DialogTrigger asChild>
                       <Button variant="outline" className="mt-4">
@@ -504,7 +517,9 @@ function PartnerPage() {
             <div>
               {status === "approved"
                 ? "The account is fully approved."
-                : "Complete onboarding and submit for review to unlock partner access."}
+                : status === "signed_pending_review"
+                  ? "Your signed agreement is under final review. Basic portal access remains available until LIVEY completes approval."
+                  : "Complete onboarding and submit for review to unlock partner access."}
             </div>
           </CardContent>
         </Card>
@@ -533,14 +548,3 @@ function Meta({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
-const statusLabel: Record<string, string> = {
-  pending_partner_registration: "Partner Registration Pending",
-  submitted: "Application Submitted",
-  under_review: "Under Review",
-  partial_approval: "Partially Approved (Agreement Pending)",
-  pending_agreement: "Agreement Sent",
-  approved: "Approved",
-  rejected: "Rejected",
-  need_more_info: "Info Requested",
-};

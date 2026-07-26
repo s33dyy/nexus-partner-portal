@@ -140,6 +140,8 @@ function OnboardingPage() {
       navigate({ to: "/partner/agreement", replace: true });
     } else if (profile?.partner_status === "pending_agreement") {
       navigate({ to: "/partner/agreement", replace: true });
+    } else if (profile?.partner_status === "signed_pending_review") {
+      navigate({ to: "/dashboard", replace: true });
     } else if (profile?.partner_status === "approved") {
       navigate({ to: "/dashboard", replace: true });
     }
@@ -147,7 +149,8 @@ function OnboardingPage() {
 
   const status = profile?.partner_status ?? "pending_partner_registration";
   const readOnly = status === "submitted" || status === "under_review" || 
-                   status === "partial_approval" || status === "pending_agreement" || status === "approved";
+                   status === "partial_approval" || status === "pending_agreement" ||
+                   status === "signed_pending_review" || status === "approved";
   const regionFieldName = regionLookupField(form.country);
 
   // Load existing partner if any
@@ -460,12 +463,18 @@ function OnboardingPage() {
         <Alert>
           <ShieldCheck className="h-4 w-4" />
           <AlertTitle>
-            {status === "approved" ? "Your registration is approved" : "Submitted for review"}
+            {status === "approved"
+              ? "Your registration is approved"
+              : status === "signed_pending_review"
+                ? "Agreement submitted for review"
+                : "Submitted for review"}
           </AlertTitle>
           <AlertDescription>
             {status === "approved"
               ? "You have full access to the partner portal."
-              : "The LIVEY partner team is reviewing your application. Details are read-only."}
+              : status === "signed_pending_review"
+                ? "Your signed agreement is with LIVEY for final review. Details are read-only while the account remains on basic access."
+                : "The LIVEY partner team is reviewing your application. Details are read-only."}
           </AlertDescription>
         </Alert>
       )}

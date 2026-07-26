@@ -70,7 +70,13 @@ function AgreementPage() {
   // Real-time subscription — auto-refresh when partner row changes
   useEffect(() => {
     if (!partner?.id) return;
-    const channel = supabase
+    const realtime = supabase as typeof supabase & {
+      channel: (name: string) => {
+        on: (...args: unknown[]) => { subscribe: () => unknown };
+      };
+      removeChannel: (channel: unknown) => Promise<unknown>;
+    };
+    const channel = realtime
       .channel(`partner-agreement-${partner.id}`)
       .on(
         "postgres_changes",
@@ -82,7 +88,7 @@ function AgreementPage() {
       )
       .subscribe();
     return () => {
-      void supabase.removeChannel(channel);
+      void realtime.removeChannel(channel);
     };
   }, [partner?.id]);
 
@@ -157,8 +163,14 @@ function AgreementPage() {
   }
 
   const isPartialApproval = partner?.status === 'partial_approval';
-  const isPendingAgreement = partner?.status === 'pending_agreement' || !!partner?.agreement_envelope_id || !!partner?.agreement_sent_at;
-  const isSigned = !!partner?.agreement_signed_at;
+  const isSignedPendingReview =
+    partner?.status === 'signed_pending_review' || !!partner?.agreement_signed_at;
+  const isPendingAgreement =
+    !isSignedPendingReview &&
+    (partner?.status === 'pending_agreement' ||
+      !!partner?.agreement_envelope_id ||
+      !!partner?.agreement_sent_at);
+  const isSigned = isSignedPendingReview || !!partner?.agreement_signed_at;
   const hasManualUpload = !!partner?.agreement_signed_doc_path;
 
   return (
@@ -171,8 +183,9 @@ function AgreementPage() {
         </div>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Partner Agreement</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your application has been approved. Please sign the partner agreement to unlock full
-          portal access.
+          {isSignedPendingReview
+            ? "Your signed agreement is with LIVEY for final review. Basic portal access remains available while approval is completed."
+            : "Your application has been approved. Please sign the partner agreement to unlock full portal access."}
         </p>
       </div>
 
@@ -180,8 +193,10 @@ function AgreementPage() {
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <Card
           className={
-            isSigned
-              ? "border-emerald-500/40 bg-emerald-500/5"
+            isSignedPendingReview
+              ? "border-sky-500/40 bg-sky-500/5"
+              : isSigned
+                ? "border-emerald-500/40 bg-emerald-500/5"
               : isPendingAgreement
                 ? "border-primary/30 bg-primary/5"
                 : isPartialApproval
@@ -191,7 +206,9 @@ function AgreementPage() {
         >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              {isSigned ? (
+              {isSignedPendingReview ? (
+                <Clock className="h-5 w-5 text-sky-600" />
+              ) : isSigned ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
               ) : isPendingAgreement ? (
                 <Clock className="h-5 w-5 text-primary" />
@@ -200,8 +217,10 @@ function AgreementPage() {
               ) : (
                 <AlertCircle className="h-5 w-5 text-amber-600" />
               )}
-              {isSigned
-                ? "Agreement Signed"
+              {isSignedPendingReview
+                ? "Agreement Signed — Awaiting Review"
+                : isSigned
+                  ? "Agreement Signed"
                 : isPendingAgreement
                   ? "Agreement Sent — Awaiting Your Signature"
                   : isPartialApproval
@@ -209,8 +228,10 @@ function AgreementPage() {
                     : "Agreement Not Yet Available"}
             </CardTitle>
             <CardDescription>
-              {isSigned
-                ? "Your signed agreement has been received. Your account will be fully activated shortly."
+              {isSignedPendingReview
+                ? "Your signed agreement has been received. LIVEY is reviewing it before granting full approval."
+                : isSigned
+                  ? "Your signed agreement has been received. Your account will be fully activated shortly."
                 : isPendingAgreement
                   ? "LIVEY has sent a partner agreement to your email. Please sign it to activate your account."
                   : isPartialApproval
@@ -261,7 +282,17 @@ function AgreementPage() {
             </CardContent>
           )}
 
-          {isSigned && (
+          {isSignedPendingReview && (
+            <CardContent>
+              <div className="flex items-center gap-2 rounded-md bg-sky-500/10 px-4 py-3 text-sm text-sky-700">
+                <ShieldCheck className="h-4 w-4 shrink-0" />
+                Signed agreement received. Basic portal access remains active while LIVEY completes
+                the final review.
+              </div>
+            </CardContent>
+          )}
+
+          {isSigned && !isSignedPendingReview && (
             <CardContent>
               <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
                 <ShieldCheck className="h-4 w-4 shrink-0" />
@@ -271,7 +302,7 @@ function AgreementPage() {
             </CardContent>
           )}
 
-          {isPartialApproval && (
+          {isPartialApproval && !isSignedPendingReview && (
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2 rounded-md border bg-amber-500/5 px-3 py-2 text-sm text-amber-700">
                 <AlertCircle className="h-4 w-4 shrink-0" />

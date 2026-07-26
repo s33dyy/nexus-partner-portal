@@ -279,7 +279,7 @@ function DashboardPage() {
         },
       ];
 
-      setMetrics(access.hasDealAccess ? fullMetrics : partialMetrics);
+      setMetrics(access.canAccessDeals ? fullMetrics : partialMetrics);
       setNewsPosts(combinedNews);
       setSpotlights(partnerRows.slice(0, 3));
       setSource(
@@ -354,20 +354,28 @@ function DashboardPage() {
         </div>
       </div>
 
-      {access.isPartialApproval && (
+      {(access.isPartialApproval || access.isPendingAgreement || access.isSignedPendingReview) && (
         <Card className="border-amber-500/40 bg-amber-500/5 mb-6">
           <CardContent className="flex items-center gap-4 p-4">
             <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="flex-1">
-              <p className="font-medium">Partner Agreement Required</p>
+              <p className="font-medium">
+                {access.isSignedPendingReview ? "Agreement Under Review" : "Partner Agreement Required"}
+              </p>
               <p className="text-sm text-muted-foreground">
-                Your partner profile has been partially approved. Please sign the agreement 
-                to unlock full portal access including deal registration and pipeline.
+                {access.isPartialApproval &&
+                  "Your partner profile has been partially approved. A super admin will upload and send the agreement through Zoho Sign."}
+                {access.isPendingAgreement &&
+                  "Your Zoho Sign agreement has been sent. Please sign it to continue."}
+                {access.isSignedPendingReview &&
+                  "Zoho Sign has completed the signature. The super admin is reviewing the signed agreement before granting full access."}
               </p>
             </div>
-            <Button asChild variant="default">
-              <Link to="/partner/agreement">Sign Agreement</Link>
-            </Button>
+            {!access.isSignedPendingReview && (
+              <Button asChild variant="default">
+                <Link to="/partner/agreement">Open Agreement</Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -519,9 +527,17 @@ function DashboardPage() {
               <Step done label="Create your account" />
               {hasRole("partner_admin") ? (
                 <>
-                  <Step done={access.isPartialApproval || access.isApproved} label="Submit partner registration" />
-                  <Step done={access.isPartialApproval} label="LIVEY partial approval" />
-                  <Step done={access.isPendingAgreement || access.isApproved} label="Sign agreement" />
+                  <Step done={access.isPartialApproval || access.isPendingAgreement || access.isSignedPendingReview || access.isApproved} label="Submit partner registration" />
+                  <Step
+                    done={
+                      access.isPartialApproval ||
+                      access.isPendingAgreement ||
+                      access.isSignedPendingReview ||
+                      access.isApproved
+                    }
+                    label="LIVEY partial approval"
+                  />
+                  <Step done={access.isPendingAgreement || access.isSignedPendingReview || access.isApproved} label="Sign agreement" />
                   <Step done={access.isApproved} label="Full approval" />
                 </>
               ) : (
@@ -538,17 +554,6 @@ function DashboardPage() {
     </div>
   );
 }
-
-const statusLabel: Record<string, string> = {
-  pending_partner_registration: "Partner Registration Pending",
-  submitted: "Application Submitted",
-  under_review: "Under Review",
-  partial_approval: "Partially Approved (Agreement Pending)",
-  pending_agreement: "Agreement Sent",
-  approved: "Approved",
-  rejected: "Rejected",
-  need_more_info: "Info Requested",
-};
 
 function Kpi({
   label,

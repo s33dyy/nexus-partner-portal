@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase, type Session, type User } from "@/integrations/local/client";
+import type { PartnerStatus } from "@/lib/partner-status";
 
 export type AppRole = "super_admin" | "partner_admin" | "partner_user";
 
@@ -11,14 +12,7 @@ export type Profile = {
   company_name: string | null;
   avatar_url: string | null;
   partner_id: string | null;
-  partner_status:
-    | "pending_partner_registration"
-    | "submitted"
-    | "under_review"
-    | "need_more_info"
-    | "pending_agreement"
-    | "approved"
-    | "rejected";
+  partner_status: PartnerStatus;
 };
 
 type AuthContextValue = {
