@@ -344,10 +344,7 @@ test("Zoho sign-url endpoint returns a fresh embedded signing URL for the curren
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken")) {
-      const body = init?.body;
-      if (body instanceof FormData) {
-        embedTokenHost = String(body.get("host") ?? "");
-      }
+      embedTokenHost = new URL(String(input)).searchParams.get("host");
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
         status: 200,
       });
@@ -506,10 +503,7 @@ test("Zoho sign-url endpoint falls back to the authenticated user as partner own
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken")) {
-      const body = init?.body;
-      if (body instanceof FormData) {
-        embedTokenHost = String(body.get("host") ?? "");
-      }
+      embedTokenHost = new URL(String(input)).searchParams.get("host");
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
         status: 200,
       });
@@ -649,10 +643,7 @@ test("Zoho sign-url endpoint prefers the browser origin for embedded signing", a
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/api/v1/requests/req-123/actions/action-456/embedtoken")) {
-      const body = init?.body;
-      if (body instanceof FormData) {
-        embedTokenHost = String(body.get("host") ?? "");
-      }
+      embedTokenHost = new URL(String(input)).searchParams.get("host");
       return new Response(JSON.stringify({ sign_url: "https://sign.zoho.in/sign/req-123/fresh" }), {
         status: 200,
       });

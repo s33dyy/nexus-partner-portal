@@ -217,16 +217,16 @@ async function fetchEmbeddedSigningUrl(requestId: string, host: string): Promise
     throw new Error(`Zoho Sign request details lookup failed: ${JSON.stringify(detailsData)}`);
   }
 
-  const embedTokenUrl = `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`;
-  const body = new FormData();
-  body.append("host", host);
+  const embedTokenUrl = new URL(
+    `${apiDomain}/api/v1/requests/${requestId}/actions/${actionId}/embedtoken`,
+  );
+  embedTokenUrl.searchParams.set("host", host);
 
   const urlRes = await fetch(embedTokenUrl, {
     method: "POST",
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
     },
-    body,
   });
   const urlData = (await urlRes.json()) as { sign_url?: string; message?: string };
   if (!urlRes.ok || !urlData.sign_url) {
