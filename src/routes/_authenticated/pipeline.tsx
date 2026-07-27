@@ -32,6 +32,7 @@ import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import { normalizeDealCollaborators, type DealCollaboratorDraft } from "@/lib/deal-collaboration";
 import { type CsvColumn } from "@/lib/csv-export";
+import { formatDealProbability } from "@/lib/deal-probability";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -362,7 +363,7 @@ function PipelinePage() {
             Refresh
           </Button>
           <CsvExportButton
-            label="Export CSV"
+            label="Export visible queue"
             filenameStem="livey-pipeline"
             columns={PIPELINE_EXPORT_COLUMNS}
             loadRows={async () =>
@@ -394,13 +395,13 @@ function PipelinePage() {
         <MetricCard
           label="Pipeline value"
           value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          hint="Current deal rows"
+          hint="Visible queue value"
         />
         <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
         <MetricCard
           label="Avg. probability"
           value={`${totals.weighted}%`}
-          hint="Across the current set"
+          hint="Across the visible queue"
         />
       </div>
 
@@ -433,21 +434,29 @@ function PipelinePage() {
           ) : (
             <div className="grid min-w-[920px] gap-4 xl:grid-cols-7">
               {grouped.map((column) => (
-                <div key={column.stage} className="space-y-3 rounded-xl border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium capitalize">{column.stage}</div>
+                <div
+                  key={column.stage}
+                  className="space-y-3 rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.95))] p-3 shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-2 rounded-xl border bg-background/80 px-3 py-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
+                        Stage
+                      </div>
+                      <div className="text-sm font-semibold capitalize">{column.stage}</div>
+                    </div>
                     <Badge variant="outline">{column.deals.length}</Badge>
                   </div>
                   <div className="space-y-3">
                     {column.deals.length === 0 ? (
-                      <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
+                      <div className="rounded-xl border border-dashed bg-background/70 p-4 text-xs text-muted-foreground">
                         No deals in this stage.
                       </div>
                     ) : (
                       column.deals.map((deal) => (
                         <div
                           key={deal.id}
-                          className="rounded-lg border bg-background p-3 shadow-sm"
+                          className="rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -458,12 +467,14 @@ function PipelinePage() {
                                 {deal.owner_name}
                               </div>
                             </div>
-                            <Badge>{deal.amount}</Badge>
+                            <Badge className="rounded-full px-3 py-1">{deal.amount}</Badge>
                           </div>
-                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                            <div>{deal.region}</div>
-                            <div>{deal.product}</div>
-                            <div>{deal.probability}% probability</div>
+                          <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.region}</div>
+                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.product}</div>
+                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                              {formatDealProbability(deal.probability)}
+                            </div>
                           </div>
                           <div className="mt-3 grid gap-2">
                             <Button
