@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
+import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import {
   normalizeDealCollaborators,
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
+import { formatDealProbability, normalizeDealProbability } from "@/lib/deal-probability";
 import { awardDealWinPoints } from "@/lib/rewards";
 import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
@@ -154,7 +156,10 @@ function AdminDealsPage() {
       setNote("");
       return;
     }
-    setReviewDraft(selectedDeal);
+    setReviewDraft({
+      ...selectedDeal,
+      probability: normalizeDealProbability(selectedDeal.probability),
+    });
     setReviewCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
     setNote(selectedDeal.notes);
   }, [collaboratorsByDealId, selectedDeal]);
@@ -275,7 +280,7 @@ function AdminDealsPage() {
           quantity: Number(reviewDraft.quantity) || 1,
           amount: reviewDraft.amount,
           customer_budget: reviewDraft.customer_budget,
-          probability: Number(reviewDraft.probability) || 0,
+          probability: normalizeDealProbability(Number(reviewDraft.probability) || 0),
           possible_close_date: reviewDraft.possible_close_date || null,
           close_date:
             reviewDraft.close_date || reviewDraft.possible_close_date || selectedDeal.close_date,
@@ -458,7 +463,7 @@ function AdminDealsPage() {
                     <div className="text-right">
                       <div className="font-medium">{deal.amount}</div>
                       <div className="text-xs text-muted-foreground">
-                        {deal.probability}% probability
+                        {formatDealProbability(deal.probability)}
                       </div>
                     </div>
                   </button>
@@ -668,16 +673,11 @@ function AdminDealsPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Probability</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
+                          <DealProbabilitySelect
                             value={reviewDraft.probability}
-                            onChange={(e) =>
+                            onValueChange={(value) =>
                               setReviewDraft((current) =>
-                                current
-                                  ? { ...current, probability: Number(e.target.value) || 0 }
-                                  : current,
+                                current ? { ...current, probability: value } : current,
                               )
                             }
                           />

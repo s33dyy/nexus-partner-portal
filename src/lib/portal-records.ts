@@ -138,5 +138,5 @@ export function parseDealAmount(amount: string | number): number {
 }
 
 export function requiresSuperAdminApproval(amount: string | number): boolean {
-  return parseDealAmount(amount) >= 5000;
+  return parseDealAmount(amount) > 5000;
 }

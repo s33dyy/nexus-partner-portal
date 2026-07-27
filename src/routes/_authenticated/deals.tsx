@@ -1,17 +1,23 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   ArrowRight,
   CheckCircle2,
+  Download,
+  FileSpreadsheet,
   Loader2,
   Plus,
   RefreshCw,
   Search,
   Target,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
+import { utils as xlsxUtils, write as writeWorkbook } from "xlsx";
 
+import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { listDropdownSourceValues } from "@/integrations/local/dropdown-sources";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -40,12 +47,21 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { filterDealsByView, type DealListStatusFilter } from "@/lib/deal-filters";
 import {
   buildDealCollaboratorPayloads,
   isDealCollaboratorEditingLocked,
   normalizeDealCollaborators,
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
+import {
+  DEAL_IMPORT_TEMPLATE_COLUMNS,
+  parseDealImportWorkbook,
+  validateDealImportRows,
+  type DealImportValidationError,
+  type ValidatedDealImportRow,
+} from "@/lib/deal-import";
+import { formatDealProbability, normalizeDealProbability } from "@/lib/deal-probability";
 import { canViewDeal } from "@/lib/deal-visibility";
 import {
   DEAL_STAGE_ORDER,
@@ -140,7 +156,7 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     amount: deal.amount,
     customer_budget: deal.customer_budget ?? "",
     possible_close_date: toDateInputValue(deal.possible_close_date),
-    probability: deal.probability,
+    probability: normalizeDealProbability(deal.probability),
     source: deal.source,
     notes: deal.notes,
     is_hidden_to_team: deal.is_hidden_to_team,
@@ -173,11 +189,29 @@ const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "notes", header: "Notes" },
 ];
 
+const DEAL_STATUS_FILTER_OPTIONS = [
+  "all",
+  "open",
+  "submitted",
+  "approved",
+  "won",
+  "lost",
+] as const satisfies readonly DealListStatusFilter[];
+
+const dealSearchSchema = z.object({
+  q: z.string().optional(),
+  stage: z.enum(["all", ...DEAL_STAGE_ORDER]).optional(),
+  status: z.enum(DEAL_STATUS_FILTER_OPTIONS).optional(),
+});
+
 export const Route = createFileRoute("/_authenticated/deals")({
+  validateSearch: dealSearchSchema,
   component: DealsPage,
 });
 
 function DealsPage() {
+  const navigate = useNavigate();
+  const search = useSearch({ from: "/_authenticated/deals" });
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
     Record<string, DealCollaboratorDraft[]>
@@ -186,8 +220,6 @@ function DealsPage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [query, setQuery] = useState("");
-  const [stageFilter, setStageFilter] = useState<DealStage | "all">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -205,8 +237,15 @@ function DealsPage() {
   const [clientCreateSeed, setClientCreateSeed] = useState("");
   const [partnerAdminProfileId, setPartnerAdminProfileId] = useState<string | null>(null);
   const [partnerAdminName, setPartnerAdminName] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<DealImportValidationError[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const { profile, hasRole } = useAuth();
   useRequireAccess("full");
+  const query = search.q ?? "";
+  const stageFilter = search.stage ?? "all";
+  const statusFilter = search.status ?? "all";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -430,6 +469,60 @@ function DealsPage() {
     );
   }, [hasRole, profile?.full_name, profile?.id]);
 
+  useEffect(() => {
+    if (!hasRole("super_admin")) {
+      setAccountOptions([]);
+      return;
+    }
+
+    let active = true;
+    void (async () => {
+      try {
+        const options = await listDropdownSourceValues({ source: "account" });
+        if (!active) return;
+        setAccountOptions(options.map((option) => ({ id: option.id, label: option.label })));
+      } catch {
+        if (!active) return;
+        setAccountOptions([]);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasRole]);
+
+  const updateListFilters = useCallback(
+    (next: { q?: string; stage?: DealStage | "all"; status?: DealListStatusFilter }) => {
+      void navigate({
+        to: "/_authenticated/deals",
+        replace: true,
+        search: (current) => ({
+          ...current,
+          q: next.q !== undefined ? next.q || undefined : current.q,
+          stage:
+            next.stage !== undefined
+              ? next.stage === "all"
+                ? undefined
+                : next.stage
+              : current.stage,
+          status:
+            next.status !== undefined
+              ? next.status === "all"
+                ? undefined
+                : next.status
+              : current.status,
+        }),
+      });
+    },
+    [navigate],
+  );
+
+  const resetImportState = useCallback(() => {
+    setImportErrors([]);
+    setImportMessage(null);
+  }, []);
+
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
@@ -456,25 +549,12 @@ function DealsPage() {
   }, [collaboratorsByDealId, selectedDeal]);
 
   const filteredDeals = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return deals.filter((deal) => {
-      const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
-      const matchesQuery =
-        !term ||
-        [
-          deal.account_name,
-          deal.contact_name,
-          deal.owner_name,
-          deal.product,
-          deal.country,
-          deal.region,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-      return matchesStage && matchesQuery;
+    return filterDealsByView(deals, {
+      query,
+      stage: stageFilter,
+      status: statusFilter,
     });
-  }, [deals, query, stageFilter]);
+  }, [deals, query, stageFilter, statusFilter]);
 
   const kpis = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
@@ -491,10 +571,30 @@ function DealsPage() {
         label: "Pipeline",
         value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
         hint: "Current opportunity rows",
+        status: "open" as const,
+        stage: "all" as const,
       },
-      { label: "Open deals", value: String(open), hint: "Across all stages" },
-      { label: "Won deals", value: String(won), hint: "Closed this cycle" },
-      { label: "Avg. probability", value: `${avgProbability}%`, hint: "Current weighted mix" },
+      {
+        label: "Open deals",
+        value: String(open),
+        hint: "Across all active stages",
+        status: "open" as const,
+        stage: "all" as const,
+      },
+      {
+        label: "Won deals",
+        value: String(won),
+        hint: "Closed this cycle",
+        status: "won" as const,
+        stage: "won" as const,
+      },
+      {
+        label: "Avg. probability",
+        value: `${avgProbability}%`,
+        hint: "Current weighted mix",
+        status: "open" as const,
+        stage: "all" as const,
+      },
     ];
   }, [deals]);
 
@@ -588,6 +688,165 @@ function DealsPage() {
     }
   };
 
+  const downloadImportTemplate = () => {
+    const workbook = xlsxUtils.book_new();
+    const sheet = xlsxUtils.json_to_sheet([
+      {
+        account_name: "Acme Systems",
+        contact_name: "Morgan Lee",
+        owner_name: "Priya Rao",
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+        quantity: 1,
+        amount: "$5,000",
+        customer_budget: "Approved",
+        possible_close_date: "2026-08-15",
+        probability: 75,
+        source: "Partner referral",
+        notes: "Expansion deal",
+      } satisfies Record<(typeof DEAL_IMPORT_TEMPLATE_COLUMNS)[number], string | number>,
+    ]);
+    xlsxUtils.book_append_sheet(workbook, sheet, "Deals");
+    const workbookBytes = writeWorkbook(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([workbookBytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `livey-deal-import-template-${formatCsvDate()}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    resetImportState();
+    setImporting(true);
+
+    try {
+      const parsedRows = parseDealImportWorkbook(await file.arrayBuffer());
+      const validation = validateDealImportRows(parsedRows);
+      const accountIdByName = new Map(
+        accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
+      );
+      const accountErrors: DealImportValidationError[] = [];
+      const importRows: ValidatedDealImportRow[] = [];
+
+      validation.rows.forEach((row, index) => {
+        if (!hasRole("super_admin")) {
+          importRows.push(row);
+          return;
+        }
+
+        const accountId = accountIdByName.get(normalizeCompanyName(row.account_name));
+        if (!accountId) {
+          accountErrors.push({
+            rowNumber: index + 2,
+            messages: [`Account "${row.account_name}" does not match a known partner account`],
+          });
+          return;
+        }
+
+        importRows.push(row);
+      });
+
+      const allErrors = [...validation.errors, ...accountErrors];
+      if (allErrors.length > 0) {
+        setImportErrors(allErrors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
+      const today = new Date().toISOString();
+      const defaultCloseDate = today.slice(0, 10);
+      const accountIdLookup = new Map(
+        accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
+      );
+      const payloads = importRows.map((row) => {
+        const accountName = isPartnerUser
+          ? profile?.full_name || profile?.company_name || row.account_name || "Partner User"
+          : row.account_name;
+        const ownerName = hasRole("partner_admin")
+          ? profile?.full_name || row.owner_name || "Partner Admin"
+          : isPartnerUser
+            ? partnerAdminName || profile?.full_name || row.owner_name || "Partner Admin"
+            : row.owner_name;
+        const autoApproved = !requiresSuperAdminApproval(parseDealAmount(row.amount));
+
+        return {
+          id: globalThis.crypto.randomUUID(),
+          partner_id: hasRole("super_admin")
+            ? (accountIdLookup.get(normalizeCompanyName(row.account_name)) ?? null)
+            : (profile?.partner_id ?? null),
+          customer_id: null,
+          poc_profile_id: hasRole("partner_admin")
+            ? (profile?.id ?? null)
+            : isPartnerUser
+              ? (partnerAdminProfileId ?? profile?.id ?? null)
+              : null,
+          account_name: accountName,
+          contact_name: row.contact_name,
+          owner_name: ownerName,
+          country: row.country || "India",
+          region: row.region,
+          product: row.product,
+          stage: EMPTY_FORM.stage,
+          status: autoApproved ? "approved" : "submitted",
+          quantity: row.quantity,
+          amount: row.amount,
+          customer_budget: row.customer_budget || null,
+          probability: row.probability,
+          possible_close_date: row.possible_close_date || null,
+          close_date: row.possible_close_date || defaultCloseDate,
+          source: row.source,
+          last_touch: `Imported from ${file.name}`,
+          notes: row.notes,
+          user_id: profile?.id ?? null,
+          is_hidden_to_team: false,
+          reward_rate_percent: EMPTY_FORM.reward_rate_percent,
+          is_seed: false,
+          created_at: today,
+          updated_at: today,
+        };
+      });
+
+      const { error } = await supabase.from("portal_deals").insert(payloads);
+      if (error) throw error;
+
+      setImportMessage(
+        `${payloads.length} ${payloads.length === 1 ? "deal" : "deals"} imported from ${file.name}.`,
+      );
+      toast.success(
+        `${payloads.length} ${payloads.length === 1 ? "deal was" : "deals were"} imported`,
+      );
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: "deal_import",
+        targetType: "deal",
+        targetName: file.name,
+        outcome: "success",
+        details: `Imported ${payloads.length} deals from ${file.name}`,
+        severity: "medium",
+      });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import the workbook");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const createDeal = async () => {
     const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
     const accountName = isPartnerUser
@@ -632,7 +891,7 @@ function DealsPage() {
         possible_close_date: draft.possible_close_date || null,
         close_date: draft.possible_close_date || draft.close_date || now.slice(0, 10),
         status: autoApproved ? "approved" : "submitted",
-        probability: Number(draft.probability) || 0,
+        probability: normalizeDealProbability(Number(draft.probability) || 0),
         is_hidden_to_team: draft.is_hidden_to_team,
         reward_rate_percent: Number(draft.reward_rate_percent) || 5,
         user_id: profile?.id,
@@ -647,13 +906,13 @@ function DealsPage() {
       await publishDealActivity({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
         notificationMessage: autoApproved
-          ? `${accountName} was auto-approved because the deal amount is under the threshold.`
+          ? `${accountName} was auto-approved because the deal amount is $5,000 or below.`
           : `${accountName} is waiting for super admin approval.`,
         feedTitle: autoApproved
           ? `${accountName} was auto-approved`
           : `${accountName} submitted for review`,
         feedCaption: autoApproved
-          ? `Deal value ${draft.amount} cleared the approval threshold and is now active.`
+          ? `Deal value ${draft.amount} stayed within the auto-approval threshold and is now active.`
           : `Deal value ${draft.amount} needs super admin approval before it can move forward.`,
         type: "deal_created",
       });
@@ -719,7 +978,7 @@ function DealsPage() {
           amount,
           customer_budget: selectedDealDraft.customer_budget.trim() || null,
           possible_close_date: selectedDealDraft.possible_close_date || null,
-          probability: Math.min(100, Math.max(0, Number(selectedDealDraft.probability) || 0)),
+          probability: normalizeDealProbability(Number(selectedDealDraft.probability) || 0),
           source,
           notes,
           is_hidden_to_team: selectedDealDraft.is_hidden_to_team,
@@ -813,7 +1072,7 @@ function DealsPage() {
     await updateDeal({
       stage: status,
       status,
-      probability: status === "won" ? 100 : Math.min(selectedDeal.probability, 10),
+      probability: status === "won" ? 100 : 0,
       last_touch: status === "won" ? "Closed won" : "Closed lost",
       close_date: new Date().toISOString().slice(0, 10),
       notes: note.trim() || selectedDeal.notes,
@@ -938,15 +1197,19 @@ function DealsPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardContent className="space-y-1 p-5">
-              <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                {kpi.label}
-              </div>
-              <div className="text-2xl font-semibold tracking-tight">{kpi.value}</div>
-              <div className="text-sm text-muted-foreground">{kpi.hint}</div>
-            </CardContent>
-          </Card>
+          <MetricCard
+            key={kpi.label}
+            label={kpi.label}
+            value={kpi.value}
+            hint={kpi.hint}
+            onClick={() =>
+              updateListFilters({
+                q: "",
+                stage: kpi.stage,
+                status: kpi.status,
+              })
+            }
+          />
         ))}
       </div>
 
@@ -957,7 +1220,7 @@ function DealsPage() {
               <div>
                 <CardTitle className="text-base">Pipeline queue</CardTitle>
                 <CardDescription>
-                  Search live deals or create a fresh one for testing.
+                  Search live deals, filter by status, or jump in from the KPI cards above.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -965,7 +1228,7 @@ function DealsPage() {
                   <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
+                    onChange={(e) => updateListFilters({ q: e.target.value })}
                     placeholder="Search deals"
                     className="pl-8"
                   />
@@ -974,11 +1237,27 @@ function DealsPage() {
                   fieldName={LOOKUP_FIELDS.dealStage}
                   label="Stage"
                   value={stageFilter === "all" ? "" : stageFilter}
-                  onValueChange={(value) => setStageFilter((value || "all") as DealStage | "all")}
+                  onValueChange={(value) =>
+                    updateListFilters({ stage: (value || "all") as DealStage | "all" })
+                  }
                   placeholder="All stages"
                   clearLabel="All stages"
                   allowClear
                   options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                  triggerClassName="w-44"
+                />
+                <LookupCombobox
+                  fieldName="deal.status_filter"
+                  label="Status"
+                  value={statusFilter === "all" ? "" : statusFilter}
+                  onValueChange={(value) =>
+                    updateListFilters({ status: (value || "all") as DealListStatusFilter })
+                  }
+                  placeholder="All statuses"
+                  clearLabel="All statuses"
+                  allowClear
+                  allowCreate={false}
+                  options={DEAL_STATUS_FILTER_OPTIONS.filter((option) => option !== "all")}
                   triggerClassName="w-44"
                 />
               </div>
@@ -1022,7 +1301,8 @@ function DealsPage() {
                     <div className="text-right">
                       <div className="font-medium">{deal.amount}</div>
                       <div className="text-xs text-muted-foreground">
-                        {deal.probability}% · closes {formatDateLabel(deal.close_date)}
+                        {formatDealProbability(deal.probability)} · closes{" "}
+                        {formatDateLabel(deal.close_date)}
                       </div>
                     </div>
                   </button>
@@ -1035,10 +1315,62 @@ function DealsPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base">Create deal</CardTitle>
-              <CardDescription>Add a new live opportunity to the portal.</CardDescription>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <CardTitle className="text-base">Create deal</CardTitle>
+                  <CardDescription>
+                    Add a new live opportunity or import a validated workbook.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={downloadImportTemplate}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download template
+                  </Button>
+                  <Button asChild type="button" variant="outline" disabled={importing}>
+                    <label htmlFor="deal-import-file">
+                      {importing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="mr-2 h-4 w-4" />
+                      )}
+                      Import .xlsx
+                    </label>
+                  </Button>
+                  <input
+                    id="deal-import-file"
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="hidden"
+                    onChange={(event) => void handleImportFile(event)}
+                  />
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="grid gap-3">
+              {importMessage ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  {importMessage}
+                </div>
+              ) : null}
+              {importErrors.length > 0 ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Import validation issues
+                  </div>
+                  <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+                    {importErrors.slice(0, 6).map((error) => (
+                      <div key={`${error.rowNumber}-${error.messages.join("|")}`}>
+                        Row {error.rowNumber}: {error.messages.join(" • ")}
+                      </div>
+                    ))}
+                    {importErrors.length > 6 ? (
+                      <div>+ {importErrors.length - 6} more row issues</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-3 md:grid-cols-2">
                 {(hasRole("super_admin") || hasRole("partner_admin")) && (
                   <div className="space-y-2">
@@ -1166,22 +1498,6 @@ function DealsPage() {
                     options={regionOptions}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantity</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={1}
-                    value={draft.quantity}
-                    onChange={(e) =>
-                      setDraft((current) => ({
-                        ...current,
-                        quantity: Number(e.target.value) || 1,
-                      }))
-                    }
-                    placeholder="1"
-                  />
-                </div>
               </div>
               {hasRole("partner_user") && (
                 <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
@@ -1203,6 +1519,24 @@ function DealsPage() {
                     allowCreate={hasRole("super_admin")}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="quantity">Quantity</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    min={1}
+                    value={draft.quantity}
+                    onChange={(e) =>
+                      setDraft((current) => ({
+                        ...current,
+                        quantity: Number(e.target.value) || 1,
+                      }))
+                    }
+                    placeholder="1"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount</Label>
                   <Input
@@ -1230,14 +1564,10 @@ function DealsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="probability">Probability</Label>
-                  <Input
-                    id="probability"
-                    type="number"
-                    min={0}
-                    max={100}
+                  <DealProbabilitySelect
                     value={draft.probability}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, probability: Number(e.target.value) || 0 }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, probability: value }))
                     }
                   />
                 </div>
@@ -1495,16 +1825,11 @@ function DealsPage() {
                           />
                         </Field>
                         <Field label="Probability">
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
+                          <DealProbabilitySelect
                             value={selectedDealDraft.probability}
-                            onChange={(e) =>
+                            onValueChange={(value) =>
                               setSelectedDealDraft((current) =>
-                                current
-                                  ? { ...current, probability: Number(e.target.value) || 0 }
-                                  : current,
+                                current ? { ...current, probability: value } : current,
                               )
                             }
                           />
@@ -1526,7 +1851,10 @@ function DealsPage() {
                         />
                         <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
                         <Meta label="Source" value={selectedDeal.source} />
-                        <Meta label="Probability" value={`${selectedDeal.probability}%`} />
+                        <Meta
+                          label="Probability"
+                          value={formatDealProbability(selectedDeal.probability)}
+                        />
                       </div>
                     )}
                     <DealCollaboratorEditor
@@ -1729,5 +2057,35 @@ function Field({
       <Label>{label}</Label>
       {children}
     </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  onClick?: () => void;
+}) {
+  const content = (
+    <CardContent className="space-y-1 p-5 text-left">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="text-sm text-muted-foreground">{hint}</div>
+    </CardContent>
+  );
+
+  return onClick ? (
+    <Card className="transition hover:-translate-y-0.5 hover:shadow-md">
+      <button type="button" className="w-full text-left" onClick={onClick}>
+        {content}
+      </button>
+    </Card>
+  ) : (
+    <Card>{content}</Card>
   );
 }
