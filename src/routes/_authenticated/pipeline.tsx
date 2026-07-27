@@ -69,6 +69,7 @@ function PipelinePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<string>("all");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
@@ -185,23 +186,28 @@ function PipelinePage() {
 
   const visibleDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return deals.filter((deal) =>
-      !term
-        ? true
-        : [deal.account_name, deal.contact_name, deal.owner_name, deal.region, deal.product]
-            .join(" ")
-            .toLowerCase()
-            .includes(term),
-    );
-  }, [deals, query]);
+    return deals.filter((deal) => {
+      const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
+      const matchesQuery =
+        !term ||
+        [deal.account_name, deal.contact_name, deal.owner_name, deal.region, deal.product]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      return matchesStage && matchesQuery;
+    });
+  }, [deals, query, stageFilter]);
 
   const grouped = useMemo(
     () =>
-      DEAL_STAGE_ORDER.map((stage) => ({
+      (stageFilter === "all"
+        ? DEAL_STAGE_ORDER
+        : DEAL_STAGE_ORDER.filter((stage) => stage === stageFilter)
+      ).map((stage) => ({
         stage,
         deals: visibleDeals.filter((deal) => deal.stage === stage),
       })),
-    [visibleDeals],
+    [visibleDeals, stageFilter],
   );
 
   const totals = useMemo(() => {
@@ -414,14 +420,34 @@ function PipelinePage() {
                 Move records across the pipeline using the live Postgres records.
               </CardDescription>
             </div>
-            <div className="relative w-full max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search account or owner"
-                className="pl-8"
-              />
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:max-w-2xl lg:justify-end">
+              <div className="w-full sm:max-w-[220px]">
+                <Label htmlFor="stage-filter" className="mb-2 block text-xs uppercase tracking-widest text-muted-foreground">
+                  Stage filter
+                </Label>
+                <select
+                  id="stage-filter"
+                  value={stageFilter}
+                  onChange={(event) => setStageFilter(event.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="all">All stages</option>
+                  {DEAL_STAGE_ORDER.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {stage.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative w-full sm:max-w-sm">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search account or owner"
+                  className="pl-8"
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -454,10 +480,10 @@ function PipelinePage() {
                       </div>
                     ) : (
                       column.deals.map((deal) => (
-                        <div
-                          key={deal.id}
-                          className="rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                        >
+                      <div
+                        key={deal.id}
+                        className="group rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:-translate-y-0.5 focus-within:shadow-md"
+                      >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium">
@@ -476,7 +502,7 @@ function PipelinePage() {
                               {formatDealProbability(deal.probability)}
                             </div>
                           </div>
-                          <div className="mt-3 grid gap-2">
+                          <div className="mt-3 grid gap-2 opacity-0 transition-opacity duration-150 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
                             <Button
                               className="w-full"
                               size="sm"

@@ -1,4 +1,17 @@
+import * as XLSX from "xlsx";
+
+import { type CsvColumn } from "@/lib/csv-export";
 import { sumRewardPoints, type RewardPointEventRecord } from "@/lib/rewards";
+
+export const REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS: CsvColumn[] = [
+  { key: "title", header: "Title" },
+  { key: "description", header: "Description" },
+  { key: "image_path", header: "Image Path" },
+  { key: "category", header: "Category" },
+  { key: "points_cost", header: "Points Cost" },
+  { key: "stock", header: "Stock" },
+  { key: "availability", header: "Availability" },
+];
 
 export type RewardCatalogImportRow = {
   title: string;
@@ -43,6 +56,32 @@ function normalizeString(value: unknown) {
 function normalizeInteger(value: unknown) {
   const numeric = Number.parseInt(String(value ?? "").trim(), 10);
   return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
+function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
+  const firstSheet = workbook.SheetNames[0];
+  if (!firstSheet) {
+    throw new Error("The selected file does not contain a worksheet.");
+  }
+
+  const sheet = workbook.Sheets[firstSheet];
+  if (!sheet) {
+    throw new Error("The selected file could not be read.");
+  }
+
+  return (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
+}
+
+export async function readRewardCatalogImportRows(file: File) {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+
+  if (extension === "csv") {
+    const workbook = XLSX.read(await file.text(), { type: "string" });
+    return readRewardCatalogImportRowsFromWorkbook(workbook);
+  }
+
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  return readRewardCatalogImportRowsFromWorkbook(workbook);
 }
 
 export function validateRewardCatalogImportRows(

@@ -25,7 +25,7 @@ test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workboo
       amount: "$4,999",
       customer_budget: "Approved",
       possible_close_date: "2026-08-15",
-      probability: 75,
+      probability: 50,
       source: "Partner referral",
       notes: "Expansion deal",
     },
@@ -37,7 +37,7 @@ test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workboo
 
   expect(rows).toHaveLength(1);
   expect(rows[0]?.account_name).toBe("Acme Systems");
-  expect(rows[0]?.probability).toBe(75);
+  expect(rows[0]?.probability).toBe(50);
 });
 
 test("validateDealImportRows rejects the whole workbook when any row is invalid", () => {
@@ -68,7 +68,7 @@ test("validateDealImportRows rejects the whole workbook when any row is invalid"
         "Contact name is required",
         "Quantity must be at least 1",
         "Amount is required",
-        "Probability must be one of 0, 25, 50, 75, or 100",
+        "Probability must be one of 0, 25, 50, or 100",
         "Source is required",
       ],
     },
@@ -88,7 +88,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       amount: " $5,000 ",
       customer_budget: "",
       possible_close_date: "2026-08-15",
-      probability: "75",
+      probability: "50",
       source: " Partner referral ",
       notes: " Expansion deal ",
     },
@@ -123,7 +123,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       amount: "$5,000",
       customer_budget: "",
       possible_close_date: "2026-08-15",
-      probability: 75,
+      probability: 50,
       source: "Partner referral",
       notes: "Expansion deal",
     },

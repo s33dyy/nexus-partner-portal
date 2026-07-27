@@ -107,7 +107,11 @@ function AdminDealsPage() {
 
       setDeals(rows);
       setCollaboratorsByDealId(collaboratorMap);
-      setTeamMembers(((memberResult.data as TeamMemberRecord[] | null) ?? []).slice());
+      setTeamMembers(
+        ((memberResult.data as TeamMemberRecord[] | null) ?? []).filter(
+          (member) => member.id !== profile?.id,
+        ),
+      );
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {

@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import {
   buildManualRewardAdjustmentEvent,
   calculateOutstandingRewardPoints,
+  readRewardCatalogImportRows,
   validateRewardCatalogImportRows,
 } from "@/lib/reward-admin";
 
@@ -93,4 +94,26 @@ test("buildManualRewardAdjustmentEvent creates positive or negative point events
   expect(credit.points_delta).toBe(250);
   expect(debit.points_delta).toBe(-100);
   expect(credit.approved_by).toBe("admin-1");
+});
+
+test("readRewardCatalogImportRows parses csv files with the template headers", async () => {
+  const csv = [
+    "title,description,image_path,category,points_cost,stock,availability",
+    'LIVEY Mug,Branded mug,https://cdn.example.com/mug.png,Merchandise,250,5,available',
+  ].join("\n");
+
+  const rows = await readRewardCatalogImportRows(
+    new File([csv], "reward-catalog.csv", { type: "text/csv" }),
+  );
+
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    title: "LIVEY Mug",
+    description: "Branded mug",
+    image_path: "https://cdn.example.com/mug.png",
+    category: "Merchandise",
+    availability: "available",
+  });
+  expect(String(rows[0]?.points_cost)).toBe("250");
+  expect(String(rows[0]?.stock)).toBe("5");
 });

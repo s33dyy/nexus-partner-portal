@@ -114,7 +114,7 @@ export function validateDealImportRows(rows: DealImportRow[]): DealImportValidat
     if (Number.isNaN(quantity) || quantity < 1) messages.push("Quantity must be at least 1");
     if (!normalizedRow.amount) messages.push("Amount is required");
     if (!isDealProbability(probability)) {
-      messages.push("Probability must be one of 0, 25, 50, 75, or 100");
+      messages.push("Probability must be one of 0, 25, 50, or 100");
     }
     if (!normalizedRow.source) messages.push("Source is required");
 

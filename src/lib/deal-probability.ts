@@ -2,7 +2,6 @@ export const DEAL_PROBABILITY_OPTIONS = [
   { value: 0, label: "0% - No chance" },
   { value: 25, label: "25% - Unlikely" },
   { value: 50, label: "50% - Likely" },
-  { value: 75, label: "75% - Probably" },
   { value: 100, label: "100% - Certain" },
 ] as const;
 

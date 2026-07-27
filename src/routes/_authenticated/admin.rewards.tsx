@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import {
   Loader2,
   Plus,
@@ -37,6 +36,8 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   buildManualRewardAdjustmentEvent,
   calculateOutstandingRewardPoints,
+  readRewardCatalogImportRows,
+  REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS,
   validateRewardCatalogImportRows,
 } from "@/lib/reward-admin";
 import {
@@ -119,6 +120,10 @@ function AdminRewardsPage() {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [importingCatalog, setImportingCatalog] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<Array<{ rowNumber: number; message: string }>>(
+    [],
+  );
   const [adjustingPoints, setAdjustingPoints] = useState(false);
   const [adjustmentDraft, setAdjustmentDraft] = useState({
     userId: "",
@@ -436,14 +441,14 @@ function AdminRewardsPage() {
 
   const importCatalogFile = async (file: File) => {
     setImportingCatalog(true);
+    setImportMessage(null);
+    setImportErrors([]);
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const firstSheet = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheet];
-      const rawRows = (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
+      const rawRows = await readRewardCatalogImportRows(file);
       const validation = validateRewardCatalogImportRows(rawRows);
 
       if (!validation.ok) {
+        setImportErrors(validation.errors);
         throw new Error(
           `Catalog import rejected. ${validation.errors
             .slice(0, 3)
@@ -464,10 +469,15 @@ function AdminRewardsPage() {
       );
       if (error) throw error;
 
+      setImportMessage(`Imported ${validation.rows.length} catalog items from ${file.name}`);
       toast.success(`Imported ${validation.rows.length} catalog items`);
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Catalog import failed");
+      const message = error instanceof Error ? error.message : "Catalog import failed";
+      if (!message.startsWith("Catalog import rejected.")) {
+        setImportMessage(message);
+      }
+      toast.error(message);
     } finally {
       setImportingCatalog(false);
       if (importInputRef.current) {
@@ -584,6 +594,13 @@ function AdminRewardsPage() {
                   />
                 </div>
                 <CsvExportButton
+                  label="Download template CSV"
+                  filenameStem="livey-reward-catalog-template"
+                  columns={REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS}
+                  loadRows={async () => []}
+                  variant="outline"
+                />
+                <CsvExportButton
                   label="Export catalog"
                   filenameStem="livey-reward-catalog"
                   columns={REWARD_CATALOG_EXPORT_COLUMNS}
@@ -623,7 +640,7 @@ function AdminRewardsPage() {
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  Import catalog
+                  Import CSV/XLSX
                 </Button>
               </div>
             </div>
@@ -667,6 +684,25 @@ function AdminRewardsPage() {
             </div>
 
             <div className="space-y-4">
+              {importMessage ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  {importMessage}
+                </div>
+              ) : null}
+              {importErrors.length > 0 ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <div className="text-sm font-medium text-destructive">
+                    Import validation issues
+                  </div>
+                  <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+                    {importErrors.slice(0, 6).map((error) => (
+                      <div key={`${error.rowNumber}-${error.message}`}>
+                        Row {error.rowNumber}: {error.message}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="rounded-2xl border bg-card p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>

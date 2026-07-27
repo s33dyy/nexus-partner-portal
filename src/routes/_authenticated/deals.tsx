@@ -316,9 +316,10 @@ function DealsPage() {
       const companyName = profile?.company_name ?? null;
       const companyKey = normalizeCompanyName(companyName);
       const members = ((memberResult.data as TeamMemberRecord[] | null) ?? []).filter((member) =>
-        hasRole("super_admin") || !companyKey
+        member.id !== profile?.id &&
+        (hasRole("super_admin") || !companyKey
           ? true
-          : normalizeCompanyName(member.company_name) === companyKey,
+          : normalizeCompanyName(member.company_name) === companyKey),
       );
 
       setDeals(visibleRows);
@@ -702,7 +703,7 @@ function DealsPage() {
         amount: "$5,000",
         customer_budget: "Approved",
         possible_close_date: "2026-08-15",
-        probability: 75,
+        probability: 50,
         source: "Partner referral",
         notes: "Expansion deal",
       } satisfies Record<(typeof DEAL_IMPORT_TEMPLATE_COLUMNS)[number], string | number>,

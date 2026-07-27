@@ -170,6 +170,7 @@ function RewardsPage() {
     [redemptions],
   );
   const outstandingPoints = useMemo(() => calculateOutstandingRewardPoints(events), [events]);
+  const showRequestActions = !isAdminView;
 
   const categories = useMemo(
     () => ["all", ...new Set(catalog.map((item) => item.category).filter(Boolean))],
@@ -347,8 +348,9 @@ function RewardsPage() {
               <div>
                 <CardTitle className="text-base">Reward catalog</CardTitle>
                 <CardDescription>
-                  Browse the storefront-style catalog and request a redemption when you have enough
-                  points.
+                  {isAdminView
+                    ? "Browse the storefront catalog and manage the catalog from the rewards manager."
+                    : "Browse the storefront-style catalog and request a redemption when you have enough points."}
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -395,6 +397,7 @@ function RewardsPage() {
                   <RewardCard
                     key={item.id}
                     item={item}
+                    showRequestAction={showRequestActions}
                     onRequest={() => openRequestDialog(item)}
                     canRequest={points >= item.points_cost}
                     points={points}
@@ -542,138 +545,137 @@ function RewardsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle className="text-base">
-                    {isAdminView ? "Redemption queue" : "My redemptions"}
-                  </CardTitle>
-                  <CardDescription>
-                    {isAdminView
-                      ? "Track requests that need review or have already been approved."
-                      : "Track the rewards you have requested."}
-                  </CardDescription>
-                </div>
-                <CsvExportButton
-                  label="Export redemptions"
-                  filenameStem="livey-rewards-redemptions"
-                  columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
-                  loadRows={async () =>
-                    redemptions.map((redemption) => ({
-                      reward_title: rewardById.get(redemption.reward_id)?.title ?? redemption.reward_id,
-                      status: redemption.status,
-                      shipping_name: redemption.shipping_name,
-                      points_cost: redemption.points_cost,
-                      approved_at: redemption.approved_at,
-                      created_at: redemption.created_at,
-                    }))
-                  }
-                  variant="outline"
-                />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {redemptions.length === 0 ? (
-                <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No redemption requests yet.
-                </div>
-              ) : (
-                redemptions.slice(0, 4).map((redemption) => (
-                  <div key={redemption.id} className="rounded-lg border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium">Reward request</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {redemption.status.replace(/_/g, " ")} ·{" "}
-                          {formatDateLabel(redemption.created_at)}
-                        </div>
-                      </div>
-                      <Badge variant="outline">{redemption.points_cost} pts</Badge>
-                    </div>
+          {!isAdminView ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle className="text-base">My redemptions</CardTitle>
+                    <CardDescription>Track the rewards you have requested.</CardDescription>
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+                  <CsvExportButton
+                    label="Export redemptions"
+                    filenameStem="livey-rewards-redemptions"
+                    columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
+                    loadRows={async () =>
+                      redemptions.map((redemption) => ({
+                        reward_title:
+                          rewardById.get(redemption.reward_id)?.title ?? redemption.reward_id,
+                        status: redemption.status,
+                        shipping_name: redemption.shipping_name,
+                        points_cost: redemption.points_cost,
+                        approved_at: redemption.approved_at,
+                        created_at: redemption.created_at,
+                      }))
+                    }
+                    variant="outline"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {redemptions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                    No redemption requests yet.
+                  </div>
+                ) : (
+                  redemptions.slice(0, 4).map((redemption) => (
+                    <div key={redemption.id} className="rounded-lg border p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium">Reward request</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {redemption.status.replace(/_/g, " ")} ·{" "}
+                            {formatDateLabel(redemption.created_at)}
+                          </div>
+                        </div>
+                        <Badge variant="outline">{redemption.points_cost} pts</Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       </div>
 
-      <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Request redemption</DialogTitle>
-            <DialogDescription>
-              Submit a request for the selected reward. Super admins can review and fulfill
-              redemptions from the admin panel.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedReward && (
-            <div className="space-y-4">
-              <div className="rounded-lg border bg-muted/30 p-4">
-                <div className="text-sm font-medium">{selectedReward.title}</div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {selectedReward.description}
+      {showRequestActions ? (
+        <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Request redemption</DialogTitle>
+              <DialogDescription>
+                Submit a request for the selected reward. Super admins can review and fulfill
+                redemptions from the admin panel.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedReward && (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="text-sm font-medium">{selectedReward.title}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {selectedReward.description}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Badge variant="secondary">{selectedReward.category}</Badge>
+                    <Badge variant="outline">{selectedReward.points_cost} points</Badge>
+                  </div>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Badge variant="secondary">{selectedReward.category}</Badge>
-                  <Badge variant="outline">{selectedReward.points_cost} points</Badge>
+                <div className="grid gap-3">
+                  <div className="grid gap-2">
+                    <Label htmlFor="shipping_name">Shipping name</Label>
+                    <Input
+                      id="shipping_name"
+                      value={requestDraft.shipping_name}
+                      onChange={(event) =>
+                        setRequestDraft((current) => ({
+                          ...current,
+                          shipping_name: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="shipping_address">Shipping address</Label>
+                    <Textarea
+                      id="shipping_address"
+                      value={requestDraft.shipping_address}
+                      onChange={(event) =>
+                        setRequestDraft((current) => ({
+                          ...current,
+                          shipping_address: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="request_notes">Notes</Label>
+                    <Textarea
+                      id="request_notes"
+                      value={requestDraft.notes}
+                      onChange={(event) =>
+                        setRequestDraft((current) => ({ ...current, notes: event.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" onClick={() => setRequestOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => void submitRequest()}
+                    disabled={submitting || points < selectedReward.points_cost}
+                  >
+                    {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Request redemption
+                  </Button>
                 </div>
               </div>
-              <div className="grid gap-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="shipping_name">Shipping name</Label>
-                  <Input
-                    id="shipping_name"
-                    value={requestDraft.shipping_name}
-                    onChange={(event) =>
-                      setRequestDraft((current) => ({
-                        ...current,
-                        shipping_name: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="shipping_address">Shipping address</Label>
-                  <Textarea
-                    id="shipping_address"
-                    value={requestDraft.shipping_address}
-                    onChange={(event) =>
-                      setRequestDraft((current) => ({
-                        ...current,
-                        shipping_address: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="request_notes">Notes</Label>
-                  <Textarea
-                    id="request_notes"
-                    value={requestDraft.notes}
-                    onChange={(event) =>
-                      setRequestDraft((current) => ({ ...current, notes: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button variant="outline" onClick={() => setRequestOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => void submitRequest()}
-                  disabled={submitting || points < selectedReward.points_cost}
-                >
-                  {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Request redemption
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+            )}
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -692,11 +694,13 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
 
 function RewardCard({
   item,
+  showRequestAction,
   onRequest,
   canRequest,
   points,
 }: {
   item: RewardCatalogRecord;
+  showRequestAction: boolean;
   onRequest: () => void;
   canRequest: boolean;
   points: number;
@@ -729,16 +733,22 @@ function RewardCard({
         <div className="text-xs text-muted-foreground">
           {item.stock > 0 ? `${item.stock} available` : "Out of stock"}
         </div>
-        <Button
-          className="w-full"
-          variant={canRequest ? "default" : "outline"}
-          onClick={onRequest}
-          disabled={!canRequest || item.stock <= 0}
-        >
-          {canRequest
-            ? "Request reward"
-            : `Need ${Math.max(item.points_cost - points, 0)} more points`}
-        </Button>
+        {showRequestAction ? (
+          <Button
+            className="w-full"
+            variant={canRequest ? "default" : "outline"}
+            onClick={onRequest}
+            disabled={!canRequest || item.stock <= 0}
+          >
+            {canRequest
+              ? "Request reward"
+              : `Need ${Math.max(item.points_cost - points, 0)} more points`}
+          </Button>
+        ) : (
+          <div className="rounded-lg border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
+            Managed from the rewards manager
+          </div>
+        )}
       </div>
     </div>
   );
