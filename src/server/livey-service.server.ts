@@ -500,6 +500,15 @@ async function downloadCloudinaryDocumentBytes(
   return extractSingleZipEntry(zipBuffer);
 }
 
+async function fetchCloudinaryDocumentBytes(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Cloudinary document fetch failed (${response.status})`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
 function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOffset = 0) {
   const whereClauses: string[] = [];
   const whereParams: unknown[] = [];
@@ -1330,6 +1339,13 @@ export async function createDocumentDataUrl(filePath: string) {
       if (parsed.secureUrl && parsed.resourceType === "image") {
         return {
           signedUrl: parsed.secureUrl,
+          fileName: blob.file_name,
+        };
+      }
+      if (parsed.secureUrl) {
+        const bytes = await fetchCloudinaryDocumentBytes(parsed.secureUrl);
+        return {
+          signedUrl: `data:${blob.mime_type || "application/octet-stream"};base64,${bytes.toString("base64")}`,
           fileName: blob.file_name,
         };
       }
