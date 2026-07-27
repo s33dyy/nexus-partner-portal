@@ -58,3 +58,39 @@ test("createDocumentDataUrl fetches raw Cloudinary PDFs from their stored secure
     globalThis.fetch = originalFetch;
   }
 });
+
+test("createDocumentDataUrl wraps legacy text blobs in a valid PDF", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { createDocumentDataUrl } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM document_blobs WHERE file_path = $1 LIMIT 1")) {
+      return {
+        rows: [
+          {
+            file_name: "GST Certificate.pdf",
+            mime_type: "application/pdf",
+            file_data: Buffer.from("LIVEY training fixture for partner review", "utf8"),
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+
+    return { rows: [], rowCount: 1 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const result = await createDocumentDataUrl("partner-documents/legacy/gst-certificate.pdf");
+    const encoded = result.signedUrl.split(",")[1] ?? "";
+    const decoded = Buffer.from(encoded, "base64").toString("utf8");
+    expect(result.fileName).toBe("GST Certificate.pdf");
+    expect(decoded.startsWith("%PDF-1.4")).toBe(true);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});

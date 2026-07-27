@@ -509,6 +509,112 @@ async function fetchCloudinaryDocumentBytes(url: string) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+function looksLikePdf(bytes: Buffer) {
+  return bytes.subarray(0, 5).toString("utf8") === "%PDF-";
+}
+
+function normalizePdfText(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "?");
+}
+
+function escapePdfText(value: string) {
+  return normalizePdfText(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function wrapPdfLines(value: string, maxLineLength = 92) {
+  const lines: string[] = [];
+  for (const paragraph of normalizePdfText(value).split("\n")) {
+    if (!paragraph.trim()) {
+      lines.push("");
+      continue;
+    }
+
+    const words = paragraph.split(/\s+/);
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= maxLineLength) {
+        current = candidate;
+        continue;
+      }
+      if (current) lines.push(current);
+      if (word.length > maxLineLength) {
+        let index = 0;
+        while (index < word.length) {
+          lines.push(word.slice(index, index + maxLineLength));
+          index += maxLineLength;
+        }
+        current = "";
+      } else {
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+  }
+  return lines;
+}
+
+function buildTextPdfBytes(input: { title: string; body: string }) {
+  const title = normalizePdfText(input.title || "Document");
+  const bodyLines = wrapPdfLines(input.body || "Document preview unavailable.");
+  const contentLines = [
+    "BT",
+    "/F1 14 Tf",
+    "72 760 Td",
+    `(${escapePdfText(title)}) Tj`,
+    "/F1 10 Tf",
+    "0 -24 Td",
+    ...(bodyLines.length > 0
+      ? bodyLines.flatMap((line, index) => [
+          `(${escapePdfText(line)}) Tj`,
+          ...(index < bodyLines.length - 1 ? ["0 -14 Td"] : []),
+        ])
+      : ["(Document preview unavailable.) Tj"]),
+    "ET",
+  ];
+  const contentStream = contentLines.join("\n");
+
+  const chunks: Buffer[] = [];
+  const offsets: number[] = [];
+  let byteLength = 0;
+
+  const push = (value: string) => {
+    offsets.push(byteLength);
+    const chunk = Buffer.from(value, "utf8");
+    chunks.push(chunk);
+    byteLength += chunk.length;
+  };
+
+  push("%PDF-1.4\n");
+  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  push(
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+  );
+  push("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+  push(`5 0 obj\n<< /Length ${Buffer.byteLength(contentStream, "utf8")} >>\nstream\n${contentStream}\nendstream\nendobj\n`);
+
+  const xrefStart = byteLength;
+  const xrefEntries = ["xref\n0 6\n0000000000 65535 f \n"];
+  for (const offset of offsets) {
+    xrefEntries.push(`${offset.toString().padStart(10, "0")} 00000 n \n`);
+  }
+  xrefEntries.push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`);
+  push(xrefEntries.join(""));
+
+  return Buffer.concat(chunks);
+}
+
+function buildPdfDataUrl(input: { title: string; bytes: Buffer; fallbackText: string }) {
+  const bytes = looksLikePdf(input.bytes)
+    ? input.bytes
+    : buildTextPdfBytes({ title: input.title, body: input.fallbackText });
+  return `data:application/pdf;base64,${bytes.toString("base64")}`;
+}
+
 function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOffset = 0) {
   const whereClauses: string[] = [];
   const whereParams: unknown[] = [];
@@ -1345,7 +1451,11 @@ export async function createDocumentDataUrl(filePath: string) {
       if (parsed.secureUrl) {
         const bytes = await fetchCloudinaryDocumentBytes(parsed.secureUrl);
         return {
-          signedUrl: `data:${blob.mime_type || "application/octet-stream"};base64,${bytes.toString("base64")}`,
+          signedUrl: buildPdfDataUrl({
+            title: blob.file_name,
+            bytes,
+            fallbackText: bytes.toString("utf8"),
+          }),
           fileName: blob.file_name,
         };
       }
@@ -1353,9 +1463,12 @@ export async function createDocumentDataUrl(filePath: string) {
         parsed.publicId,
         parsed.resourceType,
       );
-      const mimeType = blob.mime_type || "application/octet-stream";
       return {
-        signedUrl: `data:${mimeType};base64,${archiveEntry.bytes.toString("base64")}`,
+        signedUrl: buildPdfDataUrl({
+          title: blob.file_name,
+          bytes: archiveEntry.bytes,
+          fallbackText: archiveEntry.bytes.toString("utf8"),
+        }),
         fileName: blob.file_name,
       };
     }
@@ -1363,9 +1476,17 @@ export async function createDocumentDataUrl(filePath: string) {
     // Fall back to the legacy in-DB binary blob format below.
   }
 
-  const base64 = Buffer.from(blob.file_data).toString("base64");
+  const fileBytes = Buffer.from(blob.file_data);
+  const signedUrl =
+    blob.mime_type === "application/pdf"
+      ? buildPdfDataUrl({
+          title: blob.file_name,
+          bytes: fileBytes,
+          fallbackText: fileBytes.toString("utf8"),
+        })
+      : `data:${blob.mime_type};base64,${fileBytes.toString("base64")}`;
   return {
-    signedUrl: `data:${blob.mime_type};base64,${base64}`,
+    signedUrl,
     fileName: blob.file_name,
   };
 }

@@ -830,12 +830,7 @@ function AdminPartners() {
                   </Button>
                   <Button
                     onClick={() => void approveSignedAgreement()}
-                    disabled={
-                      acting ||
-                      !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
-                        selected.status,
-                      )
-                    }
+                    disabled={acting}
                   >
                     {acting ? (
                       <Loader2 className="mr-1 h-4 w-4 animate-spin" />
