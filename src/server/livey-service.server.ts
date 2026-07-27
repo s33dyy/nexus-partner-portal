@@ -63,6 +63,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "avatar_url",
     "partner_id",
     "partner_status",
+    "must_reset_password",
     "is_seed",
     "created_at",
     "updated_at",
@@ -174,6 +175,16 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
     "updated_at",
+  ],
+  portal_customer_activities: [
+    "id",
+    "customer_id",
+    "partner_id",
+    "actor_id",
+    "actor_name",
+    "summary",
+    "next_step",
+    "created_at",
   ],
   portal_catalog_items: [
     "id",
@@ -296,6 +307,30 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   ],
   password_reset_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_at"],
   notifications: ["id", "user_id", "partner_id", "title", "message", "type", "read", "created_at"],
+  support_tickets: [
+    "id",
+    "partner_id",
+    "created_by",
+    "created_by_name",
+    "subject",
+    "description",
+    "status",
+    "priority",
+    "assignee_name",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  support_ticket_comments: [
+    "id",
+    "ticket_id",
+    "author_id",
+    "author_name",
+    "author_role",
+    "body",
+    "is_seed",
+    "created_at",
+  ],
 };
 
 const SESSION_COOKIE = "livey_session";
@@ -704,7 +739,7 @@ export async function getAuthContext(token?: string) {
 
   const [{ rows: profileRows }, { rows: roleRows }] = await Promise.all([
     pool.query(
-      `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status
+      `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
        FROM profiles WHERE id = $1 LIMIT 1`,
       [session.user.id],
     ),
@@ -727,7 +762,7 @@ export async function getAuthContext(token?: string) {
 
 export async function signInWithPassword(email: string, password: string) {
   const result = await pool.query(
-    `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status
+    `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
      FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
     [email],
   );
@@ -742,6 +777,7 @@ export async function signInWithPassword(email: string, password: string) {
         avatar_url: string | null;
         partner_id: string | null;
         partner_status: PartnerStatus;
+        must_reset_password: boolean;
       }
     | undefined;
 
@@ -842,6 +878,7 @@ export async function createWorkspaceUser(input: {
   role: AppRole;
   partner_status?: PartnerStatus;
   partner_id?: string;
+  must_reset_password?: boolean;
 }) {
   const ctx = await getAuthContext();
   if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
@@ -858,8 +895,8 @@ export async function createWorkspaceUser(input: {
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(input.password, 10);
   await pool.query(
-    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, is_seed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)`,
+    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, must_reset_password, is_seed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)`,
     [
       id,
       input.email,
@@ -872,6 +909,7 @@ export async function createWorkspaceUser(input: {
       input.partner_id ||
         (ctx.profile as { partner_id?: string | null } | null)?.partner_id ||
         null,
+      input.must_reset_password ?? false,
     ],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [
@@ -906,7 +944,7 @@ export async function updatePasswordFromSession(password: string) {
     throw new Error("Unauthorized");
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE profiles SET password_hash = $1 WHERE id = $2`, [
+  await pool.query(`UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`, [
     passwordHash,
     session.user.id,
   ]);
@@ -968,7 +1006,7 @@ export async function completePasswordReset(token: string, password: string) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE profiles SET password_hash = $1 WHERE id = $2`, [
+  await pool.query(`UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`, [
     passwordHash,
     row.user_id,
   ]);
@@ -1006,6 +1044,26 @@ export async function completePasswordReset(token: string, password: string) {
       },
     } satisfies LocalSession,
   };
+}
+
+export async function issueTemporaryPasswordForUser(userId: string) {
+  const ctx = await getAuthContext();
+  if (!ctx.roles.includes("super_admin")) {
+    throw new Error("Unauthorized");
+  }
+
+  const { generateTemporaryPassword } = await import("@/lib/temp-password");
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+  await pool.query(
+    `UPDATE profiles
+     SET password_hash = $1, must_reset_password = true, updated_at = now()
+     WHERE id = $2`,
+    [passwordHash, userId],
+  );
+
+  return { temporaryPassword };
 }
 
 export async function uploadDocumentBlob(input: {

@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import { BarChart3, Download, Loader2, Printer, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/local/client";
+import { buildAnalyticsWorkbook } from "@/lib/analytics-export";
+import { buildExportFilename } from "@/lib/export-files";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import {
@@ -161,6 +165,23 @@ function AnalyticsPage() {
   const maxHealth = Math.max(1, ...healthBands.map((item) => item.count));
   const maxTier = Math.max(1, ...catalogByTier.map((item) => item.count));
 
+  const exportExcel = () => {
+    const workbook = buildAnalyticsWorkbook({
+      generatedAt: new Date().toISOString(),
+      metrics: {
+        pipelineValue: `$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+        wonDeals: totals.won,
+        openDeals: totals.open,
+        avgHealth: `${totals.avgHealth}%`,
+      },
+      deals,
+      customers,
+      catalog,
+    });
+
+    XLSX.writeFile(workbook, buildExportFilename("livey-analytics", "xlsx"));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -175,10 +196,18 @@ function AnalyticsPage() {
             the portal.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
+          <Button variant="outline" onClick={() => void exportExcel()} disabled={loading}>
+            <Download className="mr-2 h-4 w-4" />
+            Export Excel
+          </Button>
+          <Button variant="outline" onClick={() => window.print()} disabled={loading}>
+            <Printer className="mr-2 h-4 w-4" />
+            Export PDF
+          </Button>
           <button
             className="inline-flex items-center rounded-md border px-3 py-2 text-sm shadow-sm transition hover:bg-muted"
             onClick={() => {

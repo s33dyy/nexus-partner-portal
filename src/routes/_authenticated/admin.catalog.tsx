@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { type CatalogItemRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -254,7 +254,7 @@ function AdminCatalogPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-catalog-${formatCsvDate()}.csv`}
+            filenameStem="livey-catalog"
             columns={CATALOG_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredItems.map((item) => ({

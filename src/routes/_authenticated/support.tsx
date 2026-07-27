@@ -1,20 +1,506 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Headset, Loader2, RefreshCw, Send } from "lucide-react";
+import { toast } from "sonner";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/hooks/use-auth";
+import { useRequireAccess } from "@/hooks/use-partner-access";
+import { supabase } from "@/integrations/local/client";
+import { formatDateTimeLabel } from "@/lib/date-utils";
+import { applyPartnerScope } from "@/lib/partner-scope";
+import { type SupportTicketCommentRecord, type SupportTicketRecord } from "@/lib/portal-records";
 
 export const Route = createFileRoute("/_authenticated/support")({
   component: SupportPage,
 });
 
 function SupportPage() {
+  const { profile, hasRole } = useAuth();
+  useRequireAccess("partial");
+
+  const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
+  const [comments, setComments] = useState<SupportTicketCommentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [replyDraft, setReplyDraft] = useState("");
+  const [savingReply, setSavingReply] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [ticketDraft, setTicketDraft] = useState({
+    subject: "",
+    description: "",
+    priority: "medium",
+  });
+  const [metaDraft, setMetaDraft] = useState({
+    status: "open",
+    priority: "medium",
+    assignee_name: "",
+  });
+
+  const loadTickets = async () => {
+    setLoading(true);
+    try {
+      let ticketQuery = supabase
+        .from("support_tickets")
+        .select("*")
+        .order("updated_at", { ascending: false });
+
+      ticketQuery = applyPartnerScope(ticketQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+        fallbackColumn: "created_by",
+      });
+
+      const { data, error } = await ticketQuery;
+      if (error) throw error;
+      const rows = (data as SupportTicketRecord[] | null) ?? [];
+      setTickets(rows);
+      setSelectedId((current) => current ?? rows[0]?.id ?? null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load tickets");
+      setTickets([]);
+      setSelectedId(null);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadTickets();
+  }, [hasRole, profile?.id, profile?.partner_id]);
+
+  const selectedTicket = useMemo(
+    () => tickets.find((ticket) => ticket.id === selectedId) ?? null,
+    [selectedId, tickets],
+  );
+
+  useEffect(() => {
+    if (!selectedTicket) {
+      setComments([]);
+      return;
+    }
+
+    setMetaDraft({
+      status: selectedTicket.status,
+      priority: selectedTicket.priority,
+      assignee_name: selectedTicket.assignee_name ?? "",
+    });
+
+    void (async () => {
+      const { data, error } = await supabase
+        .from("support_ticket_comments")
+        .select("*")
+        .eq("ticket_id", selectedTicket.id)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        toast.error(error.message);
+        setComments([]);
+        return;
+      }
+
+      setComments((data as SupportTicketCommentRecord[] | null) ?? []);
+    })();
+  }, [selectedTicket]);
+
+  const filteredTickets = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return tickets.filter((ticket) =>
+      !term
+        ? true
+        : [ticket.subject, ticket.description, ticket.status, ticket.priority]
+            .join(" ")
+            .toLowerCase()
+            .includes(term),
+    );
+  }, [query, tickets]);
+
+  const createTicket = async () => {
+    if (!ticketDraft.subject.trim() || !ticketDraft.description.trim()) {
+      toast.error("Subject and description are required");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const now = new Date().toISOString();
+      const ticketId = globalThis.crypto.randomUUID();
+      const { error } = await supabase.from("support_tickets").insert({
+        id: ticketId,
+        partner_id: profile?.partner_id ?? null,
+        created_by: profile?.id ?? null,
+        created_by_name: profile?.full_name ?? "LIVEY User",
+        subject: ticketDraft.subject.trim(),
+        description: ticketDraft.description.trim(),
+        status: "open",
+        priority: ticketDraft.priority,
+        assignee_name: null,
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      });
+      if (error) throw error;
+
+      setTicketDraft({ subject: "", description: "", priority: "medium" });
+      toast.success("Support ticket created");
+      await loadTickets();
+      setSelectedId(ticketId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create ticket");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const saveTicketMeta = async () => {
+    if (!selectedTicket || !hasRole("super_admin")) return;
+
+    setSavingMeta(true);
+    try {
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({
+          status: metaDraft.status,
+          priority: metaDraft.priority,
+          assignee_name: metaDraft.assignee_name.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", selectedTicket.id);
+      if (error) throw error;
+
+      toast.success("Ticket updated");
+      await loadTickets();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update ticket");
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const addReply = async () => {
+    if (!selectedTicket) return;
+    if (!replyDraft.trim()) {
+      toast.error("Write a reply before sending");
+      return;
+    }
+
+    setSavingReply(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("support_ticket_comments").insert({
+        id: globalThis.crypto.randomUUID(),
+        ticket_id: selectedTicket.id,
+        author_id: profile?.id ?? null,
+        author_name: profile?.full_name ?? "LIVEY User",
+        author_role: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        body: replyDraft.trim(),
+        is_seed: false,
+        created_at: now,
+      });
+      if (error) throw error;
+
+      await supabase
+        .from("support_tickets")
+        .update({ updated_at: now })
+        .eq("id", selectedTicket.id);
+
+      setReplyDraft("");
+      toast.success("Reply added");
+      await loadTickets();
+      const commentRes = await supabase
+        .from("support_ticket_comments")
+        .select("*")
+        .eq("ticket_id", selectedTicket.id)
+        .order("created_at", { ascending: true });
+      setComments((commentRes.data as SupportTicketCommentRecord[] | null) ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to add reply");
+    } finally {
+      setSavingReply(false);
+    }
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Support</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm text-muted-foreground">
-        Support workflows can connect to live ticketing or Slack escalation once you’re ready.
-      </CardContent>
-    </Card>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+            <Headset className="h-3.5 w-3.5" />
+            Support
+          </div>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Portal tickets</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Create support requests, track replies, and keep conversations inside the portal.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{hasRole("super_admin") ? "All tickets" : "Partner-scoped"}</Badge>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setRefreshing(true);
+              void loadTickets();
+            }}
+            disabled={loading || refreshing}
+          >
+            {loading || refreshing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="text-base">Create ticket</CardTitle>
+              <CardDescription>Start a new support conversation for your partner workspace.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="ticket-subject">Subject</Label>
+                <Input
+                  id="ticket-subject"
+                  value={ticketDraft.subject}
+                  onChange={(event) =>
+                    setTicketDraft((current) => ({ ...current, subject: event.target.value }))
+                  }
+                  placeholder="Need help with partner approval"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ticket-priority">Priority</Label>
+                <select
+                  id="ticket-priority"
+                  value={ticketDraft.priority}
+                  onChange={(event) =>
+                    setTicketDraft((current) => ({ ...current, priority: event.target.value }))
+                  }
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ticket-description">Description</Label>
+                <Textarea
+                  id="ticket-description"
+                  value={ticketDraft.description}
+                  onChange={(event) =>
+                    setTicketDraft((current) => ({ ...current, description: event.target.value }))
+                  }
+                  placeholder="Describe the issue, expected behavior, and any business impact."
+                />
+              </div>
+              <Button onClick={() => void createTicket()} disabled={creating}>
+                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Create ticket
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="border-b">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="text-base">Tickets</CardTitle>
+                  <CardDescription>Open any ticket to view the full thread.</CardDescription>
+                </div>
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search tickets"
+                  className="w-full max-w-xs"
+                />
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading tickets...
+                </div>
+              ) : filteredTickets.length === 0 ? (
+                <div className="p-6 text-sm text-muted-foreground">No tickets found for this view.</div>
+              ) : (
+                <div className="divide-y">
+                  {filteredTickets.map((ticket) => (
+                    <button
+                      key={ticket.id}
+                      type="button"
+                      onClick={() => setSelectedId(ticket.id)}
+                      className={`w-full px-5 py-4 text-left transition hover:bg-muted/30 ${
+                        ticket.id === selectedId ? "bg-muted/30" : ""
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{ticket.subject}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {ticket.created_by_name} · {formatDateTimeLabel(ticket.updated_at)}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant="outline">{ticket.priority}</Badge>
+                          <Badge variant={ticket.status === "closed" ? "secondary" : "default"}>
+                            {ticket.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle className="text-base">{selectedTicket?.subject ?? "Ticket detail"}</CardTitle>
+            <CardDescription>
+              {selectedTicket
+                ? "Review the current status and continue the conversation below."
+                : "Select a ticket to view its thread."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5 p-6">
+            {!selectedTicket ? (
+              <div className="rounded-lg border border-dashed px-4 py-8 text-sm text-muted-foreground">
+                No ticket selected yet.
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{selectedTicket.priority}</Badge>
+                    <Badge variant={selectedTicket.status === "closed" ? "secondary" : "default"}>
+                      {selectedTicket.status}
+                    </Badge>
+                    {selectedTicket.assignee_name ? (
+                      <Badge variant="secondary">Assigned to {selectedTicket.assignee_name}</Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 text-sm">{selectedTicket.description}</div>
+                </div>
+
+                {hasRole("super_admin") ? (
+                  <div className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+                    <div className="grid gap-2">
+                      <Label>Status</Label>
+                      <select
+                        value={metaDraft.status}
+                        onChange={(event) =>
+                          setMetaDraft((current) => ({ ...current, status: event.target.value }))
+                        }
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="open">Open</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="waiting_on_partner">Waiting on partner</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Priority</Label>
+                      <select
+                        value={metaDraft.priority}
+                        onChange={(event) =>
+                          setMetaDraft((current) => ({ ...current, priority: event.target.value }))
+                        }
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Assignee</Label>
+                      <Input
+                        value={metaDraft.assignee_name}
+                        onChange={(event) =>
+                          setMetaDraft((current) => ({
+                            ...current,
+                            assignee_name: event.target.value,
+                          }))
+                        }
+                        placeholder="LIVEY owner"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <Button onClick={() => void saveTicketMeta()} disabled={savingMeta}>
+                        {savingMeta ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Save ticket updates
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <Separator />
+
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Thread</div>
+                  {comments.length === 0 ? (
+                    <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                      No replies yet.
+                    </div>
+                  ) : (
+                    comments.map((comment) => (
+                      <div key={comment.id} className="rounded-lg border p-4">
+                        <div className="text-sm font-medium">{comment.author_name}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {comment.author_role.replace(/_/g, " ")} · {formatDateTimeLabel(comment.created_at)}
+                        </div>
+                        <div className="mt-3 text-sm">{comment.body}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <Label htmlFor="ticket-reply">Add reply</Label>
+                  <Textarea
+                    id="ticket-reply"
+                    value={replyDraft}
+                    onChange={(event) => setReplyDraft(event.target.value)}
+                    placeholder="Share the next step, answer, or follow-up."
+                  />
+                  <Button onClick={() => void addReply()} disabled={savingReply}>
+                    {savingReply ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="mr-2 h-4 w-4" />
+                    )}
+                    Post reply
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }

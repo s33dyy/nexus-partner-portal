@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { formatDateTimeLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
 
@@ -112,7 +112,7 @@ function NotificationsPage() {
           )}
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-notifications-${formatCsvDate()}.csv`}
+            filenameStem="livey-notifications"
             columns={NOTIFICATION_EXPORT_COLUMNS}
             loadRows={async () =>
               notifications.map((notification) => ({

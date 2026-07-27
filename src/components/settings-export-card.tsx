@@ -5,7 +5,6 @@ import { CsvExportButton } from "@/components/csv-export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCsvDate } from "@/lib/csv-export";
 import type { ExportDatasetDescriptor, ExportScope } from "@/lib/export-registry";
 
 const GROUP_LABELS: Record<ExportDatasetDescriptor["group"], string> = {
@@ -61,7 +60,7 @@ export function SettingsExportCard({
         </div>
         <CsvExportButton
           label="Export CSV"
-          filename={`${dataset.filenameStem}-${formatCsvDate()}.csv`}
+          filenameStem={dataset.filenameStem}
           columns={dataset.columns}
           loadRows={() => dataset.loadRows(scope)}
         />

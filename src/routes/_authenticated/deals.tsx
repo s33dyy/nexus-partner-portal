@@ -39,7 +39,7 @@ import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import {
   buildDealCollaboratorPayloads,
   isDealCollaboratorEditingLocked,
@@ -909,7 +909,7 @@ function DealsPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-deals-${formatCsvDate()}.csv`}
+            filenameStem="livey-deals"
             columns={DEAL_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredDeals.map((deal) => ({

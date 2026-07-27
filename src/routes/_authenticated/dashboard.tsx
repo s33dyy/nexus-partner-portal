@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { NewsFeedCard } from "@/components/news-feed-card";
 import { formatDateLabel } from "@/lib/date-utils";
@@ -30,6 +31,7 @@ import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
+import { getDashboardMetricDestination } from "@/lib/global-search";
 import { getAgreementCtaLabel } from "@/routes/_authenticated/partner.agreement";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -422,6 +424,7 @@ function DashboardPage() {
           metrics.map((metric) => (
             <Kpi
               key={metric.id}
+              to={getDashboardMetricDestination(metric.id, hasRole("super_admin"))}
               label={metric.label}
               value={metric.value}
               hint={metric.hint}
@@ -444,8 +447,8 @@ function DashboardPage() {
         )}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="space-y-6 xl:col-span-2">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_360px]">
+        <div className="space-y-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <div>
@@ -459,19 +462,23 @@ function DashboardPage() {
                 Live
               </Badge>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent>
               {feedEmpty ? (
                 <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
                   No news posts yet. LIVEY admins can publish photo updates from the admin news
                   page.
                 </div>
               ) : (
-                newsPosts.map((post, index) => (
-                  <div key={post.id}>
-                    <NewsFeedCard post={post} />
-                    {index < newsPosts.length - 1 && <Separator className="my-4" />}
+                <ScrollArea className="h-[32rem] pr-4">
+                  <div className="space-y-4">
+                    {newsPosts.map((post, index) => (
+                      <div key={post.id}>
+                        <NewsFeedCard post={post} />
+                        {index < newsPosts.length - 1 && <Separator className="my-4" />}
+                      </div>
+                    ))}
                   </div>
-                ))
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
@@ -493,7 +500,7 @@ function DashboardPage() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 xl:sticky xl:top-20 xl:self-start">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Your profile</CardTitle>
@@ -606,12 +613,14 @@ function DashboardPage() {
 }
 
 function Kpi({
+  to,
   label,
   value,
   hint,
   icon: Icon,
   tone = "default",
 }: {
+  to?: string | null;
   label: string;
   value: string;
   hint: string;
@@ -626,8 +635,8 @@ function Kpi({
     info: "bg-info/15 text-info",
   }[tone];
 
-  return (
-    <Card>
+  const content = (
+    <Card className={to ? "transition-colors hover:border-primary/40 hover:bg-accent/30" : undefined}>
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
           <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -642,6 +651,12 @@ function Kpi({
       </CardContent>
     </Card>
   );
+
+  if (!to) {
+    return content;
+  }
+
+  return <Link to={to}>{content}</Link>;
 }
 
 function SpotlightRow({ partner }: { partner: PartnerSpotlight }) {

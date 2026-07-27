@@ -34,7 +34,7 @@ export function buildCsv(columns: CsvColumn[], rows: Array<Record<string, unknow
   const headerRow = columns.map((column) => escapeCsvCell(column.header));
   const bodyRows = rows.map((row) => columns.map((column) => escapeCsvCell(row[column.key])));
 
-  return [headerRow, ...bodyRows].map((row) => row.join(",")).join("\n");
+  return `\uFEFF${[headerRow, ...bodyRows].map((row) => row.join(",")).join("\n")}`;
 }
 
 export function downloadCsv(filename: string, csv: string) {

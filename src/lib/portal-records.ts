@@ -72,6 +72,17 @@ export type CustomerRecord = {
   updated_at: string;
 };
 
+export type CustomerActivityRecord = {
+  id: string;
+  customer_id: string;
+  partner_id: string | null;
+  actor_id: string | null;
+  actor_name: string;
+  summary: string;
+  next_step: string | null;
+  created_at: string;
+};
+
 export type CatalogItemRecord = {
   id: string;
   sku: string;
@@ -117,6 +128,44 @@ export type TeamMemberRecord = {
   is_seed: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type SupportTicketRecord = {
+  id: string;
+  partner_id: string | null;
+  created_by: string | null;
+  created_by_name: string;
+  subject: string;
+  description: string;
+  status: string;
+  priority: string;
+  assignee_name: string | null;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupportTicketCommentRecord = {
+  id: string;
+  ticket_id: string;
+  author_id: string | null;
+  author_name: string;
+  author_role: string;
+  body: string;
+  is_seed: boolean;
+  created_at: string;
+};
+
+export type GlobalSearchResultItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  href: string;
+};
+
+export type GlobalSearchResult = {
+  group: "Deals" | "Partners" | "Catalog";
+  items: GlobalSearchResultItem[];
 };
 
 export function nextDealStage(stage: DealStage): DealStage {

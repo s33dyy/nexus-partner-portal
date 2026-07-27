@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   Loader2,
   Plus,
@@ -30,10 +31,19 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase, uploadRewardImage } from "@/integrations/local/client";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { type RewardCatalogRecord, type RewardRedemptionRecord } from "@/lib/rewards";
+import {
+  buildManualRewardAdjustmentEvent,
+  calculateOutstandingRewardPoints,
+  validateRewardCatalogImportRows,
+} from "@/lib/reward-admin";
+import {
+  type RewardCatalogRecord,
+  type RewardPointEventRecord,
+  type RewardRedemptionRecord,
+} from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
@@ -94,6 +104,8 @@ function AdminRewardsPage() {
   const { hasRole, profile } = useAuth();
   const [catalog, setCatalog] = useState<RewardCatalogRecord[]>([]);
   const [redemptions, setRedemptions] = useState<RewardRedemptionRecord[]>([]);
+  const [events, setEvents] = useState<RewardPointEventRecord[]>([]);
+  const [users, setUsers] = useState<Array<{ id: string; full_name: string; email: string; partner_id: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -106,28 +118,47 @@ function AdminRewardsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [importingCatalog, setImportingCatalog] = useState(false);
+  const [adjustingPoints, setAdjustingPoints] = useState(false);
+  const [adjustmentDraft, setAdjustmentDraft] = useState({
+    userId: "",
+    pointsDelta: "",
+    reason: "",
+  });
   const rewardImageInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [catalogRes, redemptionRes] = await Promise.all([
+      const [catalogRes, redemptionRes, pointRes, userRes] = await Promise.all([
         supabase.from("reward_catalog_items").select("*").order("created_at", { ascending: false }),
         supabase.from("reward_redemptions").select("*").order("created_at", { ascending: false }),
+        supabase.from("reward_point_events").select("*").order("created_at", { ascending: false }),
+        supabase.from("profiles").select("id, full_name, email, partner_id").order("full_name", { ascending: true }),
       ]);
-      if (catalogRes.error || redemptionRes.error) {
-        throw catalogRes.error ?? redemptionRes.error;
+      if (catalogRes.error || redemptionRes.error || pointRes.error || userRes.error) {
+        throw catalogRes.error ?? redemptionRes.error ?? pointRes.error ?? userRes.error;
       }
       const catalogRows = (catalogRes.data as RewardCatalogRecord[] | null) ?? [];
       const redemptionRows = (redemptionRes.data as RewardRedemptionRecord[] | null) ?? [];
+      const pointRows = (pointRes.data as RewardPointEventRecord[] | null) ?? [];
       setCatalog(catalogRows);
       setRedemptions(redemptionRows);
-      setSource(catalogRows.length || redemptionRows.length ? "database" : "empty");
+      setEvents(pointRows);
+      setUsers(
+        ((userRes.data as Array<{ id: string; full_name: string; email: string; partner_id: string | null }> | null) ?? []).filter(
+          (user) => Boolean(user.email),
+        ),
+      );
+      setSource(catalogRows.length || redemptionRows.length || pointRows.length ? "database" : "empty");
       setSelectedId((current) => current ?? catalogRows[0]?.id ?? null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load rewards");
       setCatalog([]);
       setRedemptions([]);
+      setEvents([]);
+      setUsers([]);
       setSource("empty");
       setSelectedId(null);
     } finally {
@@ -158,6 +189,7 @@ function AdminRewardsPage() {
     () => catalog.find((item) => item.id === selectedId) ?? null,
     [catalog, selectedId],
   );
+  const outstandingPoints = useMemo(() => calculateOutstandingRewardPoints(events), [events]);
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -402,6 +434,78 @@ function AdminRewardsPage() {
     }
   };
 
+  const importCatalogFile = async (file: File) => {
+    setImportingCatalog(true);
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const firstSheet = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[firstSheet];
+      const rawRows = (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
+      const validation = validateRewardCatalogImportRows(rawRows);
+
+      if (!validation.ok) {
+        throw new Error(
+          `Catalog import rejected. ${validation.errors
+            .slice(0, 3)
+            .map((error) => `Row ${error.rowNumber}: ${error.message}`)
+            .join(" | ")}`,
+        );
+      }
+
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("reward_catalog_items").insert(
+        validation.rows.map((row) => ({
+          id: globalThis.crypto.randomUUID(),
+          ...row,
+          is_seed: false,
+          created_at: now,
+          updated_at: now,
+        })),
+      );
+      if (error) throw error;
+
+      toast.success(`Imported ${validation.rows.length} catalog items`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Catalog import failed");
+    } finally {
+      setImportingCatalog(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
+  const saveAdjustment = async () => {
+    const user = users.find((entry) => entry.id === adjustmentDraft.userId) ?? null;
+    const pointsDelta = Number.parseInt(adjustmentDraft.pointsDelta, 10);
+    if (!user || !Number.isFinite(pointsDelta) || pointsDelta === 0 || !adjustmentDraft.reason.trim()) {
+      toast.error("Choose a user, enter a non-zero point adjustment, and add a reason");
+      return;
+    }
+
+    setAdjustingPoints(true);
+    try {
+      const payload = buildManualRewardAdjustmentEvent({
+        userId: user.id,
+        partnerId: user.partner_id,
+        pointsDelta,
+        reason: adjustmentDraft.reason,
+        actorId: profile?.id ?? null,
+      });
+      const { error } = await supabase.from("reward_point_events").insert(payload);
+      if (error) throw error;
+
+      toast.success("Manual points adjustment saved");
+      setAdjustmentDraft({ userId: "", pointsDelta: "", reason: "" });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save points adjustment");
+    } finally {
+      setAdjustingPoints(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -454,6 +558,11 @@ function AdminRewardsPage() {
           )}
           hint="Fulfilled requests"
         />
+        <Metric
+          label="Outstanding points"
+          value={String(outstandingPoints)}
+          hint="Current ledger balance"
+        />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -476,7 +585,7 @@ function AdminRewardsPage() {
                 </div>
                 <CsvExportButton
                   label="Export catalog"
-                  filename={`livey-reward-catalog-${formatCsvDate()}.csv`}
+                  filenameStem="livey-reward-catalog"
                   columns={REWARD_CATALOG_EXPORT_COLUMNS}
                   loadRows={async () =>
                     catalog.map((item) => ({
@@ -494,6 +603,28 @@ function AdminRewardsPage() {
                   }
                   variant="outline"
                 />
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".csv,.xlsx"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importCatalogFile(file);
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => importInputRef.current?.click()}
+                  disabled={importingCatalog}
+                >
+                  {importingCatalog ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  Import catalog
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -700,6 +831,63 @@ function AdminRewardsPage() {
                       <Plus className="mr-2 h-4 w-4" />
                     )}
                     Create reward
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-card p-5">
+                <div className="text-sm font-medium">Manual points adjustment</div>
+                <div className="text-xs text-muted-foreground">
+                  Create a positive credit or negative debit directly in the reward ledger.
+                </div>
+                <div className="mt-4 grid gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="adjustment-user">User</Label>
+                    <select
+                      id="adjustment-user"
+                      value={adjustmentDraft.userId}
+                      onChange={(event) =>
+                        setAdjustmentDraft((current) => ({ ...current, userId: event.target.value }))
+                      }
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">Select a user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.full_name} ({user.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="adjustment-points">Points delta</Label>
+                    <Input
+                      id="adjustment-points"
+                      type="number"
+                      value={adjustmentDraft.pointsDelta}
+                      onChange={(event) =>
+                        setAdjustmentDraft((current) => ({
+                          ...current,
+                          pointsDelta: event.target.value,
+                        }))
+                      }
+                      placeholder="Use positive or negative values"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="adjustment-reason">Reason</Label>
+                    <Textarea
+                      id="adjustment-reason"
+                      value={adjustmentDraft.reason}
+                      onChange={(event) =>
+                        setAdjustmentDraft((current) => ({ ...current, reason: event.target.value }))
+                      }
+                      placeholder="Reason for the manual credit or debit"
+                    />
+                  </div>
+                  <Button onClick={() => void saveAdjustment()} disabled={adjustingPoints}>
+                    {adjustingPoints ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Save adjustment
                   </Button>
                 </div>
               </div>
@@ -910,7 +1098,7 @@ function AdminRewardsPage() {
               </div>
               <CsvExportButton
                 label="Export redemptions"
-                filename={`livey-reward-redemptions-${formatCsvDate()}.csv`}
+                filenameStem="livey-reward-redemptions"
                 columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
                 loadRows={async () =>
                   filteredRedemptions.map((redemption) => {

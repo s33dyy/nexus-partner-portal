@@ -13,6 +13,7 @@ export type Profile = {
   avatar_url: string | null;
   partner_id: string | null;
   partner_status: PartnerStatus;
+  must_reset_password: boolean;
 };
 
 type AuthContextValue = {

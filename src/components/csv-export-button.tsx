@@ -4,10 +4,12 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { buildCsv, downloadCsv, type CsvColumn } from "@/lib/csv-export";
+import { buildExportFilename } from "@/lib/export-files";
 
 type CsvExportButtonProps = {
   label?: string;
-  filename: string;
+  filename?: string;
+  filenameStem?: string;
   columns: CsvColumn[];
   loadRows: () => Promise<Array<Record<string, unknown>>>;
   disabled?: boolean;
@@ -17,18 +19,20 @@ type CsvExportButtonProps = {
 export function CsvExportButton({
   label = "Export CSV",
   filename,
+  filenameStem,
   columns,
   loadRows,
   disabled = false,
   variant = "outline",
 }: CsvExportButtonProps) {
   const [exporting, setExporting] = useState(false);
+  const resolvedFilename = filename ?? buildExportFilename(filenameStem ?? "livey-export", "csv");
 
   const exportCsv = async () => {
     setExporting(true);
     try {
       const rows = await loadRows();
-      downloadCsv(filename, buildCsv(columns, rows));
+      downloadCsv(resolvedFilename, buildCsv(columns, rows));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to export CSV");
     } finally {

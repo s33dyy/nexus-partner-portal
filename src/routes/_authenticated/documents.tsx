@@ -22,7 +22,7 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { applyPartnerScope } from "@/lib/partner-scope";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 
 type Partner = {
   id: string;
@@ -274,7 +274,7 @@ function DocumentsPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-documents-${formatCsvDate()}.csv`}
+            filenameStem="livey-documents"
             columns={DOC_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredDocs.map((doc) => ({

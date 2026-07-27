@@ -29,8 +29,9 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import { calculateOutstandingRewardPoints } from "@/lib/reward-admin";
 import {
   rewardProgress,
   rewardTierForPoints,
@@ -159,6 +160,16 @@ function RewardsPage() {
   const points = useMemo(() => sumRewardPoints(events), [events]);
   const tier = useMemo(() => rewardTierForPoints(points), [points]);
   const progress = useMemo(() => rewardProgress(points), [points]);
+  const isAdminView = hasRole("super_admin");
+  const pendingRedemptions = useMemo(
+    () => redemptions.filter((redemption) => redemption.status === "requested").length,
+    [redemptions],
+  );
+  const approvedRedemptions = useMemo(
+    () => redemptions.filter((redemption) => redemption.status === "approved").length,
+    [redemptions],
+  );
+  const outstandingPoints = useMemo(() => calculateOutstandingRewardPoints(events), [events]);
 
   const categories = useMemo(
     () => ["all", ...new Set(catalog.map((item) => item.category).filter(Boolean))],
@@ -289,7 +300,7 @@ function RewardsPage() {
             </Button>
             <CsvExportButton
               label="Export store CSV"
-              filename={`livey-rewards-catalog-${formatCsvDate()}.csv`}
+              filenameStem="livey-rewards-catalog"
               columns={REWARD_CATALOG_EXPORT_COLUMNS}
               loadRows={async () =>
                 filteredCatalog.map((item) => ({
@@ -308,14 +319,25 @@ function RewardsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Reward points" value={String(points)} hint={`${tier} tier`} />
-        <Metric
-          label="Next tier"
-          value={progress.nextTier ?? "Max"}
-          hint={progress.pointsToNext > 0 ? `${progress.pointsToNext} points to go` : "Top tier"}
-        />
-        <Metric label="Rewards" value={String(catalog.length)} hint="Catalog items" />
-        <Metric label="Requests" value={String(redemptions.length)} hint="Redemption history" />
+        {isAdminView ? (
+          <>
+            <Metric label="Catalog items" value={String(catalog.length)} hint="Published rewards" />
+            <Metric label="Pending redemptions" value={String(pendingRedemptions)} hint="Awaiting approval" />
+            <Metric label="Approved redemptions" value={String(approvedRedemptions)} hint="Completed requests" />
+            <Metric label="Outstanding points" value={String(outstandingPoints)} hint="Current ledger balance" />
+          </>
+        ) : (
+          <>
+            <Metric label="Reward points" value={String(points)} hint={`${tier} tier`} />
+            <Metric
+              label="Next tier"
+              value={progress.nextTier ?? "Max"}
+              hint={progress.pointsToNext > 0 ? `${progress.pointsToNext} points to go` : "Top tier"}
+            />
+            <Metric label="Rewards" value={String(catalog.length)} hint="Catalog items" />
+            <Metric label="Requests" value={String(redemptions.length)} hint="Redemption history" />
+          </>
+        )}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -386,72 +408,112 @@ function RewardsPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Your standing</CardTitle>
-              <CardDescription>Points earned from deal wins and approved activity.</CardDescription>
+              <CardTitle className="text-base">
+                {isAdminView ? "Store overview" : "Your standing"}
+              </CardTitle>
+              <CardDescription>
+                {isAdminView
+                  ? "Live catalog and redemption metrics for the full rewards program."
+                  : "Points earned from deal wins and approved activity."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-background p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                      Current tier
+              {isAdminView ? (
+                <>
+                  <div className="rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-background p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                          Outstanding points
+                        </div>
+                        <div className="mt-1 text-2xl font-semibold tracking-tight">
+                          {outstandingPoints}
+                        </div>
+                      </div>
+                      <Trophy className="h-7 w-7 text-primary" />
                     </div>
-                    <div className="mt-1 text-2xl font-semibold tracking-tight">{tier}</div>
+                    <div className="mt-4 text-sm text-muted-foreground">
+                      Pending: {pendingRedemptions} · Approved: {approvedRedemptions}
+                    </div>
                   </div>
-                  <Trophy className="h-7 w-7 text-primary" />
-                </div>
-                <div className="mt-4 text-4xl font-semibold tracking-tight">{points}</div>
-                <div className="mt-1 text-sm text-muted-foreground">Available reward points</div>
-              </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Catalog coverage</span>
+                      <span className="font-medium">{catalog.length} items</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Ledger entries</span>
+                      <span className="font-medium">{events.length}</span>
+                    </div>
+                  </div>
+                  <Button asChild className="w-full">
+                    <Link to="/admin/rewards">
+                      Manage rewards catalog
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-background p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                          Current tier
+                        </div>
+                        <div className="mt-1 text-2xl font-semibold tracking-tight">{tier}</div>
+                      </div>
+                      <Trophy className="h-7 w-7 text-primary" />
+                    </div>
+                    <div className="mt-4 text-4xl font-semibold tracking-tight">{points}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">Available reward points</div>
+                  </div>
 
-              <div>
-                <div className="flex items-center justify-between text-xs uppercase tracking-widest text-muted-foreground">
-                  <span>Tier progress</span>
-                  <span>{progress.progress}%</span>
-                </div>
-                <div className="mt-2 h-2 rounded-full bg-muted">
-                  <div
-                    className="h-2 rounded-full bg-primary transition-all"
-                    style={{ width: `${progress.progress}%` }}
-                  />
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {progress.nextTier
-                    ? `${progress.pointsToNext} points to ${progress.nextTier}`
-                    : "You are at the top tier."}
-                </div>
-              </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs uppercase tracking-widest text-muted-foreground">
+                      <span>Tier progress</span>
+                      <span>{progress.progress}%</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded-full bg-muted">
+                      <div
+                        className="h-2 rounded-full bg-primary transition-all"
+                        style={{ width: `${progress.progress}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {progress.nextTier
+                        ? `${progress.pointsToNext} points to ${progress.nextTier}`
+                        : "You are at the top tier."}
+                    </div>
+                  </div>
 
-              <Separator />
+                  <Separator />
 
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Deal win bonus</span>
-                  <span className="font-medium">500 points</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Redemption requests</span>
-                  <span className="font-medium">
-                    {redemptions.filter((redemption) => redemption.status === "requested").length}
-                  </span>
-                </div>
-              </div>
-
-              {hasRole("super_admin") && (
-                <Button asChild className="w-full">
-                  <Link to="/admin/rewards">
-                    Manage rewards catalog
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Deal win bonus</span>
+                      <span className="font-medium">500 points</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Redemption requests</span>
+                      <span className="font-medium">{pendingRedemptions}</span>
+                    </div>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Recent activity</CardTitle>
-              <CardDescription>Latest points and redemption events.</CardDescription>
+              <CardTitle className="text-base">
+                {isAdminView ? "Recent store activity" : "Recent activity"}
+              </CardTitle>
+              <CardDescription>
+                {isAdminView
+                  ? "Latest points ledger entries across the rewards program."
+                  : "Latest points and redemption events."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {recentEvents.length === 0 ? (
@@ -484,12 +546,18 @@ function RewardsPage() {
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <CardTitle className="text-base">My redemptions</CardTitle>
-                  <CardDescription>Track the rewards you have requested.</CardDescription>
+                  <CardTitle className="text-base">
+                    {isAdminView ? "Redemption queue" : "My redemptions"}
+                  </CardTitle>
+                  <CardDescription>
+                    {isAdminView
+                      ? "Track requests that need review or have already been approved."
+                      : "Track the rewards you have requested."}
+                  </CardDescription>
                 </div>
                 <CsvExportButton
                   label="Export redemptions"
-                  filename={`livey-rewards-redemptions-${formatCsvDate()}.csv`}
+                  filenameStem="livey-rewards-redemptions"
                   columns={REWARD_REDEMPTION_EXPORT_COLUMNS}
                   loadRows={async () =>
                     redemptions.map((redemption) => ({

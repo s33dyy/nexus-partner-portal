@@ -18,6 +18,13 @@ import {
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -35,7 +42,7 @@ import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
 export const Route = createFileRoute("/_authenticated/admin/partners")({
@@ -171,6 +178,10 @@ function AdminPartners() {
   const [agreementRequestStatus, setAgreementRequestStatus] = useState<string | null>(null);
   const [agreementDraftFile, setAgreementDraftFile] = useState<File | null>(null);
   const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
+  const [credentialPreview, setCredentialPreview] = useState<{
+    email: string;
+    temporaryPassword: string;
+  } | null>(null);
   const agreementFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -259,6 +270,18 @@ function AdminPartners() {
       .createSignedUrl(doc.file_path, 60);
     if (error || !data) return toast.error(error?.message ?? "Failed to open");
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const downloadDoc = async (doc: Doc) => {
+    const { data, error } = await supabase.storage
+      .from("partner-documents")
+      .createSignedUrl(doc.file_path, 60);
+    if (error || !data) return toast.error(error?.message ?? "Failed to download");
+
+    const link = document.createElement("a");
+    link.href = data.signedUrl;
+    link.download = doc.file_name;
+    link.click();
   };
 
   const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info" | "partial_approval") => {
@@ -423,15 +446,72 @@ function AdminPartners() {
     if (!selected) return;
     setActing(true);
     try {
+      const now = new Date().toISOString();
       const { error } = await supabase
         .from("partners")
-        .update({ status: "approved", agreement_signed_at: new Date().toISOString() })
+        .update({
+          status: "approved",
+          tier: tierForTurnover(selected.annual_turnover),
+          agreement_signed_at: selected.agreement_signed_at ?? now,
+        })
         .eq("id", selected.id);
       if (error) throw error;
       await supabase
         .from("profiles")
         .update({ partner_status: "approved" })
         .eq("id", selected.owner_user_id);
+
+      const tempPasswordResult = await supabase.auth.issueTemporaryPassword(selected.owner_user_id);
+      if (tempPasswordResult.error || !tempPasswordResult.data) {
+        throw new Error(tempPasswordResult.error?.message ?? "Failed to issue a temporary password");
+      }
+
+      if (noteDraft.trim()) {
+        await supabase.from("partner_review_notes").insert({
+          partner_id: selected.id,
+          author_id: (await supabase.auth.getUser()).data.user?.id ?? selected.owner_user_id,
+          note: noteDraft.trim(),
+          status_change: "approved",
+        });
+      }
+
+      await recordNotification(supabase, {
+        partnerId: selected.id,
+        title: "Partner approved",
+        message:
+          "Your partner application was approved. Use the temporary password from the LIVEY admin confirmation to sign in and reset it immediately.",
+        type: "status_change",
+      });
+      await recordAuditEvent(supabase, {
+        actorName: (await supabase.auth.getUser()).data.user?.email ?? "Super Admin",
+        actorRole: "super_admin",
+        action: "partner_approved",
+        targetType: "partner",
+        targetName: selected.company_name,
+        outcome: "approved",
+        details: "Partner approved after signed agreement review and temporary credentials issued",
+        severity: "medium",
+      });
+      await supabase.from("portal_news_posts").insert({
+        id: globalThis.crypto.randomUUID(),
+        title: `Partner ${selected.company_name} is now approved`,
+        caption:
+          noteDraft.trim() ||
+          `The partner application for ${selected.company_name} completed approval after signed agreement review.`,
+        image_path: "",
+        image_alt: "",
+        posted_by_name: "Super Admin",
+        posted_by_role: "System",
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      });
+
+      setCredentialPreview({
+        email: ownerEmail ?? "Email unavailable",
+        temporaryPassword: tempPasswordResult.data.temporaryPassword,
+      });
+      setNoteDraft("");
       toast.success("Partner approved after signed agreement review");
       setSelected(null);
       await load();
@@ -478,7 +558,7 @@ function AdminPartners() {
         <div className="flex shrink-0 items-center gap-2">
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-partner-applications-${formatCsvDate()}.csv`}
+            filenameStem="livey-partner-applications"
             columns={PARTNER_EXPORT_COLUMNS}
             loadRows={async () =>
               filtered.map((partner) => ({
@@ -660,9 +740,14 @@ function AdminPartners() {
                               </div>
                             </div>
                           </div>
-                          <Button variant="ghost" size="sm" onClick={() => void openDoc(d)}>
-                            <ExternalLink className="mr-1 h-3.5 w-3.5" /> Open
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => void openDoc(d)}>
+                              <ExternalLink className="mr-1 h-3.5 w-3.5" /> Open
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => void downloadDoc(d)}>
+                              <Upload className="mr-1 h-3.5 w-3.5 rotate-180" /> Download
+                            </Button>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -739,7 +824,7 @@ function AdminPartners() {
                     <XCircle className="mr-1 h-4 w-4" /> Reject
                   </Button>
                   <Button
-                    onClick={() => void decide("approved")}
+                    onClick={() => void approveSignedAgreement()}
                     disabled={acting || selected.status !== "signed_pending_review"}
                   >
                     {acting ? (
@@ -920,6 +1005,35 @@ function AdminPartners() {
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!credentialPreview} onOpenChange={(open) => !open && setCredentialPreview(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>One-time partner credentials</DialogTitle>
+            <DialogDescription>
+              These credentials are shown only once. Share them securely with the approved partner
+              owner and ask them to reset the password on first sign-in.
+            </DialogDescription>
+          </DialogHeader>
+          {credentialPreview ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Email</div>
+                <div className="mt-1 font-medium">{credentialPreview.email}</div>
+              </div>
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                  Temporary password
+                </div>
+                <div className="mt-1 font-medium">{credentialPreview.temporaryPassword}</div>
+              </div>
+              <Button className="w-full" onClick={() => setCredentialPreview(null)}>
+                Close
+              </Button>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

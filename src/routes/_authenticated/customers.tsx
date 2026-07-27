@@ -21,9 +21,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { toDateInputValue } from "@/lib/date-utils";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
-import { type CustomerRecord } from "@/lib/portal-records";
+import { formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
+import { type CsvColumn } from "@/lib/csv-export";
+import { type CustomerActivityRecord, type CustomerRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 
@@ -93,13 +93,16 @@ function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
+  const [activities, setActivities] = useState<CustomerActivityRecord[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
+  const [activityDraft, setActivityDraft] = useState("");
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingActivity, setSavingActivity] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -108,24 +111,40 @@ function CustomersPage() {
         .from("portal_customers")
         .select("*")
         .order("updated_at", { ascending: false });
+      let activityQuery = supabase
+        .from("portal_customer_activities")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       query = applyPartnerScope(query, {
         isSuperAdmin: hasRole("super_admin"),
         partnerId: profile?.partner_id ?? null,
         userId: profile?.id ?? null,
       });
+      activityQuery = applyPartnerScope(activityQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+        fallbackColumn: "actor_id",
+      });
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const [{ data, error }, { data: activityData, error: activityError }] = await Promise.all([
+        query,
+        activityQuery,
+      ]);
+      if (error || activityError) throw error ?? activityError;
       const rows = ((data as CustomerRecord[] | null) ?? []).map((customer) => ({
         ...customer,
         renewal_date: toDateInputValue(customer.renewal_date),
       }));
+      const activityRows = (activityData as CustomerActivityRecord[] | null) ?? [];
       setCustomers(rows);
+      setActivities(activityRows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
       setCustomers([]);
+      setActivities([]);
       setSource("empty");
       setSelectedId(null);
     } finally {
@@ -161,6 +180,10 @@ function CustomersPage() {
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === selectedId) ?? null,
     [customers, selectedId],
+  );
+  const selectedActivities = useMemo(
+    () => activities.filter((activity) => activity.customer_id === selectedId),
+    [activities, selectedId],
   );
 
   const editOptions = useMemo(() => {
@@ -245,6 +268,7 @@ function CustomersPage() {
 
   useEffect(() => {
     if (!selectedCustomer) return;
+    setActivityDraft("");
     setDraft({
       company_name: selectedCustomer.company_name,
       account_owner: selectedCustomer.account_owner,
@@ -258,6 +282,48 @@ function CustomersPage() {
       last_touch: selectedCustomer.last_touch,
     });
   }, [selectedCustomer]);
+
+  const saveActivity = async () => {
+    if (!selectedCustomer) return;
+    if (!activityDraft.trim()) {
+      toast.error("Add an activity note before saving");
+      return;
+    }
+
+    setSavingActivity(true);
+    try {
+      const now = new Date().toISOString();
+      const { error: activityError } = await supabase.from("portal_customer_activities").insert({
+        id: globalThis.crypto.randomUUID(),
+        customer_id: selectedCustomer.id,
+        partner_id: selectedCustomer.partner_id,
+        actor_id: profile?.id ?? null,
+        actor_name: profile?.full_name ?? "LIVEY User",
+        summary: activityDraft.trim(),
+        next_step: draft.next_step.trim() || null,
+        created_at: now,
+      });
+      if (activityError) throw activityError;
+
+      const { error: customerError } = await supabase
+        .from("portal_customers")
+        .update({
+          next_step: draft.next_step,
+          last_touch: draft.last_touch || "Today",
+          updated_at: now,
+        })
+        .eq("id", selectedCustomer.id);
+      if (customerError) throw customerError;
+
+      toast.success("Activity saved");
+      setActivityDraft("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save activity");
+    } finally {
+      setSavingActivity(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -293,7 +359,7 @@ function CustomersPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-customers-${formatCsvDate()}.csv`}
+            filenameStem="livey-customers"
             columns={CUSTOMER_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredCustomers.map((customer) => ({
@@ -650,6 +716,39 @@ function CustomersPage() {
                   options={LAST_TOUCH_OPTIONS as unknown as string[]}
                 />
               </Field>
+              <Field label="Activity note">
+                <Textarea
+                  value={activityDraft}
+                  onChange={(e) => setActivityDraft(e.target.value)}
+                  placeholder="Met the customer, advanced the opportunity, raised a risk, etc."
+                />
+              </Field>
+              <div className="rounded-lg border bg-muted/20 p-4">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                  Activity timeline
+                </div>
+                <div className="mt-3 space-y-3">
+                  {selectedActivities.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">
+                      No activity entries yet. Use Save Activity to append the first timeline item.
+                    </div>
+                  ) : (
+                    selectedActivities.map((activity) => (
+                      <div key={activity.id} className="rounded-lg border bg-background p-3">
+                        <div className="text-sm font-medium">{activity.summary}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {activity.actor_name} · {formatDateTimeLabel(activity.created_at)}
+                        </div>
+                        {activity.next_step ? (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Next step: {activity.next_step}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"
@@ -672,9 +771,18 @@ function CustomersPage() {
                 >
                   Reset form
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void saveActivity()}
+                  disabled={savingActivity}
+                >
+                  {savingActivity ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save activity
+                </Button>
                 <Button type="button" onClick={() => void saveCustomer()} disabled={saving}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Save changes
+                  Save customer
                 </Button>
               </div>
             </>

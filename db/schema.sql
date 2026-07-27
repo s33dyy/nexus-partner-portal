@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   avatar_url TEXT,
   partner_id UUID,
   partner_status partner_status NOT NULL DEFAULT 'pending_partner_registration',
+  must_reset_password BOOLEAN NOT NULL DEFAULT FALSE,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -217,6 +218,17 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS portal_customer_activities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES portal_customers(id) ON DELETE CASCADE,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  actor_name TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  next_step TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS portal_catalog_items (
@@ -409,6 +421,12 @@ BEFORE UPDATE ON sessions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS support_tickets_updated_at ON support_tickets;
+CREATE TRIGGER support_tickets_updated_at
+BEFORE UPDATE ON support_tickets
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL;
@@ -464,3 +482,31 @@ CREATE TABLE IF NOT EXISTS notifications (
   read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_by_name TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  description TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  priority TEXT NOT NULL DEFAULT 'medium',
+  assignee_name TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS support_ticket_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id UUID NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+  author_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  author_role TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN NOT NULL DEFAULT FALSE;

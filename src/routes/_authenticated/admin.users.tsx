@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { cn } from "@/lib/utils";
 import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
@@ -291,7 +291,7 @@ function AdminUsersPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-users-${formatCsvDate()}.csv`}
+            filenameStem="livey-users"
             columns={USER_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredUsers.map((user) => ({

@@ -1,17 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Database, FolderOpen, Layers3, ShieldCheck } from "lucide-react";
+import { Database, FolderOpen, KeyRound, Layers3, ShieldCheck } from "lucide-react";
 
 import { SettingsExportCard } from "@/components/settings-export-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { getRouteApi } from "@tanstack/react-router";
 import { listVisibleExportDatasets, type ExportDatasetDescriptor, type ExportScope } from "@/lib/export-registry";
+import { supabase } from "@/integrations/local/client";
+import { validatePasswordChange } from "@/lib/password-policy";
 
 const routeApi = getRouteApi("/_authenticated/settings");
 
@@ -45,7 +49,7 @@ const SECTION_META: Record<
 };
 
 function SettingsPage() {
-  const { hasRole, profile } = useAuth();
+  const { hasRole, profile, refresh } = useAuth();
   const role = hasRole("super_admin")
     ? "super_admin"
     : hasRole("partner_admin")
@@ -73,7 +77,16 @@ function SettingsPage() {
     [role],
   );
 
-  const searchParams = routeApi.useSearch() as { zohoSignConnected?: string; zohoSignError?: string };
+  const searchParams = routeApi.useSearch() as {
+    zohoSignConnected?: string;
+    zohoSignError?: string;
+    passwordReset?: string;
+  };
+  const [passwordDraft, setPasswordDraft] = useState({
+    password: "",
+    confirmPassword: "",
+  });
+  const [updatingPassword, setUpdatingPassword] = useState(false);
 
   useEffect(() => {
     if (searchParams.zohoSignConnected === "1") {
@@ -106,6 +119,36 @@ function SettingsPage() {
 
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [countsLoading, setCountsLoading] = useState(true);
+
+  const submitPasswordChange = async () => {
+    const result = validatePasswordChange(passwordDraft);
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+
+    setUpdatingPassword(true);
+    try {
+      const response = await supabase.auth.updateUser({ password: passwordDraft.password });
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      await refresh();
+      setPasswordDraft({ password: "", confirmPassword: "" });
+      toast.success(
+        profile?.must_reset_password
+          ? "Password updated. Your account is ready to use."
+          : "Password updated successfully.",
+      );
+      if (searchParams.passwordReset === "1") {
+        window.history.replaceState(null, "", "/settings");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update password");
+    } finally {
+      setUpdatingPassword(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -195,6 +238,74 @@ function SettingsPage() {
             title="Source links"
             description="When a dataset has a source page, the card links straight back to it."
           />
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 shadow-sm">
+        <CardHeader className="border-b">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Security</CardTitle>
+          </div>
+          <CardDescription>
+            Change your current password from inside the portal. Temporary passwords issued during
+            partner approval must be replaced here before normal access continues.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 py-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="settings-password">New password</Label>
+                <Input
+                  id="settings-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordDraft.password}
+                  onChange={(event) =>
+                    setPasswordDraft((current) => ({ ...current, password: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="settings-password-confirm">Confirm password</Label>
+                <Input
+                  id="settings-password-confirm"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordDraft.confirmPassword}
+                  onChange={(event) =>
+                    setPasswordDraft((current) => ({
+                      ...current,
+                      confirmPassword: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => void submitPasswordChange()} disabled={updatingPassword}>
+                {updatingPassword ? "Updating password..." : "Update password"}
+              </Button>
+              <Badge variant={profile?.must_reset_password ? "destructive" : "secondary"}>
+                {profile?.must_reset_password ? "Reset required" : "Password active"}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+            <div className="font-medium text-foreground">Password rules</div>
+            <div className="mt-2">
+              Use 8 or more characters with at least one uppercase letter, one lowercase letter,
+              one number, and one symbol.
+            </div>
+            {profile?.must_reset_password || searchParams.passwordReset === "1" ? (
+              <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-foreground">
+                Your current sign-in uses a temporary password. Update it here before continuing to
+                the rest of the portal.
+              </div>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -243,7 +243,7 @@ function PartnerTeamPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-team-members-${formatCsvDate()}.csv`}
+            filenameStem="livey-team-members"
             columns={TEAM_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredMembers.map((member) => ({

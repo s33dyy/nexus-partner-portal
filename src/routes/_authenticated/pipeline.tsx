@@ -31,7 +31,7 @@ import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import { normalizeDealCollaborators, type DealCollaboratorDraft } from "@/lib/deal-collaboration";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -363,7 +363,7 @@ function PipelinePage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-pipeline-${formatCsvDate()}.csv`}
+            filenameStem="livey-pipeline"
             columns={PIPELINE_EXPORT_COLUMNS}
             loadRows={async () =>
               visibleDeals.map((deal) => ({

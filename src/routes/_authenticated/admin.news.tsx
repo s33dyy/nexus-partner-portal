@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { formatDateLabel } from "@/lib/date-utils";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { hasNewsImage, type NewsPostRecord } from "@/lib/portal-news-data";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -272,7 +272,7 @@ function AdminNewsPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-news-${formatCsvDate()}.csv`}
+            filenameStem="livey-news"
             columns={NEWS_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredPosts.map((post) => ({

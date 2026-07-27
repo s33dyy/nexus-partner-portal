@@ -115,6 +115,13 @@ const updatePassword = createServerFn({ method: "POST" })
     return updatePasswordFromSession(data.password);
   });
 
+const issueTemporaryPassword = createServerFn({ method: "POST" })
+  .validator((input: { userId: string }) => input)
+  .handler(async ({ data }) => {
+    const { issueTemporaryPasswordForUser } = await import("@/server/livey-service.server");
+    return issueTemporaryPasswordForUser(data.userId);
+  });
+
 const completeReset = createServerFn({ method: "POST" })
   .validator((input: { token: string; password: string }) => input)
   .handler(async ({ data }) => {
@@ -377,6 +384,7 @@ type AuthApi = {
     role: AppRole;
     partner_status?: PartnerStatus;
     partner_id?: string;
+    must_reset_password?: boolean;
   }) => Promise<
     RpcResult<{
       id: string;
@@ -388,6 +396,7 @@ type AuthApi = {
       partner_status: PartnerStatus;
     }>
   >;
+  issueTemporaryPassword: (userId: string) => Promise<RpcResult<{ temporaryPassword: string }>>;
 };
 
 const auth: AuthApi = {
@@ -474,6 +483,17 @@ const auth: AuthApi = {
   async createWorkspaceUser(input) {
     try {
       const data = await createUser({ data: input });
+      return { data, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  },
+  async issueTemporaryPassword(userId) {
+    try {
+      const data = await issueTemporaryPassword({ data: { userId } });
       return { data, error: null };
     } catch (error) {
       return {

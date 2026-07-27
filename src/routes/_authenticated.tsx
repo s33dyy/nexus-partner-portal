@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { UnderReviewPage } from "@/components/under-review-page";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { getAuthenticatedRedirect } from "@/lib/auth-routing";
 import { Skeleton } from "@/components/ui/skeleton";
 import { hasPartialAccess } from "@/lib/partner-status";
 
@@ -24,7 +25,7 @@ function AuthenticatedLayout() {
 }
 
 function Gate({ children }: { children: React.ReactNode }) {
-  const { loading, session, profile, hasRole } = useAuth();
+  const { loading, session, profile, hasRole, roles } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const status = profile?.partner_status ?? "pending_partner_registration";
@@ -42,22 +43,34 @@ function Gate({ children }: { children: React.ReactNode }) {
       status === "need_more_info");
 
   useEffect(() => {
-    if (!loading && !session) {
-      navigate({ to: "/auth", replace: true });
-    }
     if (!loading && session && profile && isUnderReview) {
       return;
     }
-    if (
-      !loading &&
-      session &&
-      profile &&
-      needsOnboarding &&
-      location.pathname !== "/partner/onboarding"
-    ) {
+
+    const redirect = getAuthenticatedRedirect({
+      hasSession: Boolean(session),
+      pathname: location.pathname,
+      roles,
+      profile: profile
+        ? {
+            partner_status: profile.partner_status,
+            must_reset_password: profile.must_reset_password,
+          }
+        : null,
+    });
+
+    if (!loading && redirect === "/auth") {
+      navigate({ to: "/auth", replace: true });
+    }
+
+    if (!loading && redirect === "/partner/onboarding") {
       navigate({ to: "/partner/onboarding", replace: true });
     }
-  }, [isUnderReview, loading, session, profile, needsOnboarding, location.pathname, navigate]);
+
+    if (!loading && redirect === "/settings?passwordReset=1") {
+      navigate({ to: "/settings", search: { passwordReset: "1" }, replace: true });
+    }
+  }, [isUnderReview, loading, location.pathname, navigate, profile, roles, session]);
 
   if (loading || !session || !profile) {
     return (

@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
-import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { type CsvColumn } from "@/lib/csv-export";
 import { type AuditEventRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -123,7 +123,7 @@ function AdminAuditPage() {
           </Button>
           <CsvExportButton
             label="Export CSV"
-            filename={`livey-audit-events-${formatCsvDate()}.csv`}
+            filenameStem="livey-audit-events"
             columns={AUDIT_EXPORT_COLUMNS}
             loadRows={async () =>
               filteredEvents.map((event) => ({

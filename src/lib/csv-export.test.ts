@@ -39,3 +39,13 @@ test("normalizeCsvValue safely falls back for circular objects", () => {
 
   expect(normalizeCsvValue(circular)).toBe("[object Object]");
 });
+
+test("buildCsv prefixes a UTF-8 BOM for Excel-safe downloads", () => {
+  const csv = buildCsv(
+    [{ key: "created_at", header: "Created At" }],
+    [{ created_at: new Date("2026-07-27T12:34:56.000Z") }],
+  );
+
+  expect(csv.charCodeAt(0)).toBe(0xfeff);
+  expect(csv).toContain('"2026-07-27T12:34:56.000Z"');
+});
