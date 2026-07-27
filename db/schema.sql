@@ -427,12 +427,6 @@ BEFORE UPDATE ON sessions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS support_tickets_updated_at ON support_tickets;
-CREATE TRIGGER support_tickets_updated_at
-BEFORE UPDATE ON support_tickets
-FOR EACH ROW
-EXECUTE FUNCTION set_updated_at();
-
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL;
@@ -520,5 +514,11 @@ CREATE TABLE IF NOT EXISTS support_ticket_comments (
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+DROP TRIGGER IF EXISTS support_tickets_updated_at ON support_tickets;
+CREATE TRIGGER support_tickets_updated_at
+BEFORE UPDATE ON support_tickets
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN NOT NULL DEFAULT FALSE;
