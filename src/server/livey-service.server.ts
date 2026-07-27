@@ -4,6 +4,7 @@ import { inflateRawSync } from "node:zlib";
 
 import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
+import type { PoolClient } from "pg";
 
 import { pool } from "@/server/postgres.server";
 import type { PartnerStatus } from "@/lib/partner-status";
@@ -30,6 +31,18 @@ export type LocalSession = {
   access_token: string;
   expires_at: number;
   user: LocalUser;
+};
+
+type WorkspaceUserInput = {
+  full_name: string;
+  email: string;
+  phone: string;
+  company_name: string | null;
+  password: string;
+  role: AppRole;
+  partner_status?: PartnerStatus;
+  partner_id?: string;
+  must_reset_password?: boolean;
 };
 
 type QueryFilter = {
@@ -133,6 +146,12 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "status",
     "quantity",
     "amount",
+    "currency_code",
+    "amount_value",
+    "amount_inr",
+    "fx_rate",
+    "fx_provider",
+    "fx_rate_fetched_at",
     "customer_budget",
     "probability",
     "possible_close_date",
@@ -749,10 +768,24 @@ export async function getAuthContext(token?: string) {
   ]);
 
   const profile = profileRows[0]
-    ? {
+    ? ({
         ...(profileRows[0] as Record<string, unknown>),
+        id: String(profileRows[0].id),
+        partner_id:
+          profileRows[0].partner_id == null ? null : String(profileRows[0].partner_id),
         partner_status: profileRows[0].partner_status as PartnerStatus,
-      }
+      } as {
+        id: string;
+        email: string;
+        password_hash: string;
+        full_name: string;
+        phone: string | null;
+        company_name: string | null;
+        avatar_url: string | null;
+        partner_id: string | null;
+        partner_status: PartnerStatus;
+        must_reset_password: boolean;
+      })
     : null;
 
   const roles = roleRows.map((row: { role: AppRole }) => row.role);
@@ -885,49 +918,165 @@ export async function createWorkspaceUser(input: {
     throw new Error("Unauthorized");
   }
 
-  const existing = await pool.query(`SELECT id FROM profiles WHERE lower(email) = lower($1)`, [
-    input.email,
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const createdUser = await insertWorkspaceUserRecord(client, ctx, input);
+    await client.query("COMMIT");
+    return createdUser;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function insertWorkspaceUserRecord(
+  client: PoolClient,
+  ctx: Awaited<ReturnType<typeof getAuthContext>>,
+  input: WorkspaceUserInput,
+) {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const existing = await client.query(`SELECT id FROM profiles WHERE lower(email) = lower($1)`, [
+    normalizedEmail,
   ]);
   if (existing.rows.length > 0) {
-    throw new Error("An account with that email already exists");
+    throw new Error(`An account with email ${normalizedEmail} already exists`);
   }
 
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(input.password, 10);
-  await pool.query(
+  const partnerStatus =
+    input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration");
+  const partnerId =
+    input.partner_id || (ctx.profile as { partner_id?: string | null } | null)?.partner_id || null;
+
+  await client.query(
     `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, must_reset_password, is_seed)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)`,
     [
       id,
-      input.email,
+      normalizedEmail,
       passwordHash,
-      input.full_name,
-      input.phone || null,
-      input.company_name,
-      input.partner_status ??
-        (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
-      input.partner_id ||
-        (ctx.profile as { partner_id?: string | null } | null)?.partner_id ||
-        null,
+      input.full_name.trim(),
+      input.phone.trim() || null,
+      input.company_name?.trim() || null,
+      partnerStatus,
+      partnerId,
       input.must_reset_password ?? false,
     ],
   );
-  await pool.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [
+  await client.query(`INSERT INTO user_roles (user_id, role, is_seed) VALUES ($1, $2, false)`, [
     id,
     input.role,
   ]);
 
   return {
     id,
-    email: input.email,
-    full_name: input.full_name,
-    phone: input.phone || null,
-    company_name: input.company_name,
+    email: normalizedEmail,
+    full_name: input.full_name.trim(),
+    phone: input.phone.trim() || null,
+    company_name: input.company_name?.trim() || null,
     role: input.role,
-    partner_status:
-      input.partner_status ??
-      (input.role === "super_admin" ? "approved" : "pending_partner_registration"),
+    partner_status: partnerStatus,
   };
+}
+
+export async function createWorkspaceUsersBulk(input: { rows: WorkspaceUserInput[] }) {
+  const ctx = await getAuthContext();
+  if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
+    throw new Error("Unauthorized");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const createdUsers = [];
+    for (const row of input.rows) {
+      createdUsers.push(await insertWorkspaceUserRecord(client, ctx, row));
+    }
+    await client.query("COMMIT");
+    return { createdCount: createdUsers.length, users: createdUsers };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function createPartnerTeamMembersBulk(input: {
+  company_name: string;
+  rows: Array<{
+    full_name: string;
+    email: string;
+    phone: string;
+    password: string;
+    role_title: string;
+    portal_role: "partner_admin" | "partner_user";
+    responsibility: string;
+    status: "invited" | "active" | "paused";
+  }>;
+}) {
+  const ctx = await getAuthContext();
+  if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
+    throw new Error("Unauthorized");
+  }
+
+  const companyName = input.company_name.trim();
+  if (!companyName) {
+    throw new Error("Company name is required for team imports");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const createdAt = new Date().toISOString();
+
+    for (const row of input.rows) {
+      const createdUser = await insertWorkspaceUserRecord(client, ctx, {
+        full_name: row.full_name,
+        email: row.email,
+        phone: row.phone,
+        company_name: companyName,
+        password: row.password,
+        role: row.portal_role,
+        partner_status: "approved",
+      });
+      await client.query(
+        `INSERT INTO portal_team_members (
+           id, company_name, full_name, email, role_title, portal_role, responsibility,
+           status, last_active, phone, permissions, is_seed, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $13)`,
+        [
+          createdUser.id,
+          companyName,
+          row.full_name.trim(),
+          row.email.trim().toLowerCase(),
+          row.role_title.trim(),
+          row.portal_role,
+          row.responsibility.trim(),
+          row.portal_role === "partner_user" ? "active" : row.status,
+          "Just added",
+          row.phone.trim(),
+          row.portal_role === "partner_admin"
+            ? ["deals", "documents", "team"]
+            : ["dashboard", "deals", "pipeline", "customers", "analytics", "documents", "rewards"],
+          createdAt,
+          createdAt,
+        ],
+      );
+    }
+
+    await client.query("COMMIT");
+    return { createdCount: input.rows.length };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function signOutLocal() {

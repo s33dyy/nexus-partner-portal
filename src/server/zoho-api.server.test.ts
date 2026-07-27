@@ -400,7 +400,7 @@ test("Zoho sign-url endpoint returns a fresh embedded signing URL for the curren
           String(entry.sql).includes("WHERE id = $1"),
       ),
     ).toBe(true);
-    expect(embedTokenHost).toBe("https://systemforgelabs.xyz");
+    expect(String(embedTokenHost)).toBe("https://systemforgelabs.xyz");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;
@@ -543,7 +543,7 @@ test("Zoho sign-url endpoint falls back to the authenticated user as partner own
     expect(response.status).toBe(200);
     const data = (await response.json()) as { signUrl?: string };
     expect(data.signUrl).toBe("https://sign.zoho.in/sign/req-123/fresh");
-    expect(embedTokenHost).toBe("https://systemforgelabs.xyz");
+    expect(String(embedTokenHost)).toBe("https://systemforgelabs.xyz");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;
@@ -684,7 +684,7 @@ test("Zoho sign-url endpoint prefers the browser origin for embedded signing", a
     expect(response.status).toBe(200);
     const data = (await response.json()) as { signUrl?: string };
     expect(data.signUrl).toBe("https://sign.zoho.in/sign/req-123/fresh");
-    expect(embedTokenHost).toBe("https://partner.systemforgelabs.xyz");
+    expect(String(embedTokenHost)).toBe("https://partner.systemforgelabs.xyz");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;

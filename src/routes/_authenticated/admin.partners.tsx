@@ -286,8 +286,13 @@ function AdminPartners() {
 
   const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info" | "partial_approval") => {
     if (!selected) return;
-    if (decision === "approved" && selected.status !== "signed_pending_review" && selected.status !== "approved") {
-      toast.error("Approve only after the signed agreement is under review.");
+    if (
+      decision === "approved" &&
+      !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
+        selected.status,
+      )
+    ) {
+      toast.error("Grant final approval after partial access or agreement preparation begins.");
       return;
     }
     setActing(true);
@@ -489,7 +494,7 @@ function AdminPartners() {
         targetType: "partner",
         targetName: selected.company_name,
         outcome: "approved",
-        details: "Partner approved after signed agreement review and temporary credentials issued",
+        details: "Partner approved and temporary credentials issued",
         severity: "medium",
       });
       await supabase.from("portal_news_posts").insert({
@@ -497,7 +502,7 @@ function AdminPartners() {
         title: `Partner ${selected.company_name} is now approved`,
         caption:
           noteDraft.trim() ||
-          `The partner application for ${selected.company_name} completed approval after signed agreement review.`,
+          `The partner application for ${selected.company_name} completed approval and temporary credentials were issued.`,
         image_path: "",
         image_alt: "",
         posted_by_name: "Super Admin",
@@ -512,7 +517,7 @@ function AdminPartners() {
         temporaryPassword: tempPasswordResult.data.temporaryPassword,
       });
       setNoteDraft("");
-      toast.success("Partner approved after signed agreement review");
+      toast.success("Partner approved and temporary credentials issued");
       setSelected(null);
       await load();
     } catch (e: unknown) {
@@ -825,14 +830,19 @@ function AdminPartners() {
                   </Button>
                   <Button
                     onClick={() => void approveSignedAgreement()}
-                    disabled={acting || selected.status !== "signed_pending_review"}
+                    disabled={
+                      acting ||
+                      !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
+                        selected.status,
+                      )
+                    }
                   >
                     {acting ? (
                       <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                     ) : (
                       <CheckCircle2 className="mr-1 h-4 w-4" />
                     )}
-                    Approve Signed Agreement
+                    Grant Approval
                   </Button>
                 </div>
 

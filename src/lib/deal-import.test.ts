@@ -23,6 +23,7 @@ test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workboo
       product: "LIVEY WC350 QHD Webcam",
       quantity: 2,
       amount: "$4,999",
+      currency_code: "USD",
       customer_budget: "Approved",
       possible_close_date: "2026-08-15",
       probability: 75,
@@ -37,6 +38,7 @@ test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workboo
 
   expect(rows).toHaveLength(1);
   expect(rows[0]?.account_name).toBe("Acme Systems");
+  expect(rows[0]?.currency_code).toBe("USD");
   expect(rows[0]?.probability).toBe(75);
 });
 
@@ -51,6 +53,7 @@ test("validateDealImportRows rejects the whole workbook when any row is invalid"
       product: "LIVEY WC350 QHD Webcam",
       quantity: 0,
       amount: "",
+      currency_code: "BTC",
       customer_budget: "Approved",
       possible_close_date: "2026-08-15",
       probability: 64,
@@ -68,6 +71,7 @@ test("validateDealImportRows rejects the whole workbook when any row is invalid"
         "Contact name is required",
         "Quantity must be at least 1",
         "Amount is required",
+        "Currency must be one of INR, USD, EUR, GBP, AED, or SGD",
         "Probability must be one of 0, 25, 50, 75, or 100",
         "Source is required",
       ],
@@ -86,6 +90,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       product: " LIVEY WC350 QHD Webcam ",
       quantity: "",
       amount: " $5,000 ",
+      currency_code: " usd ",
       customer_budget: "",
       possible_close_date: "2026-08-15",
       probability: "75",
@@ -94,7 +99,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
     },
   ]);
 
-  expect(DEAL_IMPORT_TEMPLATE_COLUMNS).toEqual([
+  expect(DEAL_IMPORT_TEMPLATE_COLUMNS.map((column) => column.key)).toEqual([
     "account_name",
     "contact_name",
     "owner_name",
@@ -103,6 +108,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
     "product",
     "quantity",
     "amount",
+    "currency_code",
     "customer_budget",
     "possible_close_date",
     "probability",
@@ -121,11 +127,65 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       product: "LIVEY WC350 QHD Webcam",
       quantity: 1,
       amount: "$5,000",
+      currency_code: "USD",
       customer_budget: "",
       possible_close_date: "2026-08-15",
       probability: 75,
       source: "Partner referral",
       notes: "Expansion deal",
+    },
+  ]);
+});
+
+test("validateDealImportRows defaults a blank currency to INR", () => {
+  const result = validateDealImportRows([
+    {
+      account_name: "Acme Systems",
+      contact_name: "Morgan Lee",
+      owner_name: "Priya Rao",
+      country: "India",
+      region: "India West",
+      product: "LIVEY WC350 QHD Webcam",
+      quantity: 2,
+      amount: "5000",
+      currency_code: "",
+      customer_budget: "Approved",
+      possible_close_date: "2026-08-15",
+      probability: 50,
+      source: "Partner referral",
+      notes: "Expansion deal",
+    },
+  ]);
+
+  expect(result.errors).toEqual([]);
+  expect(result.rows[0]?.currency_code).toBe("INR");
+});
+
+test("validateDealImportRows requires amount strings to contain a numeric value", () => {
+  const result = validateDealImportRows([
+    {
+      account_name: "Acme Systems",
+      contact_name: "Morgan Lee",
+      owner_name: "Priya Rao",
+      country: "India",
+      region: "India West",
+      product: "LIVEY WC350 QHD Webcam",
+      quantity: 1,
+      amount: "TBD",
+      currency_code: "USD",
+      customer_budget: "Approved",
+      possible_close_date: "2026-08-15",
+      probability: 50,
+      source: "Partner referral",
+      notes: "Expansion deal",
+    },
+  ]);
+
+  expect(result.rows).toEqual([]);
+  expect(result.errors).toEqual([
+    {
+      rowNumber: 2,
+      messages: ["Amount must include a numeric value"],
     },
   ]);
 });

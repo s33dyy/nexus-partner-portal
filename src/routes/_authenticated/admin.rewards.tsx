@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import {
+  Download,
   Loader2,
   Plus,
   RefreshCw,
@@ -33,10 +33,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
+import { ImportFeedback } from "@/lib/import-feedback";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   buildManualRewardAdjustmentEvent,
   calculateOutstandingRewardPoints,
+  REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS,
+  REWARD_CATALOG_IMPORT_TEMPLATE_SAMPLE,
   validateRewardCatalogImportRows,
 } from "@/lib/reward-admin";
 import {
@@ -44,6 +47,13 @@ import {
   type RewardPointEventRecord,
   type RewardRedemptionRecord,
 } from "@/lib/rewards";
+import {
+  buildImportSummaryMessage,
+  downloadTemplateCsv,
+  parseSpreadsheetFile,
+  validateImportTemplate,
+  type ImportValidationError,
+} from "@/lib/spreadsheet-import";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
@@ -119,6 +129,8 @@ function AdminRewardsPage() {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [importingCatalog, setImportingCatalog] = useState(false);
+  const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [adjustingPoints, setAdjustingPoints] = useState(false);
   const [adjustmentDraft, setAdjustmentDraft] = useState({
     userId: "",
@@ -436,20 +448,28 @@ function AdminRewardsPage() {
 
   const importCatalogFile = async (file: File) => {
     setImportingCatalog(true);
+    setImportErrors([]);
+    setImportMessage(null);
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const firstSheet = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheet];
-      const rawRows = (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
-      const validation = validateRewardCatalogImportRows(rawRows);
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(parsed, REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS);
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the template CSV headers and add at least one row before uploading again");
+        return;
+      }
+
+      const validation = validateRewardCatalogImportRows(parsed.rows);
 
       if (!validation.ok) {
-        throw new Error(
-          `Catalog import rejected. ${validation.errors
-            .slice(0, 3)
-            .map((error) => `Row ${error.rowNumber}: ${error.message}`)
-            .join(" | ")}`,
+        setImportErrors(
+          validation.errors.map((error) => ({
+            rowNumber: error.rowNumber,
+            messages: [error.message],
+          })),
         );
+        toast.error("Fix the import errors before uploading again");
+        return;
       }
 
       const now = new Date().toISOString();
@@ -464,6 +484,7 @@ function AdminRewardsPage() {
       );
       if (error) throw error;
 
+      setImportMessage(buildImportSummaryMessage(validation.rows.length, "catalog item", file.name));
       toast.success(`Imported ${validation.rows.length} catalog items`);
       await load();
     } catch (error) {
@@ -474,6 +495,14 @@ function AdminRewardsPage() {
         importInputRef.current.value = "";
       }
     }
+  };
+
+  const downloadCatalogTemplate = () => {
+    downloadTemplateCsv({
+      filenameStem: "livey-reward-catalog-import",
+      columns: REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS,
+      sampleRows: REWARD_CATALOG_IMPORT_TEMPLATE_SAMPLE,
+    });
   };
 
   const saveAdjustment = async () => {
@@ -603,6 +632,10 @@ function AdminRewardsPage() {
                   }
                   variant="outline"
                 />
+                <Button variant="outline" onClick={downloadCatalogTemplate}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download template CSV
+                </Button>
                 <input
                   ref={importInputRef}
                   type="file"
@@ -623,12 +656,15 @@ function AdminRewardsPage() {
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  Import catalog
+                  Import CSV/XLSX
                 </Button>
               </div>
             </div>
           </CardHeader>
           <CardContent className="grid gap-6 p-6 lg:grid-cols-[0.7fr_1.3fr]">
+            <div className="lg:col-span-2">
+              <ImportFeedback successMessage={importMessage} errors={importErrors} />
+            </div>
             <div className="space-y-3">
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Catalog entries

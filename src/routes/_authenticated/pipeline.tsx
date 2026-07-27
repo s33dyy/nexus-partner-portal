@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, MoveRight, Search, Target } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
+  getDealInrAmount,
   DEAL_STAGE_ORDER,
   nextDealStage,
   nextDealStatus,
@@ -49,6 +52,8 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "status", header: "Status" },
   { key: "quantity", header: "Quantity" },
   { key: "amount", header: "Amount" },
+  { key: "currency_code", header: "Currency" },
+  { key: "amount_inr", header: "INR Equivalent" },
   { key: "customer_budget", header: "Customer Budget" },
   { key: "probability", header: "Probability" },
   { key: "possible_close_date", header: "Possible Close Date" },
@@ -69,6 +74,7 @@ function PipelinePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
@@ -185,15 +191,17 @@ function PipelinePage() {
 
   const visibleDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return deals.filter((deal) =>
-      !term
-        ? true
-        : [deal.account_name, deal.contact_name, deal.owner_name, deal.region, deal.product]
-            .join(" ")
-            .toLowerCase()
-            .includes(term),
-    );
-  }, [deals, query]);
+    return deals.filter((deal) => {
+      const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
+      const matchesQuery =
+        !term ||
+        [deal.account_name, deal.contact_name, deal.owner_name, deal.region, deal.product]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      return matchesStage && matchesQuery;
+    });
+  }, [deals, query, stageFilter]);
 
   const grouped = useMemo(
     () =>
@@ -206,8 +214,7 @@ function PipelinePage() {
 
   const totals = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
-      const numeric = Number.parseFloat(deal.amount.replace(/[^0-9.]/g, ""));
-      return sum + (Number.isFinite(numeric) ? numeric : 0);
+      return sum + getDealInrAmount(deal);
     }, 0);
     const weighted = deals.length
       ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
@@ -378,6 +385,8 @@ function PipelinePage() {
                 status: deal.status,
                 quantity: deal.quantity,
                 amount: deal.amount,
+                currency_code: deal.currency_code,
+                amount_inr: deal.amount_inr,
                 customer_budget: deal.customer_budget,
                 probability: deal.probability,
                 possible_close_date: deal.possible_close_date,
@@ -394,8 +403,12 @@ function PipelinePage() {
       <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Pipeline value"
-          value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          hint="Visible queue value"
+          value={new Intl.NumberFormat("en-IN", {
+            style: "currency",
+            currency: "INR",
+            maximumFractionDigits: 2,
+          }).format(totals.pipeline)}
+          hint="Visible INR-equivalent queue value"
         />
         <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
         <MetricCard
@@ -414,13 +427,26 @@ function PipelinePage() {
                 Move records across the pipeline using the live Postgres records.
               </CardDescription>
             </div>
-            <div className="relative w-full max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search account or owner"
-                className="pl-8"
+            <div className="flex flex-col gap-2 md:flex-row">
+              <div className="relative w-full max-w-sm">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search account or owner"
+                  className="pl-8"
+                />
+              </div>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.dealStage}
+                label="Stage"
+                value={stageFilter === "all" ? "" : stageFilter}
+                onValueChange={(value) => setStageFilter((value as DealRecord["stage"]) || "all")}
+                placeholder="All stages"
+                clearLabel="All stages"
+                allowClear
+                options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                triggerClassName="w-full md:w-44"
               />
             </div>
           </div>
@@ -456,7 +482,7 @@ function PipelinePage() {
                       column.deals.map((deal) => (
                         <div
                           key={deal.id}
-                          className="rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                          className="group rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-1 focus-within:ring-ring"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -476,7 +502,7 @@ function PipelinePage() {
                               {formatDealProbability(deal.probability)}
                             </div>
                           </div>
-                          <div className="mt-3 grid gap-2">
+                          <div className="mt-3 grid gap-2 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
                             <Button
                               className="w-full"
                               size="sm"

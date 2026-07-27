@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -15,7 +15,21 @@ import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
+import { ImportFeedback } from "@/lib/import-feedback";
 import { type TeamMemberRecord } from "@/lib/portal-records";
+import {
+  buildImportSummaryMessage,
+  downloadTemplateCsv,
+  parseSpreadsheetFile,
+  validateImportTemplate,
+  type ImportValidationError,
+} from "@/lib/spreadsheet-import";
+import {
+  resolveTeamCompanyName,
+  TEAM_IMPORT_TEMPLATE_COLUMNS,
+  TEAM_IMPORT_TEMPLATE_SAMPLE,
+  validateTeamImportRows,
+} from "@/lib/team-import";
 import { useAuth } from "@/hooks/use-auth";
 
 type TeamForm = {
@@ -61,7 +75,8 @@ export const Route = createFileRoute("/_authenticated/partner/team")({
 
 function PartnerTeamPage() {
   const { hasRole, profile } = useAuth();
-  const companyName = profile?.company_name ?? "Your company";
+  const companyName = resolveTeamCompanyName(profile?.company_name);
+  const companyLabel = companyName ?? "Your company";
   const [members, setMembers] = useState<TeamMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,9 +84,21 @@ function PartnerTeamPage() {
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<TeamForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
+    if (!companyName) {
+      setMembers([]);
+      setSource("empty");
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -116,6 +143,10 @@ function PartnerTeamPage() {
   }, [members, query]);
 
   const addMember = async () => {
+    if (!companyName) {
+      toast.error("Set your company name before inviting teammates");
+      return;
+    }
     if (
       !draft.full_name.trim() ||
       !draft.email.trim() ||
@@ -198,6 +229,61 @@ function PartnerTeamPage() {
     await load();
   };
 
+  const downloadImportTemplate = () => {
+    downloadTemplateCsv({
+      filenameStem: "livey-team-members-import",
+      columns: TEAM_IMPORT_TEMPLATE_COLUMNS,
+      sampleRows: TEAM_IMPORT_TEMPLATE_SAMPLE,
+    });
+  };
+
+  const importTeamMembers = async (file: File) => {
+    if (!companyName) {
+      toast.error("Set your company name before importing teammates");
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+      return;
+    }
+
+    setImporting(true);
+    setImportErrors([]);
+    setImportMessage(null);
+    try {
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(parsed, TEAM_IMPORT_TEMPLATE_COLUMNS);
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the template CSV headers and add at least one row before uploading again");
+        return;
+      }
+
+      const validation = validateTeamImportRows(parsed.rows);
+      if (validation.errors.length > 0) {
+        setImportErrors(validation.errors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const { data, error } = await supabase.auth.createPartnerTeamMembersBulk({
+        company_name: companyName,
+        rows: validation.rows,
+      });
+      if (error || !data) throw new Error(error?.message ?? "Failed to import teammates");
+
+      setImportMessage(buildImportSummaryMessage(data.createdCount, "teammate", file.name));
+      toast.success(`Imported ${data.createdCount} teammates`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import teammates");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
   if (!hasRole("partner_admin") && !hasRole("super_admin")) {
     return (
       <AccessDeniedPage
@@ -219,7 +305,7 @@ function PartnerTeamPage() {
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Team</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             Invite colleagues, manage access, and keep partner responsibilities clear for{" "}
-            {companyName}.
+            {companyLabel}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -263,6 +349,28 @@ function PartnerTeamPage() {
             }
             variant="outline"
           />
+          <Button variant="outline" onClick={downloadImportTemplate}>
+            <Download className="mr-2 h-4 w-4" />
+            Download template CSV
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importTeamMembers(file);
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Import CSV/XLSX
+          </Button>
         </div>
       </div>
 
@@ -361,6 +469,7 @@ function PartnerTeamPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <ImportFeedback successMessage={importMessage} errors={importErrors} />
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Name">
                   <Input

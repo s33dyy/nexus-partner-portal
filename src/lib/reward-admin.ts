@@ -1,4 +1,27 @@
 import { sumRewardPoints, type RewardPointEventRecord } from "@/lib/rewards";
+import type { TemplateColumnDefinition } from "@/lib/spreadsheet-import";
+
+export const REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS = [
+  { key: "title", header: "title" },
+  { key: "description", header: "description" },
+  { key: "category", header: "category" },
+  { key: "points_cost", header: "points_cost" },
+  { key: "stock", header: "stock" },
+  { key: "availability", header: "availability" },
+  { key: "image_path", header: "image_path" },
+] as const satisfies readonly TemplateColumnDefinition[];
+
+export const REWARD_CATALOG_IMPORT_TEMPLATE_SAMPLE = [
+  {
+    title: "LIVEY Hoodie",
+    description: "Warm merch",
+    category: "Merchandise",
+    points_cost: 1200,
+    stock: 5,
+    availability: "available",
+    image_path: "https://cdn.example.com/hoodie.png",
+  },
+];
 
 export type RewardCatalogImportRow = {
   title: string;

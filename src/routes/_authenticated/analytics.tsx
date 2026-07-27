@@ -13,6 +13,7 @@ import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import {
   DEAL_STAGE_ORDER,
+  parseDealAmount,
   type CatalogItemRecord,
   type CustomerRecord,
   type DealRecord,
@@ -23,6 +24,14 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 export const Route = createFileRoute("/_authenticated/analytics")({
   component: AnalyticsPage,
 });
+
+function resolveInrAmount(deal: Pick<DealRecord, "amount" | "amount_inr">) {
+  const inrAmount = Number(deal.amount_inr);
+  if (Number.isFinite(inrAmount) && inrAmount > 0) {
+    return inrAmount;
+  }
+  return parseDealAmount(deal.amount);
+}
 
 function AnalyticsPage() {
   const { profile, hasRole } = useAuth();
@@ -115,8 +124,7 @@ function AnalyticsPage() {
 
   const totals = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
-      const value = Number.parseFloat(deal.amount.replace(/[^0-9.]/g, ""));
-      return sum + (Number.isFinite(value) ? value : 0);
+      return sum + resolveInrAmount(deal);
     }, 0);
     const won = deals.filter((deal) => deal.stage === "won").length;
     const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
@@ -169,7 +177,7 @@ function AnalyticsPage() {
     const workbook = buildAnalyticsWorkbook({
       generatedAt: new Date().toISOString(),
       metrics: {
-        pipelineValue: `$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+        pipelineValue: `₹${totals.pipeline.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
         wonDeals: totals.won,
         openDeals: totals.open,
         avgHealth: `${totals.avgHealth}%`,
@@ -229,7 +237,7 @@ function AnalyticsPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="Pipeline value"
-          value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
+          value={`₹${totals.pipeline.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}
           hint="Current deal rows"
         />
         <Metric label="Won deals" value={String(totals.won)} hint="Closed opportunities" />

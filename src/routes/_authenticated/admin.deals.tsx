@@ -716,6 +716,7 @@ function AdminDealsPage() {
                         title="Collaborators"
                         collaborators={reviewCollaborators}
                         availableMembers={teamMembers}
+                        excludeUserId={profile?.id ?? null}
                         hiddenToTeam={reviewDraft.is_hidden_to_team}
                         rewardRatePercent={reviewDraft.reward_rate_percent}
                         showRewardRate

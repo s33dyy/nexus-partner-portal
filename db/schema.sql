@@ -177,6 +177,12 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   status TEXT NOT NULL,
   quantity INTEGER NOT NULL DEFAULT 1,
   amount TEXT NOT NULL,
+  currency_code TEXT NOT NULL DEFAULT 'INR',
+  amount_value NUMERIC(14,2),
+  amount_inr NUMERIC(14,2),
+  fx_rate NUMERIC(14,6),
+  fx_provider TEXT,
+  fx_rate_fetched_at TIMESTAMPTZ,
   customer_budget TEXT,
   probability INTEGER NOT NULL DEFAULT 0,
   possible_close_date DATE,
@@ -434,6 +440,12 @@ ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS poc_profile_id UUID REFERENCES
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'India';
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_budget TEXT;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'INR';
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS amount_value NUMERIC(14,2);
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS amount_inr NUMERIC(14,2);
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(14,6);
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_provider TEXT;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_rate_fetched_at TIMESTAMPTZ;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS possible_close_date DATE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS is_hidden_to_team BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS reward_rate_percent NUMERIC(6,2) NOT NULL DEFAULT 5;
