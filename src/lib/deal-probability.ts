@@ -15,7 +15,7 @@ export function isDealProbability(value: number): value is DealProbability {
 
 export function normalizeDealProbability(value: number): DealProbability {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-  let closest = DEAL_PROBABILITY_OPTIONS[0];
+  let closest: (typeof DEAL_PROBABILITY_OPTIONS)[number] = DEAL_PROBABILITY_OPTIONS[0];
 
   for (const option of DEAL_PROBABILITY_OPTIONS) {
     if (Math.abs(option.value - clamped) < Math.abs(closest.value - clamped)) {

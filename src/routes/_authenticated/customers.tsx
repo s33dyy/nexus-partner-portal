@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Loader2, Plus, RefreshCw, Search, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -20,10 +20,23 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
+import {
+  CUSTOMER_IMPORT_TEMPLATE_COLUMNS,
+  CUSTOMER_IMPORT_TEMPLATE_SAMPLE,
+  validateCustomerImportRows,
+} from "@/lib/customer-import";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import { type CsvColumn } from "@/lib/csv-export";
+import { ImportFeedback } from "@/lib/import-feedback";
 import { type CustomerActivityRecord, type CustomerRecord } from "@/lib/portal-records";
+import {
+  buildImportSummaryMessage,
+  downloadTemplateCsv,
+  parseSpreadsheetFile,
+  validateImportTemplate,
+  type ImportValidationError,
+} from "@/lib/spreadsheet-import";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 
@@ -103,6 +116,10 @@ function CustomersPage() {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingActivity, setSavingActivity] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -325,6 +342,60 @@ function CustomersPage() {
     }
   };
 
+  const downloadImportTemplate = () => {
+    downloadTemplateCsv({
+      filenameStem: "livey-customers-import",
+      columns: CUSTOMER_IMPORT_TEMPLATE_COLUMNS,
+      sampleRows: CUSTOMER_IMPORT_TEMPLATE_SAMPLE,
+    });
+  };
+
+  const importCustomers = async (file: File) => {
+    setImporting(true);
+    setImportErrors([]);
+    setImportMessage(null);
+    try {
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(parsed, CUSTOMER_IMPORT_TEMPLATE_COLUMNS);
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the template CSV headers and add at least one row before uploading again");
+        return;
+      }
+
+      const validation = validateCustomerImportRows(parsed.rows);
+      if (validation.errors.length > 0) {
+        setImportErrors(validation.errors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const payloads = validation.rows.map((row) => ({
+        id: globalThis.crypto.randomUUID(),
+        ...row,
+        user_id: profile?.id ?? null,
+        partner_id: profile?.partner_id ?? null,
+        is_seed: false,
+        created_at: now,
+        updated_at: now,
+      }));
+      const { error } = await supabase.from("portal_customers").insert(payloads);
+      if (error) throw error;
+
+      setImportMessage(buildImportSummaryMessage(payloads.length, "customer", file.name));
+      toast.success(`Imported ${payloads.length} customers`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import customers");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -377,6 +448,28 @@ function CustomersPage() {
             }
             variant="outline"
           />
+          <Button variant="outline" onClick={downloadImportTemplate}>
+            <Download className="mr-2 h-4 w-4" />
+            Download template CSV
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importCustomers(file);
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Import CSV/XLSX
+          </Button>
         </div>
       </div>
 
@@ -473,6 +566,7 @@ function CustomersPage() {
               <CardDescription>Insert a new account into the customer list.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <ImportFeedback successMessage={importMessage} errors={importErrors} />
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Company">
                   <Input

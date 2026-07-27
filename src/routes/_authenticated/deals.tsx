@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { utils as xlsxUtils, write as writeWorkbook } from "xlsx";
 
 import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -56,15 +55,19 @@ import {
 } from "@/lib/deal-collaboration";
 import {
   DEAL_IMPORT_TEMPLATE_COLUMNS,
+  DEAL_IMPORT_TEMPLATE_SAMPLE,
   parseDealImportWorkbook,
   validateDealImportRows,
   type DealImportValidationError,
   type ValidatedDealImportRow,
 } from "@/lib/deal-import";
+import { ImportFeedback } from "@/lib/import-feedback";
 import { formatDealProbability, normalizeDealProbability } from "@/lib/deal-probability";
 import { canViewDeal } from "@/lib/deal-visibility";
 import {
+  DEAL_CURRENCY_OPTIONS,
   DEAL_STAGE_ORDER,
+  getDealInrAmount,
   nextDealStage,
   nextDealStatus,
   parseDealAmount,
@@ -73,6 +76,7 @@ import {
   type DealStage,
   type TeamMemberRecord,
 } from "@/lib/portal-records";
+import { buildImportSummaryMessage, downloadTemplateCsv } from "@/lib/spreadsheet-import";
 
 type DealForm = {
   partner_id: string | null;
@@ -87,6 +91,12 @@ type DealForm = {
   stage: DealStage;
   quantity: number;
   amount: string;
+  currency_code: string;
+  amount_value: number | null;
+  amount_inr: number | null;
+  fx_rate: number | null;
+  fx_provider: string | null;
+  fx_rate_fetched_at: string | null;
   customer_budget: string;
   possible_close_date: string;
   probability: number;
@@ -107,6 +117,12 @@ type DealEditForm = {
   product: string;
   quantity: number;
   amount: string;
+  currency_code: string;
+  amount_value: number | null;
+  amount_inr: number | null;
+  fx_rate: number | null;
+  fx_provider: string | null;
+  fx_rate_fetched_at: string | null;
   customer_budget: string;
   possible_close_date: string;
   probability: number;
@@ -129,6 +145,12 @@ const EMPTY_FORM: DealForm = {
   stage: "sourced",
   quantity: 1,
   amount: "",
+  currency_code: "INR",
+  amount_value: null,
+  amount_inr: null,
+  fx_rate: null,
+  fx_provider: null,
+  fx_rate_fetched_at: null,
   customer_budget: "",
   possible_close_date: "",
   probability: 25,
@@ -144,6 +166,21 @@ function normalizeCompanyName(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
 }
 
+function normalizeNullableNumber(value: unknown) {
+  if (value == null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatInrAmount(value: number | null) {
+  if (!Number.isFinite(value ?? Number.NaN)) return "Unavailable";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value ?? 0);
+}
+
 function dealToEditForm(deal: DealRecord): DealEditForm {
   return {
     account_name: deal.account_name,
@@ -154,6 +191,12 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     product: deal.product,
     quantity: deal.quantity,
     amount: deal.amount,
+    currency_code: deal.currency_code || "INR",
+    amount_value: normalizeNullableNumber(deal.amount_value),
+    amount_inr: normalizeNullableNumber(deal.amount_inr),
+    fx_rate: normalizeNullableNumber(deal.fx_rate),
+    fx_provider: deal.fx_provider ?? null,
+    fx_rate_fetched_at: deal.fx_rate_fetched_at ?? null,
     customer_budget: deal.customer_budget ?? "",
     possible_close_date: toDateInputValue(deal.possible_close_date),
     probability: normalizeDealProbability(deal.probability),
@@ -181,6 +224,8 @@ const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "status", header: "Status" },
   { key: "quantity", header: "Quantity" },
   { key: "amount", header: "Amount" },
+  { key: "currency_code", header: "Currency" },
+  { key: "amount_inr", header: "INR Equivalent" },
   { key: "customer_budget", header: "Customer Budget" },
   { key: "possible_close_date", header: "Possible Close Date" },
   { key: "close_date", header: "Close Date" },
@@ -240,6 +285,12 @@ function DealsPage() {
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<DealImportValidationError[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [convertingCurrency, setConvertingCurrency] = useState(false);
+  const [currencyPreviewError, setCurrencyPreviewError] = useState<string | null>(null);
+  const [selectedDealConvertingCurrency, setSelectedDealConvertingCurrency] = useState(false);
+  const [selectedCurrencyPreviewError, setSelectedCurrencyPreviewError] = useState<string | null>(
+    null,
+  );
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const { profile, hasRole } = useAuth();
   useRequireAccess("full");
@@ -276,6 +327,10 @@ function DealsPage() {
 
       const rows = ((dealResult.data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
+        currency_code: deal.currency_code || "INR",
+        amount_value: normalizeNullableNumber(deal.amount_value),
+        amount_inr: normalizeNullableNumber(deal.amount_inr),
+        fx_rate: normalizeNullableNumber(deal.fx_rate),
         possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
       }));
@@ -316,10 +371,9 @@ function DealsPage() {
       const companyName = profile?.company_name ?? null;
       const companyKey = normalizeCompanyName(companyName);
       const members = ((memberResult.data as TeamMemberRecord[] | null) ?? []).filter((member) =>
-        member.id !== profile?.id &&
-        (hasRole("super_admin") || !companyKey
+        hasRole("super_admin") || !companyKey
           ? true
-          : normalizeCompanyName(member.company_name) === companyKey),
+          : normalizeCompanyName(member.company_name) === companyKey,
       );
 
       setDeals(visibleRows);
@@ -541,6 +595,7 @@ function DealsPage() {
       setSelectedDealDraft(null);
       setSelectedDealCollaborators([]);
       setSelectedDealEditing(false);
+      setSelectedCurrencyPreviewError(null);
       return;
     }
 
@@ -557,10 +612,166 @@ function DealsPage() {
     });
   }, [deals, query, stageFilter, statusFilter]);
 
+  useEffect(() => {
+    if (draft.currency_code === "INR") {
+      setConvertingCurrency(false);
+      setCurrencyPreviewError(null);
+      setDraft((current) => ({
+        ...current,
+        amount_value: current.amount.trim() ? parseDealAmount(current.amount) : null,
+        amount_inr: current.amount.trim() ? parseDealAmount(current.amount) : null,
+        fx_rate: 1,
+        fx_provider: "internal",
+        fx_rate_fetched_at: new Date().toISOString(),
+      }));
+      return;
+    }
+
+    const amountValue = parseDealAmount(draft.amount);
+    if (!draft.amount.trim() || amountValue <= 0) {
+      setConvertingCurrency(false);
+      setCurrencyPreviewError(null);
+      setDraft((current) => ({
+        ...current,
+        amount_value: amountValue > 0 ? amountValue : null,
+        amount_inr: null,
+        fx_rate: null,
+        fx_provider: null,
+        fx_rate_fetched_at: null,
+      }));
+      return;
+    }
+
+    let active = true;
+    setConvertingCurrency(true);
+    setCurrencyPreviewError(null);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const { data, error } = await supabase.auth.quoteCurrencyToInr({
+          sourceCurrency: draft.currency_code,
+          amount: amountValue,
+        });
+        if (!active) return;
+        setConvertingCurrency(false);
+        if (error || !data) {
+          setCurrencyPreviewError(error?.message ?? "Unable to load INR conversion");
+          setDraft((current) => ({
+            ...current,
+            amount_value: amountValue,
+            amount_inr: null,
+            fx_rate: null,
+            fx_provider: null,
+            fx_rate_fetched_at: null,
+          }));
+          return;
+        }
+        setDraft((current) => ({
+          ...current,
+          amount_value: data.amount,
+          amount_inr: data.computedInrAmount,
+          fx_rate: data.rate,
+          fx_provider: data.provider,
+          fx_rate_fetched_at: data.timestamp,
+        }));
+      })();
+    }, 350);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [draft.amount, draft.currency_code]);
+
+  useEffect(() => {
+    if (!selectedDealDraft) return;
+    if (selectedDealDraft.currency_code === "INR") {
+      setSelectedDealConvertingCurrency(false);
+      setSelectedCurrencyPreviewError(null);
+      setSelectedDealDraft((current) =>
+        current
+          ? {
+              ...current,
+              amount_value: current.amount.trim() ? parseDealAmount(current.amount) : null,
+              amount_inr: current.amount.trim() ? parseDealAmount(current.amount) : null,
+              fx_rate: 1,
+              fx_provider: "internal",
+              fx_rate_fetched_at: new Date().toISOString(),
+            }
+          : current,
+      );
+      return;
+    }
+
+    const amountValue = parseDealAmount(selectedDealDraft.amount);
+    if (!selectedDealDraft.amount.trim() || amountValue <= 0) {
+      setSelectedDealConvertingCurrency(false);
+      setSelectedCurrencyPreviewError(null);
+      setSelectedDealDraft((current) =>
+        current
+          ? {
+              ...current,
+              amount_value: amountValue > 0 ? amountValue : null,
+              amount_inr: null,
+              fx_rate: null,
+              fx_provider: null,
+              fx_rate_fetched_at: null,
+            }
+          : current,
+      );
+      return;
+    }
+
+    let active = true;
+    setSelectedDealConvertingCurrency(true);
+    setSelectedCurrencyPreviewError(null);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const { data, error } = await supabase.auth.quoteCurrencyToInr({
+          sourceCurrency: selectedDealDraft.currency_code,
+          amount: amountValue,
+        });
+        if (!active) return;
+        setSelectedDealConvertingCurrency(false);
+        if (error || !data) {
+          setSelectedCurrencyPreviewError(error?.message ?? "Unable to load INR conversion");
+          setSelectedDealDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  amount_value: amountValue,
+                  amount_inr: null,
+                  fx_rate: null,
+                  fx_provider: null,
+                  fx_rate_fetched_at: null,
+                }
+              : current,
+          );
+          return;
+        }
+        setSelectedDealDraft((current) =>
+          current
+            ? {
+                ...current,
+                amount_value: data.amount,
+                amount_inr: data.computedInrAmount,
+                fx_rate: data.rate,
+                fx_provider: data.provider,
+                fx_rate_fetched_at: data.timestamp,
+              }
+            : current,
+        );
+      })();
+    }, 350);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [selectedDealDraft?.amount, selectedDealDraft?.currency_code]);
+
   const kpis = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
-      const value = Number.parseFloat(deal.amount.replace(/[^0-9.]/g, ""));
-      return sum + (Number.isFinite(value) ? value : 0);
+      return sum + getDealInrAmount(deal);
     }, 0);
     const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
     const won = deals.filter((deal) => deal.stage === "won").length;
@@ -570,8 +781,8 @@ function DealsPage() {
     return [
       {
         label: "Pipeline",
-        value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
-        hint: "Current opportunity rows",
+        value: formatInrAmount(pipeline),
+        hint: "Current INR-equivalent opportunity value",
         status: "open" as const,
         stage: "all" as const,
       },
@@ -690,35 +901,11 @@ function DealsPage() {
   };
 
   const downloadImportTemplate = () => {
-    const workbook = xlsxUtils.book_new();
-    const sheet = xlsxUtils.json_to_sheet([
-      {
-        account_name: "Acme Systems",
-        contact_name: "Morgan Lee",
-        owner_name: "Priya Rao",
-        country: "India",
-        region: "India West",
-        product: "LIVEY WC350 QHD Webcam",
-        quantity: 1,
-        amount: "$5,000",
-        customer_budget: "Approved",
-        possible_close_date: "2026-08-15",
-        probability: 50,
-        source: "Partner referral",
-        notes: "Expansion deal",
-      } satisfies Record<(typeof DEAL_IMPORT_TEMPLATE_COLUMNS)[number], string | number>,
-    ]);
-    xlsxUtils.book_append_sheet(workbook, sheet, "Deals");
-    const workbookBytes = writeWorkbook(workbook, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([workbookBytes], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    downloadTemplateCsv({
+      filenameStem: "livey-deal-import",
+      columns: DEAL_IMPORT_TEMPLATE_COLUMNS,
+      sampleRows: DEAL_IMPORT_TEMPLATE_SAMPLE,
     });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `livey-deal-import-template-${formatCsvDate()}.xlsx`;
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -730,7 +917,7 @@ function DealsPage() {
     setImporting(true);
 
     try {
-      const parsedRows = parseDealImportWorkbook(await file.arrayBuffer());
+      const parsedRows = parseDealImportWorkbook(await file.arrayBuffer(), file.name);
       const validation = validateDealImportRows(parsedRows);
       const accountIdByName = new Map(
         accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
@@ -769,7 +956,82 @@ function DealsPage() {
       const accountIdLookup = new Map(
         accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
       );
-      const payloads = importRows.map((row) => {
+      const fxCache = new Map<
+        string,
+        {
+          amount: number;
+          computedInrAmount: number;
+          provider: string;
+          rate: number;
+          sourceCurrency: string;
+          timestamp: string;
+        }
+      >();
+      const fxErrors: DealImportValidationError[] = [];
+      const importRowsWithFx: Array<
+        ValidatedDealImportRow & {
+          amount_value: number;
+          amount_inr: number;
+          fx_rate: number;
+          fx_provider: string;
+          fx_rate_fetched_at: string;
+        }
+      > = [];
+
+      for (const [index, row] of importRows.entries()) {
+        const amountValue = parseDealAmount(row.amount);
+        const rowNumber = index + 2;
+
+        if (row.currency_code === "INR") {
+          importRowsWithFx.push({
+            ...row,
+            amount_value: amountValue,
+            amount_inr: amountValue,
+            fx_rate: 1,
+            fx_provider: "import_default",
+            fx_rate_fetched_at: today,
+          });
+          continue;
+        }
+
+        const cacheKey = `${row.currency_code}:${amountValue}`;
+        let fxData = fxCache.get(cacheKey);
+        if (!fxData) {
+          const { data, error } = await supabase.auth.quoteCurrencyToInr({
+            sourceCurrency: row.currency_code,
+            amount: amountValue,
+          });
+          if (error || !data) {
+            fxErrors.push({
+              rowNumber,
+              messages: [
+                error?.message ??
+                  `Unable to load INR conversion for ${row.currency_code} on row ${rowNumber}`,
+              ],
+            });
+            continue;
+          }
+          fxCache.set(cacheKey, data);
+          fxData = data;
+        }
+
+        importRowsWithFx.push({
+          ...row,
+          amount_value: amountValue,
+          amount_inr: fxData.computedInrAmount,
+          fx_rate: fxData.rate,
+          fx_provider: fxData.provider,
+          fx_rate_fetched_at: fxData.timestamp,
+        });
+      }
+
+      if (fxErrors.length > 0) {
+        setImportErrors(fxErrors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const payloads = importRowsWithFx.map((row) => {
         const accountName = isPartnerUser
           ? profile?.full_name || profile?.company_name || row.account_name || "Partner User"
           : row.account_name;
@@ -801,6 +1063,12 @@ function DealsPage() {
           status: autoApproved ? "approved" : "submitted",
           quantity: row.quantity,
           amount: row.amount,
+          currency_code: row.currency_code,
+          amount_value: row.amount_value,
+          amount_inr: row.amount_inr,
+          fx_rate: row.fx_rate,
+          fx_provider: row.fx_provider,
+          fx_rate_fetched_at: row.fx_rate_fetched_at,
           customer_budget: row.customer_budget || null,
           probability: row.probability,
           possible_close_date: row.possible_close_date || null,
@@ -820,9 +1088,7 @@ function DealsPage() {
       const { error } = await supabase.from("portal_deals").insert(payloads);
       if (error) throw error;
 
-      setImportMessage(
-        `${payloads.length} ${payloads.length === 1 ? "deal" : "deals"} imported from ${file.name}.`,
-      );
+      setImportMessage(buildImportSummaryMessage(payloads.length, "deal", file.name));
       toast.success(
         `${payloads.length} ${payloads.length === 1 ? "deal was" : "deals were"} imported`,
       );
@@ -870,9 +1136,16 @@ function DealsPage() {
       toast.error("Fill in the account, client, and amount");
       return;
     }
+    if (draft.currency_code !== "INR" && (!draft.amount_inr || !draft.fx_rate)) {
+      toast.error("Wait for the INR conversion to load before creating this deal");
+      return;
+    }
     setCreating(true);
     try {
       const now = new Date().toISOString();
+      const resolvedAmountValue = draft.amount_value ?? amountValue;
+      const resolvedAmountInr =
+        draft.currency_code === "INR" ? resolvedAmountValue : (draft.amount_inr ?? null);
       const payload = {
         id: globalThis.crypto.randomUUID(),
         ...draft,
@@ -888,6 +1161,11 @@ function DealsPage() {
         owner_name: ownerName,
         country: draft.country || "India",
         quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
+        amount_value: resolvedAmountValue,
+        amount_inr: resolvedAmountInr,
+        fx_rate: draft.currency_code === "INR" ? 1 : draft.fx_rate,
+        fx_provider: draft.currency_code === "INR" ? "internal" : draft.fx_provider,
+        fx_rate_fetched_at: draft.fx_rate_fetched_at ?? now,
         customer_budget: draft.customer_budget.trim() || null,
         possible_close_date: draft.possible_close_date || null,
         close_date: draft.possible_close_date || draft.close_date || now.slice(0, 10),
@@ -963,9 +1241,18 @@ function DealsPage() {
       toast.error("Fill in account, client, owner, region, product, amount, and source");
       return;
     }
+    if (selectedDealDraft.currency_code !== "INR" && (!selectedDealDraft.amount_inr || !selectedDealDraft.fx_rate)) {
+      toast.error("Wait for the INR conversion to load before saving this deal");
+      return;
+    }
 
     setSaving(true);
     try {
+      const resolvedAmountValue = selectedDealDraft.amount_value ?? parseDealAmount(amount);
+      const resolvedAmountInr =
+        selectedDealDraft.currency_code === "INR"
+          ? resolvedAmountValue
+          : (selectedDealDraft.amount_inr ?? null);
       const { error } = await supabase
         .from("portal_deals")
         .update({
@@ -977,6 +1264,13 @@ function DealsPage() {
           product,
           quantity: Number(selectedDealDraft.quantity) > 0 ? Number(selectedDealDraft.quantity) : 1,
           amount,
+          currency_code: selectedDealDraft.currency_code,
+          amount_value: resolvedAmountValue,
+          amount_inr: resolvedAmountInr,
+          fx_rate: selectedDealDraft.currency_code === "INR" ? 1 : selectedDealDraft.fx_rate,
+          fx_provider:
+            selectedDealDraft.currency_code === "INR" ? "internal" : selectedDealDraft.fx_provider,
+          fx_rate_fetched_at: selectedDealDraft.fx_rate_fetched_at ?? new Date().toISOString(),
           customer_budget: selectedDealDraft.customer_budget.trim() || null,
           possible_close_date: selectedDealDraft.possible_close_date || null,
           probability: normalizeDealProbability(Number(selectedDealDraft.probability) || 0),
@@ -1183,6 +1477,8 @@ function DealsPage() {
                 status: deal.status,
                 quantity: deal.quantity,
                 amount: deal.amount,
+                currency_code: deal.currency_code,
+                amount_inr: deal.amount_inr,
                 customer_budget: deal.customer_budget,
                 possible_close_date: deal.possible_close_date,
                 close_date: deal.close_date,
@@ -1335,13 +1631,13 @@ function DealsPage() {
                       ) : (
                         <Upload className="mr-2 h-4 w-4" />
                       )}
-                      Import .xlsx
+                      Import CSV/XLSX
                     </label>
                   </Button>
                   <input
                     id="deal-import-file"
                     type="file"
-                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     className="hidden"
                     onChange={(event) => void handleImportFile(event)}
                   />
@@ -1349,29 +1645,7 @@ function DealsPage() {
               </div>
             </CardHeader>
             <CardContent className="grid gap-3">
-              {importMessage ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                  {importMessage}
-                </div>
-              ) : null}
-              {importErrors.length > 0 ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                    <FileSpreadsheet className="h-4 w-4" />
-                    Import validation issues
-                  </div>
-                  <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-                    {importErrors.slice(0, 6).map((error) => (
-                      <div key={`${error.rowNumber}-${error.messages.join("|")}`}>
-                        Row {error.rowNumber}: {error.messages.join(" • ")}
-                      </div>
-                    ))}
-                    {importErrors.length > 6 ? (
-                      <div>+ {importErrors.length - 6} more row issues</div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
+              <ImportFeedback successMessage={importMessage} errors={importErrors} />
               <div className="grid gap-3 md:grid-cols-2">
                 {(hasRole("super_admin") || hasRole("partner_admin")) && (
                   <div className="space-y-2">
@@ -1547,7 +1821,34 @@ function DealsPage() {
                     placeholder={draft.country === "India" ? "₹9,20,000" : "$9,200"}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="currency_code">Currency</Label>
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.dealSource}
+                    label="Currency"
+                    value={draft.currency_code}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, currency_code: value || "INR" }))
+                    }
+                    options={[...DEAL_CURRENCY_OPTIONS]}
+                    allowCreate={false}
+                  />
+                </div>
               </div>
+              {draft.currency_code !== "INR" ? (
+                <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                  <div className="font-medium">INR equivalent</div>
+                  <div className="mt-1 text-muted-foreground">
+                    {convertingCurrency
+                      ? "Fetching the latest FX rate..."
+                      : currencyPreviewError
+                        ? currencyPreviewError
+                        : draft.amount_inr
+                          ? `${formatInrAmount(draft.amount_inr)} via ${draft.fx_provider ?? "provider"}`
+                          : "Enter a valid amount to preview the INR equivalent."}
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="stage">Stage</Label>
@@ -1638,6 +1939,7 @@ function DealsPage() {
                 title="Collaborators"
                 collaborators={draftCollaborators}
                 availableMembers={teamMembers}
+                excludeUserId={profile?.id ?? null}
                 hiddenToTeam={draft.is_hidden_to_team}
                 rewardRatePercent={draft.reward_rate_percent}
                 showRewardRate
@@ -1702,6 +2004,7 @@ function DealsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge>{selectedDeal.stage}</Badge>
                       <Badge variant="secondary">{selectedDeal.amount}</Badge>
+                      <Badge variant="outline">{selectedDeal.currency_code || "INR"}</Badge>
                       {selectedDeal.customer_budget ? (
                         <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
                       ) : null}
@@ -1792,6 +2095,20 @@ function DealsPage() {
                             }
                           />
                         </Field>
+                        <Field label="Currency">
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.dealSource}
+                            label="Currency"
+                            value={selectedDealDraft.currency_code}
+                            onValueChange={(value) =>
+                              setSelectedDealDraft((current) =>
+                                current ? { ...current, currency_code: value || "INR" } : current,
+                              )
+                            }
+                            options={[...DEAL_CURRENCY_OPTIONS]}
+                            allowCreate={false}
+                          />
+                        </Field>
                         <Field label="Customer budget">
                           <Input
                             value={selectedDealDraft.customer_budget}
@@ -1839,6 +2156,20 @@ function DealsPage() {
                           <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
                         </Field>
                       </div>
+                    ) : null}
+                    {selectedDealEditing && selectedDealDraft && selectedDealDraft.currency_code !== "INR" ? (
+                      <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                        <div className="font-medium">INR equivalent</div>
+                        <div className="mt-1 text-muted-foreground">
+                          {selectedDealConvertingCurrency
+                            ? "Fetching the latest FX rate..."
+                            : selectedCurrencyPreviewError
+                              ? selectedCurrencyPreviewError
+                              : selectedDealDraft.amount_inr
+                                ? `${formatInrAmount(selectedDealDraft.amount_inr)} via ${selectedDealDraft.fx_provider ?? "provider"}`
+                                : "Enter a valid amount to preview the INR equivalent."}
+                        </div>
+                      </div>
                     ) : (
                       <div className="grid gap-3 text-sm md:grid-cols-2">
                         <Meta label="Country" value={selectedDeal.country} />
@@ -1846,6 +2177,11 @@ function DealsPage() {
                         <Meta label="Contact" value={selectedDeal.contact_name} />
                         <Meta label="Owner" value={selectedDeal.owner_name} />
                         <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
+                        <Meta label="Currency" value={selectedDeal.currency_code || "INR"} />
+                        <Meta
+                          label="INR equivalent"
+                          value={formatInrAmount(normalizeNullableNumber(selectedDeal.amount_inr))}
+                        />
                         <Meta
                           label="Possible close date"
                           value={formatDateLabel(selectedDeal.possible_close_date)}
@@ -1862,6 +2198,7 @@ function DealsPage() {
                       title="Visibility & collaborators"
                       collaborators={selectedDealCollaborators}
                       availableMembers={teamMembers}
+                      excludeUserId={profile?.id ?? null}
                       hiddenToTeam={
                         selectedDealDraft?.is_hidden_to_team ?? selectedDeal.is_hidden_to_team
                       }

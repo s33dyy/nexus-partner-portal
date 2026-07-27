@@ -69,11 +69,13 @@ export function buildGlobalSearchResults(
       href: "/admin/catalog",
     }));
 
-  return [
+  const groups: GlobalSearchResult[] = [
     { group: "Deals", items: deals },
     { group: "Partners", items: partners },
     { group: "Catalog", items: catalog },
-  ].filter((group) => group.items.length > 0);
+  ];
+
+  return groups.filter((group) => group.items.length > 0);
 }
 
 export function getDashboardMetricDestination(metricId: string, isSuperAdmin: boolean) {

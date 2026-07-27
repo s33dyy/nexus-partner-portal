@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   applyPresetCollaboratorSplits,
   buildPresetCollaboratorSplits,
+  filterAddableCollaboratorMembers,
   rebalanceCollaboratorSplits,
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
@@ -30,6 +31,7 @@ type DealCollaboratorEditorProps = {
   showRewardRate?: boolean;
   allowEditRewardRate?: boolean;
   allowEditCollaborators?: boolean;
+  excludeUserId?: string | null;
   disabled?: boolean;
   onCollaboratorsChange: (collaborators: DealCollaboratorDraft[]) => void;
   onHiddenToTeamChange?: (hidden: boolean) => void;
@@ -45,6 +47,7 @@ export function DealCollaboratorEditor({
   showRewardRate = false,
   allowEditRewardRate = false,
   allowEditCollaborators = true,
+  excludeUserId = null,
   disabled = false,
   onCollaboratorsChange,
   onHiddenToTeamChange,
@@ -62,8 +65,8 @@ export function DealCollaboratorEditor({
     [availableMembers],
   );
   const availableToAdd = useMemo(
-    () => availableMembers.filter((member) => !collaboratorById.has(member.id)),
-    [availableMembers, collaboratorById],
+    () => filterAddableCollaboratorMembers(availableMembers, collaborators, excludeUserId),
+    [availableMembers, collaborators, excludeUserId],
   );
 
   const addCollaborator = () => {

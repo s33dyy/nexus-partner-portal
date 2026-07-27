@@ -80,7 +80,10 @@ export function AppSidebar() {
     items.filter((i) => !i.roles || i.roles.some((r) => roles.includes(r)));
   const isPartnerAdmin = hasRole("partner_admin");
   const canSeeWorkspace = hasRole("super_admin") || access.canAccessDeals;
-  const canSeePortalBasics = access.canAccessDashboard || access.canAccessDocuments;
+  const portalItems = [
+    ...(access.canAccessDashboard ? [portal[0]] : []),
+    ...(access.canAccessDocuments ? [portal[1]] : []),
+  ];
 
   // Agreement page only visible to partners awaiting signature
   const partnerAdminItems: Item[] = [
@@ -145,7 +148,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         {renderGroup("Rewards", visible(shared))}
-        {canSeePortalBasics ? renderGroup("Portal", portal) : null}
+        {portalItems.length > 0 ? renderGroup("Portal", portalItems) : null}
         {!canSeeWorkspace && isPartnerAdmin
           ? renderGroup("Getting started", [
               { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },

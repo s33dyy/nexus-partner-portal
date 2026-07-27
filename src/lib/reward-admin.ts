@@ -13,6 +13,18 @@ export const REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS: CsvColumn[] = [
   { key: "availability", header: "Availability" },
 ];
 
+export const REWARD_CATALOG_IMPORT_TEMPLATE_SAMPLE = [
+  {
+    title: "LIVEY Hoodie",
+    description: "Warm merch",
+    image_path: "https://cdn.example.com/hoodie.png",
+    category: "Merchandise",
+    points_cost: 1200,
+    stock: 5,
+    availability: "available",
+  },
+];
+
 export type RewardCatalogImportRow = {
   title: string;
   description: string;

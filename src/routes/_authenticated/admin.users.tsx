@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, Search, ShieldCheck, UserRoundCog } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Loader2, RefreshCw, Search, ShieldCheck, Upload, UserRoundCog } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -21,7 +21,20 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
+import { ImportFeedback } from "@/lib/import-feedback";
+import {
+  buildImportSummaryMessage,
+  downloadTemplateCsv,
+  parseSpreadsheetFile,
+  validateImportTemplate,
+  type ImportValidationError,
+} from "@/lib/spreadsheet-import";
 import { cn } from "@/lib/utils";
+import {
+  USER_IMPORT_TEMPLATE_COLUMNS,
+  USER_IMPORT_TEMPLATE_SAMPLE,
+  validateUserImportRows,
+} from "@/lib/user-import";
 import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
 import { PARTNER_STATUSES, type PartnerStatus } from "@/lib/partner-status";
@@ -78,6 +91,9 @@ function AdminUsersPage() {
   const [draftRole, setDraftRole] = useState("partner_user");
   const [draftStatus, setDraftStatus] = useState<PartnerStatus>("approved");
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({
     full_name: "",
     email: "",
@@ -86,6 +102,7 @@ function AdminUsersPage() {
     password: "",
     role: "partner_admin" as AppRole,
   });
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -191,10 +208,11 @@ function AdminUsersPage() {
     if (!selectedUser || selectedUser.roles.includes("super_admin")) return;
     if (
       selectedUser.partner_id &&
-      selectedUser.partner_status !== "signed_pending_review" &&
-      selectedUser.partner_status !== "approved"
+      !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
+        selectedUser.partner_status,
+      )
     ) {
-      toast.error("Use Partner Approvals after the agreement is signed.");
+      toast.error("Use Partner Approvals after partial access or agreement preparation begins.");
       return;
     }
     if (selectedUser.partner_status === "approved") return;
@@ -259,6 +277,52 @@ function AdminUsersPage() {
     }
   };
 
+  const downloadImportTemplate = () => {
+    downloadTemplateCsv({
+      filenameStem: "livey-users-import",
+      columns: USER_IMPORT_TEMPLATE_COLUMNS,
+      sampleRows: USER_IMPORT_TEMPLATE_SAMPLE,
+    });
+  };
+
+  const importUsers = async (file: File) => {
+    setImporting(true);
+    setImportErrors([]);
+    setImportMessage(null);
+    try {
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(parsed, USER_IMPORT_TEMPLATE_COLUMNS);
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the template CSV headers and add at least one row before uploading again");
+        return;
+      }
+
+      const validation = validateUserImportRows(parsed.rows);
+      if (validation.errors.length > 0) {
+        setImportErrors(validation.errors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const { error, data } = await supabase.auth.createWorkspaceUsersBulk({
+        rows: validation.rows,
+      });
+      if (error || !data) throw new Error(error?.message ?? "Failed to import users");
+
+      setImportMessage(buildImportSummaryMessage(data.createdCount, "user", file.name));
+      toast.success(`Imported ${data.createdCount} users`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import users");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -307,6 +371,28 @@ function AdminUsersPage() {
             }
             variant="outline"
           />
+          <Button variant="outline" onClick={downloadImportTemplate}>
+            <Download className="mr-2 h-4 w-4" />
+            Download template CSV
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importUsers(file);
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Import CSV/XLSX
+          </Button>
         </div>
       </div>
 
@@ -411,6 +497,7 @@ function AdminUsersPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
+              <ImportFeedback successMessage={importMessage} errors={importErrors} />
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Full name">
                   <Input
@@ -551,8 +638,9 @@ function AdminUsersPage() {
                   disabled={
                     saving ||
                     (selectedUser.partner_id
-                      ? selectedUser.partner_status !== "signed_pending_review" &&
-                        selectedUser.partner_status !== "approved"
+                      ? !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
+                          selectedUser.partner_status,
+                        )
                       : false) ||
                     selectedUser.partner_status === "approved" ||
                     selectedUser.roles.includes("super_admin")

@@ -120,7 +120,7 @@ test("resolveScopeFilters scopes team exports by company name", () => {
 });
 
 test("portal deals exports hide hidden deals from partner users", async () => {
-  const client = supabase as typeof supabase & { from: MockFrom };
+  const client = supabase as unknown as { from: MockFrom };
   const originalFrom: MockFrom = client.from;
   const calls: Array<{
     table: string;
@@ -268,6 +268,72 @@ test("portal deals exports hide hidden deals from partner users", async () => {
         operation: "select",
       },
     ]);
+  } finally {
+    client.from = originalFrom;
+  }
+});
+
+test("customer exports stay partner-scoped for partner users", async () => {
+  const client = supabase as unknown as { from: MockFrom };
+  const originalFrom: MockFrom = client.from;
+  const calls: Array<{
+    table: string;
+    filters: Array<{ column: string; value: unknown }>;
+    operation: string;
+  }> = [];
+
+  client.from = ((table: string) => {
+    const state = {
+      table,
+      filters: [] as Array<{ column: string; value: unknown }>,
+      operation: "select",
+    };
+    calls.push(state);
+
+    const query: MockQuery = {
+      select() {
+        state.operation = "select";
+        return query;
+      },
+      count() {
+        state.operation = "count";
+        return query;
+      },
+      eq(column: string, value: unknown) {
+        state.filters.push({ column, value });
+        return query;
+      },
+      maybeSingle() {
+        return Promise.resolve({ data: null, error: null });
+      },
+      then<TResult1 = MockResult, TResult2 = never>(
+        onfulfilled?: ((value: MockResult) => TResult1 | PromiseLike<TResult1>) | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ): Promise<TResult1 | TResult2> {
+        return Promise.resolve({ data: [], error: null }).then(onfulfilled, onrejected);
+      },
+    };
+
+    return query;
+  }) as MockFrom;
+
+  try {
+    const dataset = EXPORT_DATASETS.find((entry) => entry.id === "portal-customers");
+    expect(dataset).toBeDefined();
+
+    await dataset!.loadRows({
+      role: "partner_user",
+      isSuperAdmin: false,
+      partnerId: "partner-123",
+      userId: "user-456",
+      companyName: "Techilla",
+    });
+
+    expect(calls).toContainEqual({
+      table: "portal_customers",
+      operation: "select",
+      filters: [{ column: "partner_id", value: "partner-123" }],
+    });
   } finally {
     client.from = originalFrom;
   }

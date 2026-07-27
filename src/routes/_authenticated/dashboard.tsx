@@ -37,6 +37,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { getStatusLabel, getStatusProgress } from "@/lib/partner-status";
+import { parseDealAmount } from "@/lib/portal-records";
 
 type PartnerSpotlight = {
   id: string;
@@ -62,6 +63,14 @@ type DashboardMetric = {
   hint: string;
   tone: "default" | "primary" | "success" | "warning" | "info";
 };
+
+function resolveInrAmount(input: { amount: string; amount_inr?: number | null }) {
+  const inrAmount = Number(input.amount_inr);
+  if (Number.isFinite(inrAmount) && inrAmount > 0) {
+    return inrAmount;
+  }
+  return parseDealAmount(input.amount);
+}
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
@@ -95,7 +104,7 @@ function DashboardPage() {
       let dealQuery = hasDealAccess
         ? supabase
             .from("portal_deals")
-            .select("id, amount, stage, status")
+            .select("id, amount, amount_inr, stage, status")
             .order("updated_at", { ascending: false })
         : null;
       let customerQuery = hasDealAccess ? supabase.from("portal_customers").select("id") : null;
@@ -185,6 +194,7 @@ function DashboardPage() {
           (dealsRes.data as Array<{
             id: string;
             amount: string;
+            amount_inr?: number | null;
             stage: string;
             status: string;
             user_id: string | null;
@@ -240,8 +250,7 @@ function DashboardPage() {
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const pipeline = dealRows.reduce((sum, deal) => {
-        const value = Number.parseFloat(String(deal.amount).replace(/[^0-9.]/g, ""));
-        return sum + (Number.isFinite(value) ? value : 0);
+        return sum + resolveInrAmount(deal);
       }, 0);
       const openDeals = dealRows.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
       const wonDeals = dealRows.filter((deal) => deal.stage === "won").length;
@@ -258,7 +267,7 @@ function DashboardPage() {
         {
           id: "pipeline",
           label: "Pipeline value",
-          value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+          value: `₹${pipeline.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
           hint: "Across all live opportunity rows",
           tone: "primary",
         },

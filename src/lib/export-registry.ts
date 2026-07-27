@@ -231,7 +231,7 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
     filenameStem: "livey-customers",
     visibleTo: ALL_ROLES,
     routePath: "/customers",
-    scopeMode: "partner-or-user",
+    scopeMode: "partner",
     columns: [
       { key: "id", header: "ID" },
       { key: "company_name", header: "Company" },

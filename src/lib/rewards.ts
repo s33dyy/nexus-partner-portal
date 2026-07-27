@@ -67,8 +67,8 @@ type RewardQuery = {
   select(columns?: string): RewardQuery;
   count(): RewardQuery;
   eq(column: string, value: unknown): RewardQuery;
-  maybeSingle(): Promise<{ data: { id: string } | null; error: null | Error }>;
-  insert(payload: Record<string, unknown>): Promise<{ error: unknown | null }>;
+  maybeSingle(): PromiseLike<{ data: unknown; error: unknown | null }>;
+  insert(payload: Record<string, unknown>): PromiseLike<{ error: unknown | null }>;
 };
 
 type RewardDbClient = {

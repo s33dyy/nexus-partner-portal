@@ -31,6 +31,10 @@ export type DealRewardAllocation = {
   points: number;
 };
 
+export type CollaboratorMemberOption = {
+  id: string;
+};
+
 export function buildPresetCollaboratorSplits(collaboratorCount: number): number[] {
   if (collaboratorCount === 1) return [100];
   if (collaboratorCount === 2) return [60, 40];
@@ -60,6 +64,20 @@ export function applyPresetCollaboratorSplits(userIds: string[]): DealCollaborat
     splitPercent: splits[index] ?? 0,
     sortOrder: index,
   }));
+}
+
+export function filterAddableCollaboratorMembers<T extends CollaboratorMemberOption>(
+  members: T[],
+  collaborators: DealCollaboratorDraft[],
+  currentUserId?: string | null,
+) {
+  const selectedIds = new Set(collaborators.map((collaborator) => collaborator.userId));
+
+  return members.filter((member) => {
+    if (selectedIds.has(member.id)) return false;
+    if (currentUserId && member.id === currentUserId) return false;
+    return true;
+  });
 }
 
 export function rebalanceCollaboratorSplits(

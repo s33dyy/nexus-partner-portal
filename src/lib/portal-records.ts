@@ -12,6 +12,10 @@ export const DEAL_STAGE_ORDER = [
 
 export type DealStage = (typeof DEAL_STAGE_ORDER)[number];
 
+export const DEAL_CURRENCY_OPTIONS = ["INR", "USD", "EUR", "GBP", "AED", "SGD"] as const;
+
+export type DealCurrencyCode = (typeof DEAL_CURRENCY_OPTIONS)[number];
+
 export type DealRecord = {
   id: string;
   account_name: string;
@@ -26,6 +30,12 @@ export type DealRecord = {
   status: string;
   quantity: number;
   amount: string;
+  currency_code: string;
+  amount_value: number | null;
+  amount_inr: number | null;
+  fx_rate: number | null;
+  fx_provider: string | null;
+  fx_rate_fetched_at: string | null;
   customer_budget: string | null;
   probability: number;
   possible_close_date: string | null;
@@ -184,6 +194,23 @@ export function parseDealAmount(amount: string | number): number {
   const numeric =
     typeof amount === "number" ? amount : Number.parseFloat(String(amount).replace(/[^0-9.]/g, ""));
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+export function normalizeDealCurrencyCode(value: string | null | undefined): string {
+  const normalized = value?.trim().toUpperCase();
+  return normalized || "INR";
+}
+
+export function isDealCurrencyCode(value: string): value is DealCurrencyCode {
+  return (DEAL_CURRENCY_OPTIONS as readonly string[]).includes(value);
+}
+
+export function getDealInrAmount(input: Pick<DealRecord, "amount" | "amount_inr">): number {
+  const explicitAmount = Number(input.amount_inr);
+  if (Number.isFinite(explicitAmount) && explicitAmount > 0) {
+    return explicitAmount;
+  }
+  return parseDealAmount(input.amount);
 }
 
 export function requiresSuperAdminApproval(amount: string | number): boolean {

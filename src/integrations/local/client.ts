@@ -95,6 +95,55 @@ const createUser = createServerFn({ method: "POST" })
     return createWorkspaceUser(data);
   });
 
+const createUsersBulk = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      rows: Array<{
+        full_name: string;
+        email: string;
+        phone: string;
+        company_name: string | null;
+        password: string;
+        role: AppRole;
+        partner_status?: PartnerStatus;
+        partner_id?: string;
+        must_reset_password?: boolean;
+      }>;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    const { createWorkspaceUsersBulk } = await import("@/server/livey-service.server");
+    return createWorkspaceUsersBulk(data);
+  });
+
+const createTeamMembersBulk = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      company_name: string;
+      rows: Array<{
+        full_name: string;
+        email: string;
+        phone: string;
+        password: string;
+        role_title: string;
+        portal_role: "partner_admin" | "partner_user";
+        responsibility: string;
+        status: "invited" | "active" | "paused";
+      }>;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    const { createPartnerTeamMembersBulk } = await import("@/server/livey-service.server");
+    return createPartnerTeamMembersBulk(data);
+  });
+
+const quoteFxToInr = createServerFn({ method: "POST" })
+  .validator((input: { sourceCurrency: string; amount: number }) => input)
+  .handler(async ({ data }) => {
+    const { quoteCurrencyToInr } = await import("@/server/fx-rates.server");
+    return quoteCurrencyToInr(data);
+  });
+
 const requestReset = createServerFn({ method: "POST" })
   .validator((input: { email: string; redirectTo?: string }) => input)
   .handler(async ({ data }) => {
@@ -396,6 +445,58 @@ type AuthApi = {
       partner_status: PartnerStatus;
     }>
   >;
+  createWorkspaceUsersBulk: (input: {
+    rows: Array<{
+      full_name: string;
+      email: string;
+      phone: string;
+      company_name: string | null;
+      password: string;
+      role: AppRole;
+      partner_status?: PartnerStatus;
+      partner_id?: string;
+      must_reset_password?: boolean;
+    }>;
+  }) => Promise<
+    RpcResult<{
+      createdCount: number;
+      users: Array<{
+        id: string;
+        email: string;
+        full_name: string;
+        phone: string | null;
+        company_name: string | null;
+        role: AppRole;
+        partner_status: PartnerStatus;
+      }>;
+    }>
+  >;
+  createPartnerTeamMembersBulk: (input: {
+    company_name: string;
+    rows: Array<{
+      full_name: string;
+      email: string;
+      phone: string;
+      password: string;
+      role_title: string;
+      portal_role: "partner_admin" | "partner_user";
+      responsibility: string;
+      status: "invited" | "active" | "paused";
+    }>;
+  }) => Promise<RpcResult<{ createdCount: number }>>;
+  quoteCurrencyToInr: (input: {
+    sourceCurrency: string;
+    amount: number;
+  }) => Promise<
+    RpcResult<{
+      sourceCurrency: string;
+      amount: number;
+      rate: number;
+      computedInrAmount: number;
+      provider: string;
+      timestamp: string;
+    }>
+  >;
   issueTemporaryPassword: (userId: string) => Promise<RpcResult<{ temporaryPassword: string }>>;
 };
 
@@ -483,6 +584,39 @@ const auth: AuthApi = {
   async createWorkspaceUser(input) {
     try {
       const data = await createUser({ data: input });
+      return { data, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  },
+  async createWorkspaceUsersBulk(input) {
+    try {
+      const data = await createUsersBulk({ data: input });
+      return { data, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  },
+  async createPartnerTeamMembersBulk(input) {
+    try {
+      const data = await createTeamMembersBulk({ data: input });
+      return { data, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  },
+  async quoteCurrencyToInr(input) {
+    try {
+      const data = await quoteFxToInr({ data: input });
       return { data, error: null };
     } catch (error) {
       return {

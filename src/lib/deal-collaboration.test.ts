@@ -4,6 +4,7 @@ import {
   buildPresetCollaboratorSplits,
   calculateDealRewardAllocations,
   buildDealCollaboratorPayloads,
+  filterAddableCollaboratorMembers,
   isDealCollaboratorEditingLocked,
 } from "@/lib/deal-collaboration";
 
@@ -81,4 +82,18 @@ test("buildDealCollaboratorPayloads keeps invitation order and stamps deal ids",
 test("isDealCollaboratorEditingLocked returns true for closed deals", () => {
   expect(isDealCollaboratorEditingLocked({ stage: "won", status: "won" })).toBe(true);
   expect(isDealCollaboratorEditingLocked({ stage: "approved", status: "approved" })).toBe(false);
+});
+
+test("filterAddableCollaboratorMembers excludes the authenticated user and existing collaborators", () => {
+  expect(
+    filterAddableCollaboratorMembers(
+      [
+        { id: "user-a" },
+        { id: "user-b" },
+        { id: "user-c" },
+      ],
+      [{ userId: "user-b", splitPercent: 100, sortOrder: 0 }],
+      "user-a",
+    ),
+  ).toEqual([{ id: "user-c" }]);
 });
