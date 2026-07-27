@@ -495,7 +495,7 @@ function DealsPage() {
   const updateListFilters = useCallback(
     (next: { q?: string; stage?: DealStage | "all"; status?: DealListStatusFilter }) => {
       void navigate({
-        to: "/_authenticated/deals",
+        to: "/deals",
         replace: true,
         search: (current) => ({
           ...current,
