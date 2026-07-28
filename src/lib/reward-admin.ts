@@ -81,7 +81,22 @@ function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
     throw new Error("The selected file could not be read.");
   }
 
-  return (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
+  const rawRows = (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<
+    Record<string, unknown>
+  >) ?? [];
+
+  return rawRows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [
+        key
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, ""),
+        value,
+      ]),
+    ),
+  );
 }
 
 export async function readRewardCatalogImportRows(file: File) {
