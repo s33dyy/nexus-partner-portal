@@ -492,7 +492,7 @@ function PipelinePage() {
                             </div>
                             <Badge className="rounded-full px-3 py-1">{deal.amount}</Badge>
                           </div>
-                          <div className="mt-3 grid gap-2 overflow-hidden text-xs text-muted-foreground transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-48 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-48 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
+                          <div className="mt-3 grid gap-2 overflow-hidden text-xs text-muted-foreground transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-[28rem] lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-[28rem] lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
                             <div className="grid gap-2">
                               <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.owner_name}</div>
                               <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.region}</div>
