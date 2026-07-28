@@ -12,6 +12,7 @@ import {
 import {
   buildImportValidationResult,
   parseSpreadsheetRows,
+  type ParsedSpreadsheet,
   type ImportValidationError,
   type ImportValidationResult,
   type TemplateColumnDefinition,
@@ -84,6 +85,58 @@ export type ValidatedDealImportRow = {
 export type DealImportValidationError = ImportValidationError;
 
 export type DealImportValidationResult = ImportValidationResult<ValidatedDealImportRow>;
+
+const DEAL_IMPORT_HEADER_ALIASES = {
+  account_name: ["Account", "Account Name"],
+  contact_name: ["Client", "Contact", "Contact Name"],
+  owner_name: ["Owner", "POC"],
+  country: ["Country"],
+  region: ["Region"],
+  product: ["Product"],
+  quantity: ["Quantity"],
+  amount: ["Amount", "Deal Value", "Value"],
+  currency_code: ["Currency", "Currency Code"],
+  customer_budget: ["Customer Budget", "Budget"],
+  possible_close_date: ["Possible Close Date"],
+  probability: ["Probability"],
+  source: ["Source"],
+  notes: ["Notes"],
+} as const satisfies Record<DealImportTemplateColumn, string[]>;
+
+const DEAL_IMPORT_HEADER_LOOKUP = new Map<string, DealImportTemplateColumn>(
+  DEAL_IMPORT_TEMPLATE_COLUMNS_ALL.flatMap((column) => {
+    const aliases = [column.header, ...(DEAL_IMPORT_HEADER_ALIASES[column.key] ?? [])];
+    return aliases.map(
+      (alias) =>
+        [alias.trim().toLowerCase(), column.key] as [string, DealImportTemplateColumn],
+    );
+  }),
+);
+
+function resolveDealImportHeader(value: string) {
+  return DEAL_IMPORT_HEADER_LOOKUP.get(value.trim().toLowerCase()) ?? value.trim();
+}
+
+export function normalizeDealImportSpreadsheet(parsed: ParsedSpreadsheet): ParsedSpreadsheet {
+  const headers = parsed.headers.map((header) => resolveDealImportHeader(header));
+  const rows = parsed.rows.map((row) => {
+    const normalizedRow: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(row)) {
+      const normalizedKey = resolveDealImportHeader(key);
+      const existingValue = normalizedRow[normalizedKey];
+      if (
+        existingValue == null ||
+        existingValue === "" ||
+        (typeof existingValue === "string" && existingValue.trim() === "")
+      ) {
+        normalizedRow[normalizedKey] = value;
+      }
+    }
+    return normalizedRow;
+  });
+
+  return { headers, rows };
+}
 
 export function getDealImportTemplateColumns(
   input: DealImportTemplateOptions = {},

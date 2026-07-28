@@ -5,6 +5,7 @@ import {
   DEAL_IMPORT_TEMPLATE_COLUMNS,
   getDealImportTemplateColumns,
   getDealImportTemplateSample,
+  normalizeDealImportSpreadsheet,
   parseDealImportWorkbook,
   validateDealImportRows,
 } from "@/lib/deal-import";
@@ -258,6 +259,65 @@ test("validateDealImportRows requires amount strings to contain a numeric value"
     {
       rowNumber: 2,
       messages: ["Amount must include a numeric value"],
+    },
+  ]);
+});
+
+test("normalizeDealImportSpreadsheet accepts export-style deal headers", () => {
+  const normalized = normalizeDealImportSpreadsheet({
+    headers: [
+      "Account",
+      "Client",
+      "Owner",
+      "Country",
+      "Region",
+      "Product",
+      "Quantity",
+      "Amount",
+      "Currency",
+      "Customer Budget",
+      "Possible Close Date",
+      "Probability",
+      "Source",
+      "Notes",
+    ],
+    rows: [
+      {
+        Account: "Northstar Systems",
+        Client: "Repro Client",
+        Owner: "Maya Chen",
+        Country: "India",
+        Region: "India West",
+        Product: "LIVEY WC350 QHD Webcam",
+        Quantity: 1,
+        Amount: "5000",
+        Currency: "INR",
+        "Customer Budget": "Approved",
+        "Possible Close Date": "2026-08-15",
+        Probability: 50,
+        Source: "Partner referral",
+        Notes: "Imported from export headers",
+      },
+    ],
+  });
+
+  expect(normalized.headers).toEqual(DEAL_IMPORT_TEMPLATE_COLUMNS.map((column) => column.header));
+  expect(normalized.rows).toEqual([
+    {
+      account_name: "Northstar Systems",
+      contact_name: "Repro Client",
+      owner_name: "Maya Chen",
+      country: "India",
+      region: "India West",
+      product: "LIVEY WC350 QHD Webcam",
+      quantity: 1,
+      amount: "5000",
+      currency_code: "INR",
+      customer_budget: "Approved",
+      possible_close_date: "2026-08-15",
+      probability: 50,
+      source: "Partner referral",
+      notes: "Imported from export headers",
     },
   ]);
 });

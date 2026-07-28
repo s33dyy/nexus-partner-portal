@@ -56,6 +56,7 @@ import {
 import {
   getDealImportTemplateColumns,
   getDealImportTemplateSample,
+  normalizeDealImportSpreadsheet,
   validateDealImportRows,
   type DealImportValidationError,
   type ValidatedDealImportRow,
@@ -942,7 +943,9 @@ function DealsPage() {
     setImporting(true);
 
     try {
-      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const parsed = normalizeDealImportSpreadsheet(
+        parseSpreadsheetFile(await file.arrayBuffer(), file.name),
+      );
       const templateErrors = validateImportTemplate(parsed, dealImportTemplateColumns);
       if (templateErrors.length > 0) {
         setImportErrors(templateErrors);
