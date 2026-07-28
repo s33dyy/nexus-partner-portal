@@ -4,6 +4,8 @@ import {
   validateCustomerImportRows,
   CUSTOMER_IMPORT_TEMPLATE_COLUMNS,
 } from "@/lib/customer-import";
+import { buildCsv } from "@/lib/csv-export";
+import { DEAL_IMPORT_TEMPLATE_COLUMNS, DEAL_IMPORT_TEMPLATE_SAMPLE, validateDealImportRows } from "@/lib/deal-import";
 import { validateImportTemplate } from "@/lib/spreadsheet-import";
 import { REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS as REWARD_TEMPLATE_COLUMNS } from "@/lib/reward-admin";
 import {
@@ -12,6 +14,7 @@ import {
   validateTeamImportRows,
 } from "@/lib/team-import";
 import { USER_IMPORT_TEMPLATE_COLUMNS, validateUserImportRows } from "@/lib/user-import";
+import { parseSpreadsheetFile } from "@/lib/spreadsheet-import";
 
 test("validateUserImportRows normalizes valid rows and keeps template columns stable", () => {
   const result = validateUserImportRows([
@@ -220,6 +223,19 @@ test("validateImportTemplate rejects empty imports even when template headers ar
       messages: ["Add at least one data row before importing this file."],
     },
   ]);
+});
+
+test("deal template CSV round-trips through the spreadsheet parser", () => {
+  const csv = buildCsv(
+    DEAL_IMPORT_TEMPLATE_COLUMNS.map((column) => ({ key: column.key, header: column.header })),
+    DEAL_IMPORT_TEMPLATE_SAMPLE,
+  );
+  const parsed = parseSpreadsheetFile(new TextEncoder().encode(csv).buffer, "deal-template.csv");
+  const result = validateDealImportRows(parsed.rows);
+
+  expect(parsed.headers[0]).toBe("account_name");
+  expect(result.errors).toEqual([]);
+  expect(result.rows).toHaveLength(1);
 });
 
 test("resolveTeamCompanyName rejects placeholder or blank company labels", () => {

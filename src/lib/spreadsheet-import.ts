@@ -39,7 +39,9 @@ export function parseSpreadsheetFile(
 ): ParsedSpreadsheet {
   const lowerName = filename.trim().toLowerCase();
   const workbook = lowerName.endsWith(".csv")
-    ? read(new TextDecoder().decode(new Uint8Array(input)), { type: "string" })
+    ? read(new TextDecoder().decode(new Uint8Array(input)).replace(/^\uFEFF/, ""), {
+        type: "string",
+      })
     : read(input, { type: "array" });
   const [firstSheetName] = workbook.SheetNames;
   if (!firstSheetName) return { headers: [], rows: [] };
