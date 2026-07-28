@@ -151,47 +151,51 @@ function DashboardPage() {
         partnerQuery = partnerQuery.eq("owner_user_id", profile.id);
       }
 
-      const queries = [
-        dealQuery,
-        customerQuery,
-        partnerQuery,
-        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
-        notificationQuery,
-        rewardQuery,
-      ];
-
       const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes, collaboratorRes] =
-        await Promise.all([
-          ...queries.map((q) => q ?? Promise.resolve({ data: [], error: null })),
+        await Promise.allSettled([
+          dealQuery ?? Promise.resolve({ data: [], error: null }),
+          customerQuery ?? Promise.resolve({ data: [], error: null }),
+          partnerQuery,
+          supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+          notificationQuery,
+          rewardQuery,
           supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
         ]);
 
-      if (
-        dealsRes.error ||
-        customersRes.error ||
-        partnersRes.error ||
-        newsRes.error ||
-        notifRes.error ||
-        rewardRes.error ||
-        collaboratorRes.error
-      ) {
-        throw (
-          dealsRes.error ??
-          customersRes.error ??
-          partnersRes.error ??
-          newsRes.error ??
-          notifRes.error ??
-          rewardRes.error ??
-          collaboratorRes.error
-        );
+      const dealResult = dealsRes.status === "fulfilled" ? dealsRes.value : { data: [], error: dealsRes.reason };
+      const customerResult =
+        customersRes.status === "fulfilled" ? customersRes.value : { data: [], error: customersRes.reason };
+      const partnerResult =
+        partnersRes.status === "fulfilled" ? partnersRes.value : { data: [], error: partnersRes.reason };
+      const newsResult = newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
+      const notifResult =
+        notifRes.status === "fulfilled" ? notifRes.value : { data: [], error: notifRes.reason };
+      const rewardResult =
+        rewardRes.status === "fulfilled" ? rewardRes.value : { data: [], error: rewardRes.reason };
+      const collaboratorResult =
+        collaboratorRes.status === "fulfilled"
+          ? collaboratorRes.value
+          : { data: [], error: collaboratorRes.reason };
+
+      const partialFailures = [
+        dealResult.error,
+        customerResult.error,
+        partnerResult.error,
+        newsResult.error,
+        notifResult.error,
+        rewardResult.error,
+        collaboratorResult.error,
+      ].filter(Boolean);
+      if (partialFailures.length > 0) {
+        console.error("Dashboard load encountered partial failures", partialFailures);
       }
 
       const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(
-        (collaboratorRes.data as Array<{ deal_id: string; user_id: string }> | null) ?? [],
+        (collaboratorResult.data as Array<{ deal_id: string; user_id: string }> | null) ?? [],
       );
       const dealRows = filterVisibleDeals(
         (
-          (dealsRes.data as Array<{
+          (dealResult.data as Array<{
             id: string;
             amount: string;
             amount_inr?: number | null;
@@ -216,12 +220,12 @@ function DashboardPage() {
           isPartnerAdmin: hasRole("partner_admin"),
         },
       );
-      const customerRows = (customersRes.data as Array<{ id: string }> | null) ?? [];
-      const partnerRows = (partnersRes.data as PartnerSpotlight[] | null) ?? [];
-      const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
-      const notifRows = (notifRes.data as NotificationFeedRow[] | null) ?? [];
+      const customerRows = (customerResult.data as Array<{ id: string }> | null) ?? [];
+      const partnerRows = (partnerResult.data as PartnerSpotlight[] | null) ?? [];
+      const newsRows = (newsResult.data as NewsPostRecord[] | null) ?? [];
+      const notifRows = (notifResult.data as NotificationFeedRow[] | null) ?? [];
       const rewardRows =
-        (rewardRes.data as Array<{
+        (rewardResult.data as Array<{
           id: string;
           user_id: string | null;
           partner_id: string | null;

@@ -480,9 +480,9 @@ function PipelinePage() {
                       </div>
                     ) : (
                       column.deals.map((deal) => (
-                        <div
+                      <div
                           key={deal.id}
-                          className="group rounded-xl border border-border/70 bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-1 focus-within:ring-ring"
+                          className="group relative rounded-xl border border-border/70 bg-background p-3 pb-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-1 focus-within:ring-ring"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -502,7 +502,7 @@ function PipelinePage() {
                               {formatDealProbability(deal.probability)}
                             </div>
                           </div>
-                          <div className="mt-3 grid gap-2 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
+                          <div className="mt-3 grid gap-2 transition-all lg:absolute lg:inset-x-3 lg:bottom-3 lg:mt-0 lg:max-h-0 lg:overflow-hidden lg:opacity-0 lg:pointer-events-none lg:translate-y-2 lg:group-hover:max-h-24 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-24 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
                             <Button
                               className="w-full"
                               size="sm"

@@ -102,7 +102,7 @@ function PartnerPage() {
     try {
       const currentUserId = authProfile?.id;
       const currentPartnerId = authProfile?.partner_id ?? null;
-      const [profileRes, partnerRes, docsRes, notesRes, newsRes] = await Promise.all([
+      const [profileRes, partnerRes, docsRes, notesRes, newsRes] = await Promise.allSettled([
         currentUserId
           ? supabase.from("profiles").select("*").eq("id", currentUserId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
@@ -126,23 +126,28 @@ function PartnerPage() {
         supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
       ]);
 
-      if (
-        profileRes.error ||
-        partnerRes.error ||
-        docsRes.error ||
-        notesRes.error ||
-        newsRes.error
-      ) {
-        throw (
-          profileRes.error ?? partnerRes.error ?? docsRes.error ?? notesRes.error ?? newsRes.error
-        );
+      const profileResult = profileRes.status === "fulfilled" ? profileRes.value : { data: null, error: profileRes.reason };
+      const partnerResult = partnerRes.status === "fulfilled" ? partnerRes.value : { data: null, error: partnerRes.reason };
+      const docsResult = docsRes.status === "fulfilled" ? docsRes.value : { data: [], error: docsRes.reason };
+      const notesResult = notesRes.status === "fulfilled" ? notesRes.value : { data: [], error: notesRes.reason };
+      const newsResult = newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
+
+      const partialFailures = [
+        profileResult.error,
+        partnerResult.error,
+        docsResult.error,
+        notesResult.error,
+        newsResult.error,
+      ].filter(Boolean);
+      if (partialFailures.length > 0) {
+        console.error("Partner summary load encountered partial failures", partialFailures);
       }
 
-      const profileRow = (profileRes.data as Profile | null) ?? null;
-      const partnerRow = (partnerRes.data as Partner | null) ?? null;
-      const docRows = (docsRes.data as DocRow[] | null) ?? [];
-      const noteRows = (notesRes.data as NoteRow[] | null) ?? [];
-      const newsRows = (newsRes.data as NewsPostRecord[] | null) ?? [];
+      const profileRow = (profileResult.data as Profile | null) ?? null;
+      const partnerRow = (partnerResult.data as Partner | null) ?? null;
+      const docRows = (docsResult.data as DocRow[] | null) ?? [];
+      const noteRows = (notesResult.data as NoteRow[] | null) ?? [];
+      const newsRows = (newsResult.data as NewsPostRecord[] | null) ?? [];
 
       setProfile(profileRow);
       setPartner(partnerRow);
