@@ -502,7 +502,7 @@ function PipelinePage() {
                               {formatDealProbability(deal.probability)}
                             </div>
                           </div>
-                          <div className="mt-3 grid gap-2 transition-all lg:absolute lg:inset-x-3 lg:bottom-3 lg:mt-0 lg:max-h-0 lg:overflow-hidden lg:opacity-0 lg:pointer-events-none lg:translate-y-2 lg:group-hover:max-h-24 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-24 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
+                          <div className="mt-3 grid gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-24 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-24 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
                             <Button
                               className="w-full"
                               size="sm"
