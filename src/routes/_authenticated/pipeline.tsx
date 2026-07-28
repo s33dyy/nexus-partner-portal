@@ -489,37 +489,37 @@ function PipelinePage() {
                               <div className="truncate text-sm font-medium">
                                 {deal.account_name}
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {deal.owner_name}
-                              </div>
                             </div>
                             <Badge className="rounded-full px-3 py-1">{deal.amount}</Badge>
                           </div>
-                          <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
-                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.region}</div>
-                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.product}</div>
-                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-                              {formatDealProbability(deal.probability)}
+                          <div className="mt-3 grid gap-2 overflow-hidden text-xs text-muted-foreground transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-48 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-48 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
+                            <div className="grid gap-2">
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.owner_name}</div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.region}</div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.product}</div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                {formatDealProbability(deal.probability)}
+                              </div>
                             </div>
-                          </div>
-                          <div className="mt-3 grid gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-24 lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-24 lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
-                            <Button
-                              className="w-full"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void moveDeal(deal)}
-                            >
-                              Move forward
-                              <MoveRight className="ml-2 h-4 w-4" />
-                            </Button>
-                            <Button
-                              className="w-full"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => openNote(deal)}
-                            >
-                              Notes
-                            </Button>
+                            <div className="grid gap-2 pt-1">
+                              <Button
+                                className="w-full"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void moveDeal(deal)}
+                              >
+                                Move forward
+                                <MoveRight className="ml-2 h-4 w-4" />
+                              </Button>
+                              <Button
+                                className="w-full"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => openNote(deal)}
+                              >
+                                Notes
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       ))
