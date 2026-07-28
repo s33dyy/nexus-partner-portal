@@ -54,9 +54,8 @@ import {
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
 import {
-  DEAL_IMPORT_TEMPLATE_COLUMNS,
-  DEAL_IMPORT_TEMPLATE_SAMPLE,
-  parseDealImportWorkbook,
+  getDealImportTemplateColumns,
+  getDealImportTemplateSample,
   validateDealImportRows,
   type DealImportValidationError,
   type ValidatedDealImportRow,
@@ -76,7 +75,12 @@ import {
   type DealStage,
   type TeamMemberRecord,
 } from "@/lib/portal-records";
-import { buildImportSummaryMessage, downloadTemplateCsv } from "@/lib/spreadsheet-import";
+import {
+  buildImportSummaryMessage,
+  downloadTemplateCsv,
+  parseSpreadsheetFile,
+  validateImportTemplate,
+} from "@/lib/spreadsheet-import";
 
 type DealForm = {
   partner_id: string | null;
@@ -164,6 +168,20 @@ const EMPTY_FORM: DealForm = {
 
 function normalizeCompanyName(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
+function buildCustomerScopeKey(input: {
+  partnerId?: string | null;
+  userId?: string | null;
+  companyName: string;
+}) {
+  const normalizedCompany = normalizeCompanyName(input.companyName);
+  const scope = input.partnerId
+    ? `partner:${input.partnerId}`
+    : input.userId
+      ? `user:${input.userId}`
+      : "global";
+  return `${scope}:${normalizedCompany}`;
 }
 
 function normalizeNullableNumber(value: unknown) {
@@ -900,11 +918,18 @@ function DealsPage() {
     }
   };
 
+  const dealImportTemplateOptions = {
+    includeAccountName: !hasRole("partner_user"),
+    includeOwnerName: hasRole("super_admin"),
+  };
+  const dealImportTemplateColumns = getDealImportTemplateColumns(dealImportTemplateOptions);
+  const dealImportTemplateSample = getDealImportTemplateSample(dealImportTemplateOptions);
+
   const downloadImportTemplate = () => {
     downloadTemplateCsv({
       filenameStem: "livey-deal-import",
-      columns: DEAL_IMPORT_TEMPLATE_COLUMNS,
-      sampleRows: DEAL_IMPORT_TEMPLATE_SAMPLE,
+      columns: dealImportTemplateColumns,
+      sampleRows: dealImportTemplateSample,
     });
   };
 
@@ -917,8 +942,15 @@ function DealsPage() {
     setImporting(true);
 
     try {
-      const parsedRows = parseDealImportWorkbook(await file.arrayBuffer(), file.name);
-      const validation = validateDealImportRows(parsedRows);
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(parsed, dealImportTemplateColumns);
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the template CSV headers and add at least one row before uploading again");
+        return;
+      }
+
+      const validation = validateDealImportRows(parsed.rows, dealImportTemplateOptions);
       const accountIdByName = new Map(
         accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
       );
@@ -1031,7 +1063,10 @@ function DealsPage() {
         return;
       }
 
-      const payloads = importRowsWithFx.map((row) => {
+      const resolvedRows = importRowsWithFx.map((row) => {
+        const partnerId = hasRole("super_admin")
+          ? (accountIdLookup.get(normalizeCompanyName(row.account_name)) ?? null)
+          : (profile?.partner_id ?? null);
         const accountName = isPartnerUser
           ? profile?.full_name || profile?.company_name || row.account_name || "Partner User"
           : row.account_name;
@@ -1040,50 +1075,130 @@ function DealsPage() {
           : isPartnerUser
             ? partnerAdminName || profile?.full_name || row.owner_name || "Partner Admin"
             : row.owner_name;
+        const customerScopeUserId = partnerId ? null : (profile?.id ?? null);
+        const customerKey = buildCustomerScopeKey({
+          partnerId,
+          userId: customerScopeUserId,
+          companyName: row.contact_name,
+        });
         const autoApproved = !requiresSuperAdminApproval(parseDealAmount(row.amount));
 
         return {
-          id: globalThis.crypto.randomUUID(),
-          partner_id: hasRole("super_admin")
-            ? (accountIdLookup.get(normalizeCompanyName(row.account_name)) ?? null)
-            : (profile?.partner_id ?? null),
-          customer_id: null,
+          row,
+          partner_id: partnerId,
+          customer_scope_user_id: customerScopeUserId,
           poc_profile_id: hasRole("partner_admin")
             ? (profile?.id ?? null)
             : isPartnerUser
               ? (partnerAdminProfileId ?? profile?.id ?? null)
               : null,
+          customer_key: customerKey,
           account_name: accountName,
-          contact_name: row.contact_name,
           owner_name: ownerName,
-          country: row.country || "India",
-          region: row.region,
-          product: row.product,
+          autoApproved,
+        };
+      });
+
+      let customerQuery = supabase
+        .from("portal_customers")
+        .select("id, company_name, partner_id, user_id");
+      customerQuery = applyPartnerScope(customerQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
+
+      const { data: customerRows, error: customerLoadError } = await customerQuery;
+      if (customerLoadError) throw customerLoadError;
+
+      const customerIdByKey = new Map<string, string>();
+      for (const customer of (customerRows ?? []) as Array<{
+        id: string;
+        company_name: string;
+        partner_id: string | null;
+        user_id: string | null;
+      }>) {
+        customerIdByKey.set(
+          buildCustomerScopeKey({
+            partnerId: customer.partner_id,
+            userId: customer.user_id,
+            companyName: customer.company_name,
+          }),
+          customer.id,
+        );
+      }
+
+      const customerPayloads = resolvedRows.flatMap((resolvedRow) => {
+        if (customerIdByKey.has(resolvedRow.customer_key)) {
+          return [];
+        }
+
+        const customerId = globalThis.crypto.randomUUID();
+        customerIdByKey.set(resolvedRow.customer_key, customerId);
+        return [
+          {
+            id: customerId,
+            company_name: resolvedRow.row.contact_name,
+            account_owner: resolvedRow.owner_name,
+            region: resolvedRow.row.region,
+            segment: "Imported",
+            health_score: 50,
+            mrr: resolvedRow.row.amount,
+            renewal_date: resolvedRow.row.possible_close_date || defaultCloseDate,
+            status: "active",
+            next_step: resolvedRow.row.notes || "Imported from deal CSV",
+            last_touch: `Imported from ${file.name}`,
+            user_id: resolvedRow.customer_scope_user_id,
+            partner_id: resolvedRow.partner_id,
+            is_seed: false,
+            created_at: today,
+            updated_at: today,
+          },
+        ];
+      });
+
+      if (customerPayloads.length > 0) {
+        const { error: customerInsertError } = await supabase
+          .from("portal_customers")
+          .insert(customerPayloads);
+        if (customerInsertError) throw customerInsertError;
+      }
+
+      const payloads = resolvedRows.map((resolvedRow) => ({
+          id: globalThis.crypto.randomUUID(),
+          partner_id: resolvedRow.partner_id,
+          customer_id: customerIdByKey.get(resolvedRow.customer_key) ?? null,
+          poc_profile_id: resolvedRow.poc_profile_id,
+          account_name: resolvedRow.account_name,
+          contact_name: resolvedRow.row.contact_name,
+          owner_name: resolvedRow.owner_name,
+          country: resolvedRow.row.country || "India",
+          region: resolvedRow.row.region,
+          product: resolvedRow.row.product,
           stage: EMPTY_FORM.stage,
-          status: autoApproved ? "approved" : "submitted",
-          quantity: row.quantity,
-          amount: row.amount,
-          currency_code: row.currency_code,
-          amount_value: row.amount_value,
-          amount_inr: row.amount_inr,
-          fx_rate: row.fx_rate,
-          fx_provider: row.fx_provider,
-          fx_rate_fetched_at: row.fx_rate_fetched_at,
-          customer_budget: row.customer_budget || null,
-          probability: row.probability,
-          possible_close_date: row.possible_close_date || null,
-          close_date: row.possible_close_date || defaultCloseDate,
-          source: row.source,
+          status: resolvedRow.autoApproved ? "approved" : "submitted",
+          quantity: resolvedRow.row.quantity,
+          amount: resolvedRow.row.amount,
+          currency_code: resolvedRow.row.currency_code,
+          amount_value: resolvedRow.row.amount_value,
+          amount_inr: resolvedRow.row.amount_inr,
+          fx_rate: resolvedRow.row.fx_rate,
+          fx_provider: resolvedRow.row.fx_provider,
+          fx_rate_fetched_at: resolvedRow.row.fx_rate_fetched_at,
+          customer_budget: resolvedRow.row.customer_budget || null,
+          probability: resolvedRow.row.probability,
+          possible_close_date: resolvedRow.row.possible_close_date || null,
+          close_date: resolvedRow.row.possible_close_date || defaultCloseDate,
+          source: resolvedRow.row.source,
           last_touch: `Imported from ${file.name}`,
-          notes: row.notes,
+          notes: resolvedRow.row.notes,
           user_id: profile?.id ?? null,
           is_hidden_to_team: false,
           reward_rate_percent: EMPTY_FORM.reward_rate_percent,
           is_seed: false,
           created_at: today,
           updated_at: today,
-        };
-      });
+      }));
 
       const { error } = await supabase.from("portal_deals").insert(payloads);
       if (error) throw error;

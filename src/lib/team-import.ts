@@ -13,7 +13,6 @@ export const TEAM_IMPORT_TEMPLATE_COLUMNS = [
   { key: "role_title", header: "role_title" },
   { key: "portal_role", header: "portal_role" },
   { key: "responsibility", header: "responsibility" },
-  { key: "status", header: "status" },
 ] as const satisfies readonly TemplateColumnDefinition[];
 
 export const TEAM_IMPORT_TEMPLATE_SAMPLE = [
@@ -25,7 +24,6 @@ export const TEAM_IMPORT_TEMPLATE_SAMPLE = [
     role_title: "Operations Manager",
     portal_role: "partner_user",
     responsibility: "Deals and customer follow-up",
-    status: "active",
   },
 ];
 

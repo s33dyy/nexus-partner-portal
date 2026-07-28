@@ -14,7 +14,6 @@ export const USER_IMPORT_TEMPLATE_COLUMNS = [
   { key: "company_name", header: "company_name" },
   { key: "password", header: "password" },
   { key: "role", header: "role" },
-  { key: "partner_status", header: "partner_status" },
 ] as const satisfies readonly TemplateColumnDefinition[];
 
 export const USER_IMPORT_TEMPLATE_SAMPLE = [
@@ -25,7 +24,6 @@ export const USER_IMPORT_TEMPLATE_SAMPLE = [
     company_name: "Techilla",
     password: "TempPass123!",
     role: "partner_admin",
-    partner_status: "pending_partner_registration",
   },
 ];
 

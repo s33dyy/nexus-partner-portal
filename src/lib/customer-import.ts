@@ -15,7 +15,6 @@ export const CUSTOMER_IMPORT_TEMPLATE_COLUMNS = [
   { key: "renewal_date", header: "renewal_date" },
   { key: "status", header: "status" },
   { key: "next_step", header: "next_step" },
-  { key: "last_touch", header: "last_touch" },
 ] as const satisfies readonly TemplateColumnDefinition[];
 
 export const CUSTOMER_IMPORT_TEMPLATE_SAMPLE = [
@@ -29,7 +28,6 @@ export const CUSTOMER_IMPORT_TEMPLATE_SAMPLE = [
     renewal_date: "2026-09-15",
     status: "active",
     next_step: "Schedule QBR",
-    last_touch: "Today",
   },
 ];
 

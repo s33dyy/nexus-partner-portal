@@ -25,7 +25,6 @@ test("validateUserImportRows normalizes valid rows and keeps template columns st
       company_name: " Techilla ",
       password: "TempPass123!",
       role: "partner_admin",
-      partner_status: "pending_partner_registration",
     },
   ]);
 
@@ -36,7 +35,6 @@ test("validateUserImportRows normalizes valid rows and keeps template columns st
     "company_name",
     "password",
     "role",
-    "partner_status",
   ]);
   expect(result.errors).toEqual([]);
   expect(result.rows).toEqual([
@@ -91,7 +89,6 @@ test("validateCustomerImportRows normalizes valid rows and keeps template column
       renewal_date: "2026-09-15",
       status: " active ",
       next_step: " Schedule QBR ",
-      last_touch: " Today ",
     },
   ]);
 
@@ -105,7 +102,6 @@ test("validateCustomerImportRows normalizes valid rows and keeps template column
     "renewal_date",
     "status",
     "next_step",
-    "last_touch",
   ]);
   expect(result.errors).toEqual([]);
   expect(result.rows[0]).toEqual({
@@ -132,7 +128,6 @@ test("validateTeamImportRows rejects invalid rows without partial success", () =
       role_title: "Ops Manager",
       portal_role: "partner_user",
       responsibility: "Deals",
-      status: "active",
     },
     {
       full_name: "",
@@ -154,7 +149,6 @@ test("validateTeamImportRows rejects invalid rows without partial success", () =
     "role_title",
     "portal_role",
     "responsibility",
-    "status",
   ]);
   expect(result.successCount).toBe(0);
   expect(result.rows).toEqual([]);
@@ -173,7 +167,7 @@ test("validateImportTemplate rejects files missing required template columns", (
   ).toEqual([
     {
       rowNumber: 1,
-      messages: ["Missing required columns: phone, company_name, password, role, partner_status"],
+      messages: ["Missing required columns: phone, company_name, password, role"],
     },
   ]);
 
@@ -188,7 +182,7 @@ test("validateImportTemplate rejects files missing required template columns", (
   ).toEqual([
     {
       rowNumber: 1,
-      messages: ["Missing required columns: health_score, mrr, renewal_date, status, next_step, last_touch"],
+      messages: ["Missing required columns: health_score, mrr, renewal_date, status, next_step"],
     },
   ]);
 

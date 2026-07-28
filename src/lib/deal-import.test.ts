@@ -3,6 +3,8 @@ import { utils, write } from "xlsx";
 
 import {
   DEAL_IMPORT_TEMPLATE_COLUMNS,
+  getDealImportTemplateColumns,
+  getDealImportTemplateSample,
   parseDealImportWorkbook,
   validateDealImportRows,
 } from "@/lib/deal-import";
@@ -135,6 +137,76 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       notes: "Expansion deal",
     },
   ]);
+});
+
+test("deal import templates omit auto-filled columns for partner roles", () => {
+  expect(getDealImportTemplateColumns({ includeAccountName: true, includeOwnerName: false })).toEqual(
+    DEAL_IMPORT_TEMPLATE_COLUMNS.filter((column) => column.key !== "owner_name"),
+  );
+  expect(getDealImportTemplateColumns({ includeAccountName: false, includeOwnerName: false })).toEqual(
+    DEAL_IMPORT_TEMPLATE_COLUMNS.filter(
+      (column) => column.key !== "account_name" && column.key !== "owner_name",
+    ),
+  );
+  expect(getDealImportTemplateSample({ includeAccountName: false, includeOwnerName: false })[0]).toEqual({
+    contact_name: "Morgan Lee",
+    country: "India",
+    region: "India West",
+    product: "LIVEY WC350 QHD Webcam",
+    quantity: 1,
+    amount: "$5,000",
+    currency_code: "USD",
+    customer_budget: "Approved",
+    possible_close_date: "2026-08-15",
+    probability: 50,
+    source: "Partner referral",
+    notes: "Expansion deal",
+  });
+});
+
+test("validateDealImportRows allows partner-role templates to omit auto-filled columns", () => {
+  const partnerAdminResult = validateDealImportRows(
+    [
+      {
+        account_name: "Acme Systems",
+        contact_name: "Morgan Lee",
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+        quantity: 1,
+        amount: "$5,000",
+        currency_code: "USD",
+        customer_budget: "Approved",
+        possible_close_date: "2026-08-15",
+        probability: 50,
+        source: "Partner referral",
+        notes: "Expansion deal",
+      },
+    ],
+    { includeAccountName: true, includeOwnerName: false },
+  );
+  const partnerUserResult = validateDealImportRows(
+    [
+      {
+        contact_name: "Morgan Lee",
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+        quantity: 1,
+        amount: "$5,000",
+        currency_code: "USD",
+        customer_budget: "Approved",
+        possible_close_date: "2026-08-15",
+        probability: 50,
+        source: "Partner referral",
+        notes: "Expansion deal",
+      },
+    ],
+    { includeAccountName: false, includeOwnerName: false },
+  );
+
+  expect(partnerAdminResult.errors).toEqual([]);
+  expect(partnerUserResult.errors).toEqual([]);
 });
 
 test("validateDealImportRows defaults a blank currency to INR", () => {

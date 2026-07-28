@@ -17,7 +17,7 @@ import {
   type TemplateColumnDefinition,
 } from "@/lib/spreadsheet-import";
 
-export const DEAL_IMPORT_TEMPLATE_COLUMNS = [
+const DEAL_IMPORT_TEMPLATE_COLUMNS_ALL = [
   { key: "account_name", header: "account_name" },
   { key: "contact_name", header: "contact_name" },
   { key: "owner_name", header: "owner_name" },
@@ -34,24 +34,31 @@ export const DEAL_IMPORT_TEMPLATE_COLUMNS = [
   { key: "notes", header: "notes" },
 ] as const satisfies readonly TemplateColumnDefinition[];
 
-export const DEAL_IMPORT_TEMPLATE_SAMPLE = [
-  {
-    account_name: "Acme Systems",
-    contact_name: "Morgan Lee",
-    owner_name: "Priya Rao",
-    country: "India",
-    region: "India West",
-    product: "LIVEY WC350 QHD Webcam",
-    quantity: 1,
-    amount: "$5,000",
-    currency_code: "USD",
-    customer_budget: "Approved",
-    possible_close_date: "2026-08-15",
-    probability: 50,
-    source: "Partner referral",
-    notes: "Expansion deal",
-  },
-];
+const DEAL_IMPORT_TEMPLATE_SAMPLE_ROW = {
+  account_name: "Acme Systems",
+  contact_name: "Morgan Lee",
+  owner_name: "Priya Rao",
+  country: "India",
+  region: "India West",
+  product: "LIVEY WC350 QHD Webcam",
+  quantity: 1,
+  amount: "$5,000",
+  currency_code: "USD",
+  customer_budget: "Approved",
+  possible_close_date: "2026-08-15",
+  probability: 50,
+  source: "Partner referral",
+  notes: "Expansion deal",
+} as const;
+
+export type DealImportTemplateOptions = {
+  includeAccountName?: boolean;
+  includeOwnerName?: boolean;
+};
+
+export const DEAL_IMPORT_TEMPLATE_COLUMNS = DEAL_IMPORT_TEMPLATE_COLUMNS_ALL;
+
+export const DEAL_IMPORT_TEMPLATE_SAMPLE = [DEAL_IMPORT_TEMPLATE_SAMPLE_ROW];
 
 export type DealImportTemplateColumn = (typeof DEAL_IMPORT_TEMPLATE_COLUMNS)[number]["key"];
 
@@ -78,6 +85,35 @@ export type DealImportValidationError = ImportValidationError;
 
 export type DealImportValidationResult = ImportValidationResult<ValidatedDealImportRow>;
 
+export function getDealImportTemplateColumns(
+  input: DealImportTemplateOptions = {},
+): readonly TemplateColumnDefinition[] {
+  const includeAccountName = input.includeAccountName ?? true;
+  const includeOwnerName = input.includeOwnerName ?? true;
+
+  return DEAL_IMPORT_TEMPLATE_COLUMNS_ALL.filter((column) => {
+    if (column.key === "account_name") return includeAccountName;
+    if (column.key === "owner_name") return includeOwnerName;
+    return true;
+  });
+}
+
+export function getDealImportTemplateSample(
+  input: DealImportTemplateOptions = {},
+): Array<Record<string, unknown>> {
+  const columns = getDealImportTemplateColumns(input);
+  return [
+    Object.fromEntries(
+      columns.map((column) => [
+        column.key,
+        DEAL_IMPORT_TEMPLATE_SAMPLE_ROW[
+          column.key as keyof typeof DEAL_IMPORT_TEMPLATE_SAMPLE_ROW
+        ],
+      ]),
+    ),
+  ];
+}
+
 export function parseDealImportWorkbook(input: ArrayBufferLike, filename = "import.xlsx"): DealImportRow[] {
   return parseSpreadsheetRows(input, filename);
 }
@@ -100,7 +136,12 @@ function parseProbability(value: unknown) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
-export function validateDealImportRows(rows: DealImportRow[]): DealImportValidationResult {
+export function validateDealImportRows(
+  rows: DealImportRow[],
+  input: DealImportTemplateOptions = {},
+): DealImportValidationResult {
+  const requireAccountName = input.includeAccountName ?? true;
+  const requireOwnerName = input.includeOwnerName ?? true;
   const validatedRows: ValidatedDealImportRow[] = [];
   const errors: DealImportValidationError[] = [];
 
@@ -129,9 +170,9 @@ export function validateDealImportRows(rows: DealImportRow[]): DealImportValidat
       notes: asTrimmedString(row.notes),
     };
 
-    if (!normalizedRow.account_name) messages.push("Account name is required");
+    if (requireAccountName && !normalizedRow.account_name) messages.push("Account name is required");
     if (!normalizedRow.contact_name) messages.push("Contact name is required");
-    if (!normalizedRow.owner_name) messages.push("Owner name is required");
+    if (requireOwnerName && !normalizedRow.owner_name) messages.push("Owner name is required");
     if (!normalizedRow.region) messages.push("Region is required");
     if (!normalizedRow.product) messages.push("Product is required");
     if (Number.isNaN(quantity) || quantity < 1) messages.push("Quantity must be at least 1");
