@@ -147,7 +147,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {renderGroup("Rewards", visible(shared))}
+        {!hasRole("super_admin") ? renderGroup("Rewards", visible(shared)) : null}
         {portalItems.length > 0 ? renderGroup("Portal", portalItems) : null}
         {!canSeeWorkspace && isPartnerAdmin
           ? renderGroup("Getting started", [

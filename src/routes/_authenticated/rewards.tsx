@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -68,7 +68,9 @@ const REWARD_REDEMPTION_EXPORT_COLUMNS: CsvColumn[] = [
 
 function RewardsPage() {
   const { profile, hasRole } = useAuth();
+  const navigate = useNavigate();
   const access = useRequireAccess('partial');
+  const isSuperAdmin = hasRole("super_admin");
   
   const [catalog, setCatalog] = useState<RewardCatalogRecord[]>([]);
   const [events, setEvents] = useState<RewardPointEventRecord[]>([]);
@@ -86,6 +88,12 @@ function RewardsPage() {
     shipping_address: "",
     notes: "",
   });
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      navigate({ to: "/admin/rewards", replace: true });
+    }
+  }, [isSuperAdmin, navigate]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -160,7 +168,7 @@ function RewardsPage() {
   const points = useMemo(() => sumRewardPoints(events), [events]);
   const tier = useMemo(() => rewardTierForPoints(points), [points]);
   const progress = useMemo(() => rewardProgress(points), [points]);
-  const isAdminView = hasRole("super_admin");
+  const isAdminView = isSuperAdmin;
   const pendingRedemptions = useMemo(
     () => redemptions.filter((redemption) => redemption.status === "requested").length,
     [redemptions],
@@ -196,6 +204,14 @@ function RewardsPage() {
     () => new Map(catalog.map((item) => [item.id, item])),
     [catalog],
   );
+
+  if (isSuperAdmin) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center px-6 py-16 text-sm text-muted-foreground">
+        Redirecting to the super admin rewards manager...
+      </div>
+    );
+  }
 
   const openRequestDialog = (reward: RewardCatalogRecord) => {
     setSelectedReward(reward);
