@@ -231,6 +231,62 @@ export async function createCatalogItemFromDropdown(input: {
   return result.rows[0];
 }
 
+export async function updateCatalogItemFromDropdown(input: {
+  id: string;
+  product_name: string;
+  sku?: string;
+  category?: string;
+  partner_tier?: string;
+  list_price?: string;
+  margin?: string;
+  stock?: number;
+  availability?: string;
+  benefits?: string;
+  catalog_kind?: CatalogKind;
+}) {
+  const values = buildCatalogCreateValues(input);
+  const columns = await getPortalCatalogItemColumns();
+  const updatedAt = new Date().toISOString();
+  const updatableValues = {
+    ...values,
+    updated_at: updatedAt,
+  };
+  const orderedColumns: Array<keyof typeof updatableValues> = [
+    "sku",
+    "product_name",
+    "category",
+    "partner_tier",
+    "list_price",
+    "margin",
+    "stock",
+    "availability",
+    "benefits",
+    "catalog_kind",
+    "updated_at",
+  ];
+  const updateColumns = orderedColumns.filter((column) => columns.has(column));
+  if (updateColumns.length === 0) {
+    throw new Error("No writable catalog columns available");
+  }
+
+  const setSql = updateColumns.map((column, index) => `${column} = $${index + 1}`).join(", ");
+  const updateParams = updateColumns.map((column) => updatableValues[column]);
+  const result = await pool.query(
+    `UPDATE portal_catalog_items
+     SET ${setSql}
+     WHERE id = $${updateParams.length + 1}
+     RETURNING *`,
+    [...updateParams, input.id],
+  );
+
+  const updated = result.rows[0];
+  if (!updated) {
+    throw new Error("Catalog item not found");
+  }
+
+  return updated;
+}
+
 export async function createCustomerFromDropdown(input: {
   company_name: string;
   account_owner: string;

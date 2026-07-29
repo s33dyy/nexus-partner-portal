@@ -20,7 +20,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { createDropdownCatalogItem } from "@/integrations/local/dropdown-sources";
+import {
+  createDropdownCatalogItem,
+  updateDropdownCatalogItem,
+} from "@/integrations/local/dropdown-sources";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
@@ -285,14 +288,10 @@ function AdminCatalogPage() {
         ...draft,
         catalog_kind: draft.catalog_kind,
       });
-      const { error } = await supabase
-        .from("portal_catalog_items")
-        .update({
-          ...values,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selectedItem.id);
-      if (error) throw error;
+      await updateDropdownCatalogItem({
+        id: selectedItem.id,
+        ...values,
+      });
       toast.success("Catalog item updated");
       setEditOpen(false);
       await load();

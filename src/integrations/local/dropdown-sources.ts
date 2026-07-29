@@ -40,6 +40,27 @@ const createDropdownCatalogItemFn = createServerFn({ method: "POST" })
     return createCatalogItemFromDropdown(data);
   });
 
+const updateDropdownCatalogItemFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      id: string;
+      product_name: string;
+      sku?: string;
+      category?: string;
+      partner_tier?: string;
+      list_price?: string;
+      margin?: string;
+      stock?: number;
+      availability?: string;
+      benefits?: string;
+      catalog_kind?: CatalogKind;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    const { updateCatalogItemFromDropdown } = await import("@/server/dropdown-sources.server");
+    return updateCatalogItemFromDropdown(data);
+  });
+
 const createDropdownCustomerFn = createServerFn({ method: "POST" })
   .validator(
     (input: {
@@ -86,6 +107,22 @@ export async function createDropdownCatalogItem(input: {
   catalog_kind?: CatalogKind;
 }) {
   return createDropdownCatalogItemFn({ data: input });
+}
+
+export async function updateDropdownCatalogItem(input: {
+  id: string;
+  product_name: string;
+  sku?: string;
+  category?: string;
+  partner_tier?: string;
+  list_price?: string;
+  margin?: string;
+  stock?: number;
+  availability?: string;
+  benefits?: string;
+  catalog_kind?: CatalogKind;
+}) {
+  return updateDropdownCatalogItemFn({ data: input });
 }
 
 export async function createDropdownCustomer(input: {
