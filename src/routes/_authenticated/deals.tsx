@@ -36,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { listDropdownSourceValues } from "@/integrations/local/dropdown-sources";
+import { upsertLookupValue } from "@/integrations/local/lookups";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -54,7 +55,10 @@ import {
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
 import {
+  buildDealImportLookupUpserts,
+  getDealImportStatus,
   getDealImportTemplateColumns,
+  getDealImportTemplateDownloadColumns,
   getDealImportTemplateSample,
   normalizeDealImportSpreadsheet,
   validateDealImportRows,
@@ -920,16 +924,18 @@ function DealsPage() {
   };
 
   const dealImportTemplateOptions = {
-    includeAccountName: !hasRole("partner_user"),
-    includeOwnerName: hasRole("super_admin"),
+    mode: hasRole("super_admin") ? ("super_admin" as const) : ("partner" as const),
   };
   const dealImportTemplateColumns = getDealImportTemplateColumns(dealImportTemplateOptions);
+  const dealImportTemplateDownloadColumns = getDealImportTemplateDownloadColumns(
+    dealImportTemplateOptions,
+  );
   const dealImportTemplateSample = getDealImportTemplateSample(dealImportTemplateOptions);
 
   const downloadImportTemplate = () => {
     downloadTemplateCsv({
       filenameStem: "livey-deal-import",
-      columns: dealImportTemplateColumns,
+      columns: dealImportTemplateDownloadColumns,
       sampleRows: dealImportTemplateSample,
     });
   };
@@ -985,12 +991,17 @@ function DealsPage() {
         return;
       }
 
+      const isPartnerRole = !hasRole("super_admin");
       const isPartnerUser = !hasRole("super_admin") && !hasRole("partner_admin");
       const today = new Date().toISOString();
       const defaultCloseDate = today.slice(0, 10);
       const accountIdLookup = new Map(
         accountOptions.map((option) => [normalizeCompanyName(option.label), option.id]),
       );
+      const partnerAccountName =
+        accountOptions.find((option) => option.id === (profile?.partner_id ?? null))?.label ??
+        profile?.company_name?.trim() ??
+        "Partner Account";
       const fxCache = new Map<
         string,
         {
@@ -1070,9 +1081,7 @@ function DealsPage() {
         const partnerId = hasRole("super_admin")
           ? (accountIdLookup.get(normalizeCompanyName(row.account_name)) ?? null)
           : (profile?.partner_id ?? null);
-        const accountName = isPartnerUser
-          ? profile?.full_name || profile?.company_name || row.account_name || "Partner User"
-          : row.account_name;
+        const accountName = isPartnerRole ? partnerAccountName : row.account_name;
         const ownerName = hasRole("partner_admin")
           ? profile?.full_name || row.owner_name || "Partner Admin"
           : isPartnerUser
@@ -1101,6 +1110,17 @@ function DealsPage() {
           autoApproved,
         };
       });
+
+      if (isPartnerRole) {
+        const lookupUpserts = buildDealImportLookupUpserts(
+          resolvedRows.map((resolvedRow) => resolvedRow.row),
+        );
+        await Promise.all(
+          lookupUpserts.map((lookupUpsert) =>
+            upsertLookupValue(lookupUpsert.fieldName, lookupUpsert.value),
+          ),
+        );
+      }
 
       let customerQuery = supabase
         .from("portal_customers")
@@ -1178,8 +1198,8 @@ function DealsPage() {
           country: resolvedRow.row.country || "India",
           region: resolvedRow.row.region,
           product: resolvedRow.row.product,
-          stage: EMPTY_FORM.stage,
-          status: resolvedRow.autoApproved ? "approved" : "submitted",
+          stage: resolvedRow.row.stage,
+          status: getDealImportStatus(resolvedRow.row.stage, resolvedRow.autoApproved),
           quantity: resolvedRow.row.quantity,
           amount: resolvedRow.row.amount,
           currency_code: resolvedRow.row.currency_code,

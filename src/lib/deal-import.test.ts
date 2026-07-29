@@ -2,8 +2,11 @@ import { expect, test } from "bun:test";
 import { utils, write } from "xlsx";
 
 import {
+  buildDealImportLookupUpserts,
   DEAL_IMPORT_TEMPLATE_COLUMNS,
+  getDealImportStatus,
   getDealImportTemplateColumns,
+  getDealImportTemplateDownloadColumns,
   getDealImportTemplateSample,
   normalizeDealImportSpreadsheet,
   parseDealImportWorkbook,
@@ -94,6 +97,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       quantity: "",
       amount: " $5,000 ",
       currency_code: " usd ",
+      stage: " proposal ",
       customer_budget: "",
       possible_close_date: "2026-08-15",
       probability: "50",
@@ -112,6 +116,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
     "quantity",
     "amount",
     "currency_code",
+    "stage",
     "customer_budget",
     "possible_close_date",
     "probability",
@@ -131,6 +136,7 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
       quantity: 1,
       amount: "$5,000",
       currency_code: "USD",
+      stage: "proposal",
       customer_budget: "",
       possible_close_date: "2026-08-15",
       probability: 50,
@@ -140,16 +146,34 @@ test("validateDealImportRows normalizes valid rows for insertion and template co
   ]);
 });
 
-test("deal import templates omit auto-filled columns for partner roles", () => {
-  expect(getDealImportTemplateColumns({ includeAccountName: true, includeOwnerName: false })).toEqual(
-    DEAL_IMPORT_TEMPLATE_COLUMNS.filter((column) => column.key !== "owner_name"),
-  );
-  expect(getDealImportTemplateColumns({ includeAccountName: false, includeOwnerName: false })).toEqual(
-    DEAL_IMPORT_TEMPLATE_COLUMNS.filter(
-      (column) => column.key !== "account_name" && column.key !== "owner_name",
-    ),
-  );
-  expect(getDealImportTemplateSample({ includeAccountName: false, includeOwnerName: false })[0]).toEqual({
+test("partner-side deal templates use the reduced import shape", () => {
+  expect(getDealImportTemplateColumns({ mode: "partner" }).map((column) => column.key)).toEqual([
+    "contact_name",
+    "country",
+    "region",
+    "product",
+    "quantity",
+    "amount",
+    "currency_code",
+    "stage",
+    "probability",
+    "possible_close_date",
+    "source",
+  ]);
+  expect(getDealImportTemplateDownloadColumns({ mode: "partner" }).map((column) => column.header)).toEqual([
+    "Client",
+    "Country",
+    "Region",
+    "Product",
+    "Quantity",
+    "Amount",
+    "Currency",
+    "Stage",
+    "Probability",
+    "Probable Close Date",
+    "Source",
+  ]);
+  expect(getDealImportTemplateSample({ mode: "partner" })[0]).toEqual({
     contact_name: "Morgan Lee",
     country: "India",
     region: "India West",
@@ -157,35 +181,33 @@ test("deal import templates omit auto-filled columns for partner roles", () => {
     quantity: 1,
     amount: "$5,000",
     currency_code: "USD",
-    customer_budget: "Approved",
-    possible_close_date: "2026-08-15",
+    stage: "proposal",
     probability: 50,
+    possible_close_date: "2026-08-15",
     source: "Partner referral",
-    notes: "Expansion deal",
   });
 });
 
+test("super-admin deal templates keep the wider current shape", () => {
+  expect(getDealImportTemplateColumns({ mode: "super_admin" }).map((column) => column.key)).toEqual([
+    "account_name",
+    "contact_name",
+    "owner_name",
+    "country",
+    "region",
+    "product",
+    "quantity",
+    "amount",
+    "currency_code",
+    "customer_budget",
+    "possible_close_date",
+    "probability",
+    "source",
+    "notes",
+  ]);
+});
+
 test("validateDealImportRows allows partner-role templates to omit auto-filled columns", () => {
-  const partnerAdminResult = validateDealImportRows(
-    [
-      {
-        account_name: "Acme Systems",
-        contact_name: "Morgan Lee",
-        country: "India",
-        region: "India West",
-        product: "LIVEY WC350 QHD Webcam",
-        quantity: 1,
-        amount: "$5,000",
-        currency_code: "USD",
-        customer_budget: "Approved",
-        possible_close_date: "2026-08-15",
-        probability: 50,
-        source: "Partner referral",
-        notes: "Expansion deal",
-      },
-    ],
-    { includeAccountName: true, includeOwnerName: false },
-  );
   const partnerUserResult = validateDealImportRows(
     [
       {
@@ -196,17 +218,15 @@ test("validateDealImportRows allows partner-role templates to omit auto-filled c
         quantity: 1,
         amount: "$5,000",
         currency_code: "USD",
-        customer_budget: "Approved",
+        stage: "proposal",
         possible_close_date: "2026-08-15",
         probability: 50,
         source: "Partner referral",
-        notes: "Expansion deal",
       },
     ],
-    { includeAccountName: false, includeOwnerName: false },
+    { mode: "partner" },
   );
 
-  expect(partnerAdminResult.errors).toEqual([]);
   expect(partnerUserResult.errors).toEqual([]);
 });
 
@@ -222,6 +242,7 @@ test("validateDealImportRows defaults a blank currency to INR", () => {
       quantity: 2,
       amount: "5000",
       currency_code: "",
+      stage: "proposal",
       customer_budget: "Approved",
       possible_close_date: "2026-08-15",
       probability: 50,
@@ -246,6 +267,7 @@ test("validateDealImportRows requires amount strings to contain a numeric value"
       quantity: 1,
       amount: "TBD",
       currency_code: "USD",
+      stage: "proposal",
       customer_budget: "Approved",
       possible_close_date: "2026-08-15",
       probability: 50,
@@ -263,61 +285,129 @@ test("validateDealImportRows requires amount strings to contain a numeric value"
   ]);
 });
 
-test("normalizeDealImportSpreadsheet accepts export-style deal headers", () => {
+test("validateDealImportRows rejects invalid partner stages", () => {
+  const result = validateDealImportRows(
+    [
+      {
+        contact_name: "Morgan Lee",
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+        quantity: 1,
+        amount: "$5,000",
+        currency_code: "USD",
+        stage: "review",
+        possible_close_date: "2026-08-15",
+        probability: 50,
+        source: "Partner referral",
+      },
+    ],
+    { mode: "partner" },
+  );
+
+  expect(result.rows).toEqual([]);
+  expect(result.errors).toEqual([
+    {
+      rowNumber: 2,
+      messages: ["Stage must be one of sourced, demo, testing, qualified, proposal, negotiation, approved, won, or lost"],
+    },
+  ]);
+});
+
+test("normalizeDealImportSpreadsheet accepts partner template headers and aliases", () => {
   const normalized = normalizeDealImportSpreadsheet({
     headers: [
-      "Account",
       "Client",
-      "Owner",
       "Country",
       "Region",
       "Product",
       "Quantity",
       "Amount",
       "Currency",
-      "Customer Budget",
-      "Possible Close Date",
+      "Stage",
+      "Probable Close Date",
       "Probability",
       "Source",
-      "Notes",
     ],
     rows: [
       {
-        Account: "Northstar Systems",
         Client: "Repro Client",
-        Owner: "Maya Chen",
         Country: "India",
         Region: "India West",
         Product: "LIVEY WC350 QHD Webcam",
         Quantity: 1,
         Amount: "5000",
         Currency: "INR",
-        "Customer Budget": "Approved",
-        "Possible Close Date": "2026-08-15",
+        Stage: "proposal",
+        "Probable Close Date": "2026-08-15",
         Probability: 50,
         Source: "Partner referral",
-        Notes: "Imported from export headers",
       },
     ],
   });
 
-  expect(normalized.headers).toEqual(DEAL_IMPORT_TEMPLATE_COLUMNS.map((column) => column.header));
+  expect(normalized.headers).toEqual([
+    "contact_name",
+    "country",
+    "region",
+    "product",
+    "quantity",
+    "amount",
+    "currency_code",
+    "stage",
+    "possible_close_date",
+    "probability",
+    "source",
+  ]);
   expect(normalized.rows).toEqual([
     {
-      account_name: "Northstar Systems",
       contact_name: "Repro Client",
-      owner_name: "Maya Chen",
       country: "India",
       region: "India West",
       product: "LIVEY WC350 QHD Webcam",
       quantity: 1,
       amount: "5000",
       currency_code: "INR",
-      customer_budget: "Approved",
+      stage: "proposal",
       possible_close_date: "2026-08-15",
       probability: 50,
       source: "Partner referral",
-      notes: "Imported from export headers",
     },
   ]);
+});
+
+test("buildDealImportLookupUpserts deduplicates values and scopes regions by country", () => {
+  expect(
+    buildDealImportLookupUpserts([
+      {
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+      },
+      {
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+      },
+      {
+        country: "UAE",
+        region: "Dubai",
+        product: "LIVEY Studio Bar",
+      },
+    ]),
+  ).toEqual([
+    { fieldName: "deals.country", value: "India" },
+    { fieldName: "deals.region.india", value: "India West" },
+    { fieldName: "deals.product", value: "LIVEY WC350 QHD Webcam" },
+    { fieldName: "deals.country", value: "UAE" },
+    { fieldName: "deals.region.uae", value: "Dubai" },
+    { fieldName: "deals.product", value: "LIVEY Studio Bar" },
+  ]);
+});
+
+test("getDealImportStatus keeps terminal stages and otherwise follows approval state", () => {
+  expect(getDealImportStatus("won", false)).toBe("won");
+  expect(getDealImportStatus("lost", true)).toBe("lost");
+  expect(getDealImportStatus("proposal", true)).toBe("approved");
+  expect(getDealImportStatus("proposal", false)).toBe("submitted");
 });
