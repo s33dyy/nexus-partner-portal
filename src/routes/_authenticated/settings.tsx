@@ -13,7 +13,11 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { getRouteApi } from "@tanstack/react-router";
-import { listVisibleExportDatasets, type ExportDatasetDescriptor, type ExportScope } from "@/lib/export-registry";
+import {
+  listVisibleExportDatasets,
+  type ExportDatasetDescriptor,
+  type ExportScope,
+} from "@/lib/export-registry";
 import { supabase } from "@/integrations/local/client";
 import { validatePasswordChange } from "@/lib/password-policy";
 
@@ -33,12 +37,14 @@ const SECTION_META: Record<
 > = {
   operational: {
     title: "Operational exports",
-    description: "Current working data from deals, customers, notifications, documents, and rewards.",
+    description:
+      "Current working data from deals, customers, notifications, documents, and rewards.",
     icon: Database,
   },
   governance: {
     title: "Governance exports",
-    description: "Administrative records for users, partners, reviews, audit, team, and catalog data.",
+    description:
+      "Administrative records for users, partners, reviews, audit, team, and product catalog data.",
     icon: ShieldCheck,
   },
   configuration: {
@@ -56,7 +62,7 @@ function SettingsPage() {
       ? "partner_admin"
       : "partner_user";
 
-  useRequireAccess('partial');
+  useRequireAccess("partial");
 
   const scope = useMemo<ExportScope>(
     () => ({
@@ -71,9 +77,7 @@ function SettingsPage() {
 
   const visibleDatasets = useMemo(
     () =>
-      listVisibleExportDatasets(role).sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
+      listVisibleExportDatasets(role).sort((left, right) => left.label.localeCompare(right.label)),
     [role],
   );
 
@@ -157,7 +161,9 @@ function SettingsPage() {
       setCountsLoading(true);
 
       const results = await Promise.allSettled(
-        visibleDatasets.map(async (dataset) => [dataset.id, await dataset.loadCount(scope)] as const),
+        visibleDatasets.map(
+          async (dataset) => [dataset.id, await dataset.loadCount(scope)] as const,
+        ),
       );
 
       if (!active) {
@@ -296,8 +302,8 @@ function SettingsPage() {
           <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
             <div className="font-medium text-foreground">Password rules</div>
             <div className="mt-2">
-              Use 8 or more characters with at least one uppercase letter, one lowercase letter,
-              one number, and one symbol.
+              Use 8 or more characters with at least one uppercase letter, one lowercase letter, one
+              number, and one symbol.
             </div>
             {profile?.must_reset_password || searchParams.passwordReset === "1" ? (
               <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-foreground">
@@ -425,13 +431,7 @@ function SectionBlock({
   );
 }
 
-function InfoTile({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
+function InfoTile({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded-xl border bg-muted/20 p-4">
       <div className="text-sm font-medium">{title}</div>

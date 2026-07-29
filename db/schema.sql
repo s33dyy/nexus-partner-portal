@@ -155,6 +155,21 @@ CREATE TABLE IF NOT EXISTS partner_documents (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS deal_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  uploaded_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  doc_type TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL REFERENCES document_blobs(file_path) ON DELETE CASCADE,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS partner_review_notes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -248,6 +263,7 @@ CREATE TABLE IF NOT EXISTS portal_catalog_items (
   stock INTEGER NOT NULL DEFAULT 0,
   availability TEXT NOT NULL,
   benefits TEXT NOT NULL,
+  catalog_kind TEXT NOT NULL DEFAULT 'product',
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -400,6 +416,12 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS portal_catalog_items_updated_at ON portal_catalog_items;
 CREATE TRIGGER portal_catalog_items_updated_at
 BEFORE UPDATE ON portal_catalog_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS deal_documents_updated_at ON deal_documents;
+CREATE TRIGGER deal_documents_updated_at
+BEFORE UPDATE ON deal_documents
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

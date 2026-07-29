@@ -49,7 +49,7 @@ const workspace: Item[] = [
 
 const portal: Item[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Documents", url: "/documents", icon: FileText },
+  { title: "Deal Documents", url: "/deal-documents", icon: FileText },
 ];
 
 const shared: Item[] = [{ title: "Rewards", url: "/rewards", icon: Trophy }];
@@ -63,7 +63,7 @@ const admin: Item[] = [
   { title: "Partner Approvals", url: "/admin/partners", icon: ShieldCheck, roles: ["super_admin"] },
   { title: "Deal Approvals", url: "/admin/deals", icon: Handshake, roles: ["super_admin"] },
   { title: "Users & Roles", url: "/admin/users", icon: Users, roles: ["super_admin"] },
-  { title: "Tiers & Products", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
+  { title: "Product Catalog", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
   { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
   { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
   { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
@@ -82,7 +82,7 @@ export function AppSidebar() {
   const canSeeWorkspace = hasRole("super_admin") || access.canAccessDeals;
   const portalItems = [
     ...(access.canAccessDashboard ? [portal[0]] : []),
-    ...(access.canAccessDocuments ? [portal[1]] : []),
+    ...(access.canAccessDealDocuments ? [portal[1]] : []),
   ];
 
   // Agreement page only visible to partners awaiting signature
@@ -155,7 +155,8 @@ export function AppSidebar() {
             ])
           : null}
         {canSeeWorkspace ? renderGroup("Workspace", workspace) : null}
-        {isPartnerAdmin && (access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding || canSeeWorkspace)
+        {isPartnerAdmin &&
+        (access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding || canSeeWorkspace)
           ? renderGroup("Company", partnerAdminItems)
           : null}
         {hasRole("super_admin") && renderGroup("Administration", admin)}

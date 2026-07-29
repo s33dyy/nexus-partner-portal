@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, Plus, RefreshCw, Search, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -100,8 +100,8 @@ export const Route = createFileRoute("/_authenticated/customers")({
 
 function CustomersPage() {
   const { profile, hasRole } = useAuth();
-  const access = useRequireAccess('full');
-  
+  const access = useRequireAccess("full");
+
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -121,7 +121,7 @@ function CustomersPage() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -168,11 +168,11 @@ function CustomersPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const filteredCustomers = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -399,7 +399,7 @@ function CustomersPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <Users className="h-3.5 w-3.5" />
             Workspace
@@ -409,7 +409,7 @@ function CustomersPage() {
             Reserve accounts, track health, and keep customer ownership visible across the portal.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
@@ -467,7 +467,11 @@ function CustomersPage() {
             onClick={() => importInputRef.current?.click()}
             disabled={importing}
           >
-            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {importing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
             Import CSV/XLSX
           </Button>
         </div>
@@ -533,7 +537,7 @@ function CustomersPage() {
                       setSelectedId(customer.id);
                       setEditOpen(true);
                     }}
-                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
+                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
                       selectedCustomer?.id === customer.id ? "bg-muted/40" : ""
                     }`}
                   >
@@ -546,7 +550,7 @@ function CustomersPage() {
                         {customer.account_owner} · {customer.segment} · {customer.region}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <div className="font-medium">{customer.mrr}</div>
                       <div className="text-xs text-muted-foreground">
                         {customer.health_score}% health
@@ -843,7 +847,7 @@ function CustomersPage() {
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"

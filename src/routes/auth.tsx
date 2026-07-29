@@ -39,7 +39,7 @@ function AuthPage() {
   }, [navigate, search.redirect]);
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
+    <div className="grid min-h-dvh overflow-x-hidden lg:grid-cols-2">
       {/* Brand panel */}
       <div className="relative hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground">
         <div className="absolute inset-0 opacity-40 [background:radial-gradient(1200px_600px_at_10%_-20%,color-mix(in_oklab,var(--sidebar-primary)_30%,transparent),transparent),radial-gradient(800px_400px_at_100%_100%,color-mix(in_oklab,var(--sidebar-primary)_20%,transparent),transparent)]" />
@@ -89,7 +89,7 @@ function AuthPage() {
       </div>
 
       {/* Form panel */}
-      <div className="flex items-center justify-center p-6 md:p-10 bg-background">
+      <div className="flex min-w-0 items-center justify-center bg-background p-6 md:p-10">
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden flex items-center gap-2">
             <div className="flex h-10 items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 ring-1 ring-border">

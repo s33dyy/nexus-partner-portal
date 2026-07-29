@@ -31,6 +31,7 @@ import { LookupCombobox } from "@/components/lookup-combobox";
 
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
 import {
   PARTNER_ONBOARDING_LOOKUP_FIELDS,
   regionLookupField,
@@ -103,7 +104,8 @@ function isDocRow(doc: DocRow | null | undefined): doc is DocRow {
 }
 
 function OnboardingPage() {
-  const { user, profile, refresh, hasRole, loading } = useAuth();
+  const { user, profile, refresh, loading } = useAuth();
+  const access = usePartnerAccess();
   const navigate = useNavigate();
   const [stepIdx, setStepIdx] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -130,9 +132,9 @@ function OnboardingPage() {
 
   useEffect(() => {
     if (loading) return;
-    if (hasRole("super_admin") || hasRole("partner_admin")) return;
+    if (access.canAccessPartnerDocuments) return;
     navigate({ to: "/dashboard", replace: true });
-  }, [hasRole, loading, navigate]);
+  }, [access.canAccessPartnerDocuments, loading, navigate]);
 
   // Redirect if already past onboarding stage
   useEffect(() => {
@@ -148,9 +150,13 @@ function OnboardingPage() {
   }, [profile?.partner_status, navigate]);
 
   const status = profile?.partner_status ?? "pending_partner_registration";
-  const readOnly = status === "submitted" || status === "under_review" || 
-                   status === "partial_approval" || status === "pending_agreement" ||
-                   status === "signed_pending_review" || status === "approved";
+  const readOnly =
+    status === "submitted" ||
+    status === "under_review" ||
+    status === "partial_approval" ||
+    status === "pending_agreement" ||
+    status === "signed_pending_review" ||
+    status === "approved";
   const regionFieldName = regionLookupField(form.country);
 
   // Load existing partner if any
@@ -525,7 +531,7 @@ function OnboardingPage() {
               transition={{ duration: 0.18 }}
             >
               {step.key === "business" && (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Company name*">
                     <Input
                       value={form.company_name}
@@ -579,7 +585,7 @@ function OnboardingPage() {
               )}
 
               {step.key === "company" && (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Business address*" className="md:col-span-2">
                     <Textarea
                       value={form.business_address}
@@ -700,7 +706,7 @@ function OnboardingPage() {
                     const busy = uploadingType === t;
                     return (
                       <div key={t} className="rounded-md border p-4">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="text-sm font-medium">{t}</div>
                             <div className="text-xs text-muted-foreground">
@@ -746,7 +752,7 @@ function OnboardingPage() {
                             {list.map((d) => (
                               <li
                                 key={d.id}
-                                className="flex items-center justify-between rounded border bg-muted/30 px-3 py-2 text-xs"
+                                className="flex flex-col gap-2 rounded border bg-muted/30 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
                               >
                                 <div className="flex items-center gap-2 truncate">
                                   <FileText className="h-3.5 w-3.5 text-muted-foreground" />
@@ -831,7 +837,7 @@ function OnboardingPage() {
           </AnimatePresence>
 
           <Separator className="my-6" />
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Button variant="outline" onClick={goPrev} disabled={stepIdx === 0}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>

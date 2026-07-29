@@ -1,6 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload, UserPlus } from "lucide-react";
+import {
+  Download,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  UserPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -183,8 +193,16 @@ function PartnerTeamPage() {
         phone: draft.phone,
         permissions:
           draft.portal_role === "partner_admin"
-            ? ["deals", "documents", "team"]
-            : ["dashboard", "deals", "pipeline", "customers", "analytics", "documents", "rewards"],
+            ? ["deals", "documents", "deal-documents", "team"]
+            : [
+                "dashboard",
+                "deals",
+                "pipeline",
+                "customers",
+                "analytics",
+                "deal-documents",
+                "rewards",
+              ],
         is_seed: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -368,7 +386,11 @@ function PartnerTeamPage() {
             onClick={() => importInputRef.current?.click()}
             disabled={importing}
           >
-            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {importing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
             Import CSV/XLSX
           </Button>
         </div>
@@ -554,7 +576,7 @@ function PartnerTeamPage() {
             </CardHeader>
             <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
               <div>Partner admins can manage onboarding, deals, team, and document workflows.</div>
-              <div>Partner users can handle deals, customers, analytics, and documents.</div>
+              <div>Partner users can handle deals, customers, analytics, and deal documents.</div>
               <Separator />
               <div>
                 The roster is deletable, so you can reset the workspace cleanly when needed.

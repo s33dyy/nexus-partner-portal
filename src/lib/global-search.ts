@@ -18,6 +18,7 @@ export type GlobalSearchSourceData = {
     product_name: string;
     category: string;
     partner_tier: string;
+    catalog_kind?: string | null;
   }>;
 };
 
@@ -65,14 +66,14 @@ export function buildGlobalSearchResults(
     .map((item) => ({
       id: item.id,
       title: item.product_name,
-      subtitle: `${item.category} · ${item.partner_tier}`,
+      subtitle: `${(item.catalog_kind ?? "product").toLowerCase() === "combo" ? "Combo" : "Product"} · ${item.category} · ${item.partner_tier}`,
       href: "/admin/catalog",
     }));
 
   const groups: GlobalSearchResult[] = [
     { group: "Deals", items: deals },
     { group: "Partners", items: partners },
-    { group: "Catalog", items: catalog },
+    { group: "Product Catalog", items: catalog },
   ];
 
   return groups.filter((group) => group.items.length > 0);

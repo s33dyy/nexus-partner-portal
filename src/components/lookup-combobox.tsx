@@ -2,9 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronsUpDown, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-import { listLookupValues as listLegacyLookupValues, upsertLookupValue as saveLookupValue } from "@/integrations/local/lookups";
-import { listDropdownSourceValues as listCanonicalDropdownValues } from "@/integrations/local/dropdown-sources";
+import {
+  createDropdownCatalogItem,
+  listDropdownSourceValues as listCanonicalDropdownValues,
+} from "@/integrations/local/dropdown-sources";
+import {
+  listLookupValues as listLegacyLookupValues,
+  upsertLookupValue as saveLookupValue,
+} from "@/integrations/local/lookups";
 import { useAuth } from "@/hooks/use-auth";
+import { getCatalogKindLabel, type CatalogKind } from "@/lib/catalog";
 import { cn } from "@/lib/utils";
 import { type DropdownOption, type DropdownSourceKey } from "@/lib/dropdown-sources";
 import { Button } from "@/components/ui/button";
@@ -35,6 +42,7 @@ type LookupComboboxProps = {
   options?: string[];
   emptyLabel?: string;
   onCreateRequest?: (value: string) => void;
+  catalogKind?: CatalogKind | "all";
 };
 
 function uniqueOptions(values: DropdownOption[]) {
@@ -81,6 +89,7 @@ export function LookupCombobox({
   options = [],
   emptyLabel,
   onCreateRequest,
+  catalogKind = "product",
 }: LookupComboboxProps) {
   const { profile, hasRole } = useAuth();
   const [open, setOpen] = useState(false);
@@ -90,8 +99,8 @@ export function LookupCombobox({
   const [loadedOptions, setLoadedOptions] = useState<DropdownOption[]>([]);
 
   const resolvedSource = source ?? "lookup";
-  const scopedPartnerId = hasRole("super_admin") ? null : profile?.partner_id ?? null;
-  const scopedUserId = hasRole("super_admin") ? null : profile?.id ?? null;
+  const scopedPartnerId = hasRole("super_admin") ? null : (profile?.partner_id ?? null);
+  const scopedUserId = hasRole("super_admin") ? null : (profile?.id ?? null);
 
   useEffect(() => {
     let active = true;
@@ -126,6 +135,7 @@ export function LookupCombobox({
           fieldName,
           partnerId: scopedPartnerId,
           userId: scopedUserId,
+          catalogKind,
         });
         if (!active) return;
         setLoadedOptions(uniqueOptions(rows));
@@ -135,8 +145,9 @@ export function LookupCombobox({
         setLoadedOptions([]);
         setHasLoaded(true);
       } finally {
-        if (!active) return;
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     };
 
@@ -145,7 +156,18 @@ export function LookupCombobox({
     return () => {
       active = false;
     };
-  }, [fieldName, hasLoaded, open, profile?.id, profile?.partner_id, resolvedSource, hasRole]);
+  }, [
+    catalogKind,
+    fieldName,
+    hasLoaded,
+    open,
+    profile?.id,
+    profile?.partner_id,
+    resolvedSource,
+    hasRole,
+    scopedPartnerId,
+    scopedUserId,
+  ]);
 
   const mergedOptions = useMemo(() => {
     const mappedStatic = options.map((option) => toStaticOption(option, resolvedSource));
@@ -167,15 +189,20 @@ export function LookupCombobox({
     : false;
   const selectedLabel = value.trim() || placeholder || `Select ${label.toLowerCase()}`;
   const createValue = search.trim();
-  const optionExists = mergedOptions.some((option) => normalize(option.label) === normalize(createValue));
-  const canCreateLookup = resolvedSource === "lookup" && allowCreate && createValue.length > 0 && !optionExists;
+  const optionExists = mergedOptions.some(
+    (option) => normalize(option.label) === normalize(createValue),
+  );
+  const canCreateLookup =
+    resolvedSource === "lookup" && allowCreate && createValue.length > 0 && !optionExists;
+  const canCreateCatalog =
+    resolvedSource === "catalog" && allowCreate && createValue.length > 0 && !optionExists;
   const canCreateClient =
     resolvedSource === "client" &&
     allowCreate &&
     Boolean(onCreateRequest) &&
     createValue.length > 0 &&
     !optionExists;
-  const canCreate = canCreateLookup || canCreateClient;
+  const canCreate = canCreateLookup || canCreateCatalog || canCreateClient;
   const canClear = allowClear && value.trim().length > 0;
 
   const choose = (nextValue: DropdownOption | null) => {
@@ -190,6 +217,26 @@ export function LookupCombobox({
       onCreateRequest(nextValue);
       setSearch("");
       setOpen(false);
+      return;
+    }
+
+    if (resolvedSource === "catalog") {
+      try {
+        const created = await createDropdownCatalogItem({
+          product_name: nextValue,
+          catalog_kind: catalogKind === "all" ? "product" : catalogKind,
+        });
+        const nextOption: DropdownOption = {
+          id: created.id,
+          label: created.product_name,
+          description: `${getCatalogKindLabel(created.catalog_kind ?? "product")} · ${created.sku}`,
+          source: "catalog",
+        };
+        setLoadedOptions((current) => uniqueOptions([...current, nextOption]));
+        choose(nextOption);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to create option");
+      }
       return;
     }
 

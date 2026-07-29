@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Download, Loader2, Plus, RefreshCw, Search, ShieldCheck, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -18,11 +18,30 @@ import {
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
-import { type CatalogItemRecord } from "@/lib/portal-records";
+import { ImportFeedback } from "@/lib/import-feedback";
+import {
+  parseSpreadsheetFile,
+  validateImportTemplate,
+  downloadTemplateCsv,
+  buildImportSummaryMessage,
+} from "@/lib/spreadsheet-import";
+import {
+  buildCatalogCreateValues,
+  filterCatalogItemsByKind,
+  getCatalogImportTemplateColumns,
+  getCatalogImportTemplateSample,
+  getCatalogKindLabel,
+  getCatalogKindPluralLabel,
+  normalizeCatalogKind,
+  validateCatalogImportRows,
+  type CatalogItemRecord,
+  type CatalogKind,
+} from "@/lib/catalog";
 import { useAuth } from "@/hooks/use-auth";
 
 type CatalogForm = {
@@ -35,6 +54,7 @@ type CatalogForm = {
   stock: number;
   availability: string;
   benefits: string;
+  catalog_kind: CatalogKind;
 };
 
 const EMPTY_FORM: CatalogForm = {
@@ -47,6 +67,7 @@ const EMPTY_FORM: CatalogForm = {
   stock: 0,
   availability: "In stock",
   benefits: "",
+  catalog_kind: "product",
 };
 
 function uniqueStrings(values: Array<string | number | null | undefined>) {
@@ -63,6 +84,7 @@ const CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "stock", header: "Stock" },
   { key: "availability", header: "Availability" },
   { key: "benefits", header: "Benefits" },
+  { key: "catalog_kind", header: "Module" },
 ];
 
 export const Route = createFileRoute("/_authenticated/admin/catalog")({
@@ -71,10 +93,12 @@ export const Route = createFileRoute("/_authenticated/admin/catalog")({
 
 function AdminCatalogPage() {
   const { hasRole } = useAuth();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
+  const [moduleKind, setModuleKind] = useState<CatalogKind>("product");
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,8 +106,13 @@ function AdminCatalogPage() {
   const [draft, setDraft] = useState<CatalogForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<
+    Array<{ rowNumber: number; messages: string[] }>
+  >([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -94,7 +123,12 @@ function AdminCatalogPage() {
       const rows = (data as CatalogItemRecord[] | null) ?? [];
       setItems(rows);
       setSource(rows.length > 0 ? "database" : "empty");
-      setSelectedId((current) => current ?? rows[0]?.id ?? null);
+      const currentRows = filterCatalogItemsByKind(rows, moduleKind);
+      setSelectedId((current) =>
+        current && currentRows.some((item) => item.id === current)
+          ? current
+          : (currentRows[0]?.id ?? null),
+      );
     } catch {
       setItems([]);
       setSource("empty");
@@ -103,15 +137,20 @@ function AdminCatalogPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [moduleKind]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  const moduleItems = useMemo(
+    () => filterCatalogItemsByKind(items, moduleKind),
+    [items, moduleKind],
+  );
 
   const filteredItems = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return items.filter((item) => {
+    return moduleItems.filter((item) => {
       const matchesCategory = categoryFilter === "all" || item.category === categoryFilter;
       const matchesQuery =
         !term ||
@@ -121,28 +160,27 @@ function AdminCatalogPage() {
           .includes(term);
       return matchesCategory && matchesQuery;
     });
-  }, [categoryFilter, items, query]);
+  }, [categoryFilter, moduleItems, query]);
 
   const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? null,
-    [items, selectedId],
+    () => moduleItems.find((item) => item.id === selectedId) ?? null,
+    [moduleItems, selectedId],
   );
 
   const editOptions = useMemo(() => {
     return {
-      skus: uniqueStrings(items.map((item) => item.sku)),
-      productNames: uniqueStrings(items.map((item) => item.product_name)),
-      categories: uniqueStrings(items.map((item) => item.category)),
-      tiers: uniqueStrings(items.map((item) => item.partner_tier)),
-      prices: uniqueStrings(items.map((item) => item.list_price)),
-      margins: uniqueStrings(items.map((item) => item.margin)),
-      availability: uniqueStrings(items.map((item) => item.availability)),
+      skus: uniqueStrings(moduleItems.map((item) => item.sku)),
+      categories: uniqueStrings(moduleItems.map((item) => item.category)),
+      tiers: uniqueStrings(moduleItems.map((item) => item.partner_tier)),
+      prices: uniqueStrings(moduleItems.map((item) => item.list_price)),
+      margins: uniqueStrings(moduleItems.map((item) => item.margin)),
+      availability: uniqueStrings(moduleItems.map((item) => item.availability)),
     };
-  }, [items]);
+  }, [moduleItems]);
 
   const categories = useMemo(
-    () => ["all", ...new Set(items.map((item) => item.category))],
-    [items],
+    () => ["all", ...new Set(moduleItems.map((item) => item.category))],
+    [moduleItems],
   );
 
   useEffect(() => {
@@ -157,29 +195,107 @@ function AdminCatalogPage() {
       stock: selectedItem.stock,
       availability: selectedItem.availability,
       benefits: selectedItem.benefits,
+      catalog_kind: normalizeCatalogKind(selectedItem.catalog_kind),
     });
   }, [selectedItem]);
 
+  useEffect(() => {
+    setDraft((current) =>
+      current.catalog_kind === moduleKind
+        ? current
+        : {
+            ...current,
+            catalog_kind: moduleKind,
+          },
+    );
+    setSelectedId((current) =>
+      current && moduleItems.some((item) => item.id === current)
+        ? current
+        : (moduleItems[0]?.id ?? null),
+    );
+  }, [moduleKind, moduleItems]);
+
+  const catalogImportOptions = useMemo(() => ({ kind: moduleKind }), [moduleKind]);
+
   if (!hasRole("super_admin")) {
-    return <AccessDeniedPage title="Tiers & products" roleLabel="Super Admin" />;
+    return <AccessDeniedPage title="Product Catalog" roleLabel="Super Admin" />;
   }
+
+  const downloadImportTemplate = () => {
+    downloadTemplateCsv({
+      filenameStem: `livey-${moduleKind}-catalog`,
+      columns: getCatalogImportTemplateColumns(catalogImportOptions),
+      sampleRows: getCatalogImportTemplateSample(catalogImportOptions),
+    });
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    setImportErrors([]);
+    setImportMessage(null);
+
+    try {
+      const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
+      const templateErrors = validateImportTemplate(
+        parsed,
+        getCatalogImportTemplateColumns(catalogImportOptions),
+      );
+      if (templateErrors.length > 0) {
+        setImportErrors(templateErrors);
+        toast.error("Use the catalog import template before uploading again");
+        return;
+      }
+
+      const validation = validateCatalogImportRows(parsed.rows, catalogImportOptions);
+      if (validation.errors.length > 0) {
+        setImportErrors(validation.errors);
+        toast.error("Fix the import errors before uploading again");
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("portal_catalog_items").insert(
+        validation.rows.map((row) => ({
+          id: crypto.randomUUID(),
+          ...row,
+          is_seed: false,
+          created_at: now,
+          updated_at: now,
+        })),
+      );
+      if (error) throw error;
+
+      setImportMessage(
+        buildImportSummaryMessage(validation.rows.length, "catalog item", file.name),
+      );
+      toast.success(`Imported ${validation.rows.length} catalog items`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import catalog items");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
 
   const saveItem = async () => {
     if (!selectedItem) return;
     setSaving(true);
     try {
+      const values = buildCatalogCreateValues({
+        ...draft,
+        catalog_kind: draft.catalog_kind,
+      });
       const { error } = await supabase
         .from("portal_catalog_items")
         .update({
-          sku: draft.sku,
-          product_name: draft.product_name,
-          category: draft.category,
-          partner_tier: draft.partner_tier,
-          list_price: draft.list_price,
-          margin: draft.margin,
-          stock: draft.stock,
-          availability: draft.availability,
-          benefits: draft.benefits,
+          ...values,
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedItem.id);
@@ -195,15 +311,16 @@ function AdminCatalogPage() {
   };
 
   const addItem = async () => {
-    if (!draft.sku.trim() || !draft.product_name.trim()) {
-      toast.error("SKU and product name are required");
+    if (!draft.product_name.trim()) {
+      toast.error("Product name is required");
       return;
     }
     setAdding(true);
     try {
+      const values = buildCatalogCreateValues(draft);
       const payload = {
         id: crypto.randomUUID(),
-        ...draft,
+        ...values,
         is_seed: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -211,7 +328,7 @@ function AdminCatalogPage() {
       const { error } = await supabase.from("portal_catalog_items").insert(payload);
       if (error) throw error;
       toast.success("Catalog item added");
-      setDraft(EMPTY_FORM);
+      setDraft({ ...EMPTY_FORM, catalog_kind: moduleKind });
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add item");
@@ -223,17 +340,17 @@ function AdminCatalogPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
             Administration
           </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Tiers & products</h1>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Product Catalog</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Define partner tiers, benefits, and product offerings that shape the portal.
+            Define products and combos that shape the portal, all from one shared catalog store.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
@@ -267,6 +384,7 @@ function AdminCatalogPage() {
                 stock: item.stock,
                 availability: item.availability,
                 benefits: item.benefits,
+                catalog_kind: normalizeCatalogKind(item.catalog_kind),
               }))
             }
             variant="outline"
@@ -275,15 +393,19 @@ function AdminCatalogPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Items" value={String(items.length)} hint="Catalog records" />
+        <Metric
+          label={getCatalogKindPluralLabel(moduleKind)}
+          value={String(moduleItems.length)}
+          hint="Catalog records in this module"
+        />
         <Metric
           label="Registered"
-          value={String(items.filter((item) => item.partner_tier === "Registered").length)}
+          value={String(moduleItems.filter((item) => item.partner_tier === "Registered").length)}
           hint="Entry-level offers"
         />
         <Metric
           label="In stock"
-          value={String(items.filter((item) => item.availability === "In stock").length)}
+          value={String(moduleItems.filter((item) => item.availability === "In stock").length)}
           hint="Ready to sell"
         />
       </div>
@@ -292,17 +414,42 @@ function AdminCatalogPage() {
         <Card>
           <CardHeader className="space-y-4 border-b">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
+              <div className="min-w-0">
                 <CardTitle className="text-base">Catalog items</CardTitle>
-                <CardDescription>Search, filter, and edit the live product set.</CardDescription>
+                <CardDescription>
+                  Search, filter, and edit the live {getCatalogKindLabel(moduleKind).toLowerCase()}{" "}
+                  set.
+                </CardDescription>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+                <Button type="button" variant="outline" onClick={downloadImportTemplate}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download template
+                </Button>
+                <Button asChild type="button" variant="outline" disabled={importing}>
+                  <label htmlFor="catalog-import-file">
+                    {importing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Import CSV/XLSX
+                  </label>
+                </Button>
+                <input
+                  ref={importInputRef}
+                  id="catalog-import-file"
+                  type="file"
+                  accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={(event) => void handleImportFile(event)}
+                />
                 <div className="relative w-full max-w-xs">
                   <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search catalog"
+                    placeholder={`Search ${getCatalogKindLabel(moduleKind).toLowerCase()}s`}
                     className="pl-8"
                   />
                 </div>
@@ -319,16 +466,27 @@ function AdminCatalogPage() {
                 />
               </div>
             </div>
+            <Tabs
+              value={moduleKind}
+              onValueChange={(value) => setModuleKind(value as CatalogKind)}
+              className="w-fit"
+            >
+              <TabsList>
+                <TabsTrigger value="product">{getCatalogKindPluralLabel("product")}</TabsTrigger>
+                <TabsTrigger value="combo">{getCatalogKindPluralLabel("combo")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </CardHeader>
           <CardContent className="p-0">
+            <ImportFeedback successMessage={importMessage} errors={importErrors} />
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading catalog...
+                Loading {getCatalogKindPluralLabel(moduleKind).toLowerCase()}...
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="p-8 text-sm text-muted-foreground">
-                No catalog items match this view.
+                No {getCatalogKindPluralLabel(moduleKind).toLowerCase()} match this view.
               </div>
             ) : (
               <div className="divide-y">
@@ -339,20 +497,23 @@ function AdminCatalogPage() {
                       setSelectedId(item.id);
                       setEditOpen(true);
                     }}
-                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
+                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
                       selectedItem?.id === item.id ? "bg-muted/40" : ""
                     }`}
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="truncate font-medium">{item.product_name}</div>
+                        <Badge variant="secondary">
+                          {getCatalogKindLabel(normalizeCatalogKind(item.catalog_kind))}
+                        </Badge>
                         <Badge variant="outline">{item.partner_tier}</Badge>
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
                         {item.sku} · {item.category}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <div className="font-medium">{item.list_price}</div>
                       <div className="text-xs text-muted-foreground">{item.availability}</div>
                     </div>
@@ -366,9 +527,11 @@ function AdminCatalogPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader className="border-b">
-              <CardTitle className="text-base">Add item</CardTitle>
+              <CardTitle className="text-base">
+                Add {getCatalogKindLabel(moduleKind).toLowerCase()}
+              </CardTitle>
               <CardDescription>
-                Create a new product or bundle for the portal catalog.
+                Create a new {getCatalogKindLabel(moduleKind).toLowerCase()} in the shared catalog.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -391,8 +554,9 @@ function AdminCatalogPage() {
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, product_name: value }))
                     }
-                    placeholder="Select or create product"
-                    options={editOptions.productNames}
+                    placeholder={`Select or create ${moduleKind}`}
+                    source="catalog"
+                    catalogKind={moduleKind}
                   />
                 </Field>
                 <Field label="Category">
@@ -439,6 +603,26 @@ function AdminCatalogPage() {
                       setDraft((value) => ({ ...value, stock: Number(e.target.value) || 0 }))
                     }
                   />
+                </Field>
+                <Field label="Module">
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={draft.catalog_kind === "product" ? "default" : "outline"}
+                      onClick={() =>
+                        setDraft((current) => ({ ...current, catalog_kind: "product" }))
+                      }
+                    >
+                      Product
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={draft.catalog_kind === "combo" ? "default" : "outline"}
+                      onClick={() => setDraft((current) => ({ ...current, catalog_kind: "combo" }))}
+                    >
+                      Combo
+                    </Button>
+                  </div>
                 </Field>
               </div>
               <Field label="Benefits">
@@ -492,8 +676,9 @@ function AdminCatalogPage() {
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, product_name: value }))
                     }
-                    placeholder="Select or create product"
-                    options={editOptions.productNames}
+                    placeholder={`Select or create ${moduleKind}`}
+                    source="catalog"
+                    catalogKind={moduleKind}
                   />
                 </Field>
                 <Field label="Category">
@@ -565,6 +750,26 @@ function AdminCatalogPage() {
                     options={editOptions.availability}
                   />
                 </Field>
+                <Field label="Module">
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={draft.catalog_kind === "product" ? "default" : "outline"}
+                      onClick={() =>
+                        setDraft((current) => ({ ...current, catalog_kind: "product" }))
+                      }
+                    >
+                      Product
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={draft.catalog_kind === "combo" ? "default" : "outline"}
+                      onClick={() => setDraft((current) => ({ ...current, catalog_kind: "combo" }))}
+                    >
+                      Combo
+                    </Button>
+                  </div>
+                </Field>
               </div>
               <Field label="Benefits">
                 <Textarea
@@ -588,6 +793,7 @@ function AdminCatalogPage() {
                       stock: selectedItem.stock,
                       availability: selectedItem.availability,
                       benefits: selectedItem.benefits,
+                      catalog_kind: normalizeCatalogKind(selectedItem.catalog_kind),
                     })
                   }
                 >

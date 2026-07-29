@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw, Search, ShieldCheck, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -69,7 +69,7 @@ function AdminDealsPage() {
     ];
   }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [dealResult, collaboratorResult, memberResult] = await Promise.all([
@@ -124,11 +124,11 @@ function AdminDealsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [profile?.id]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const filteredDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -181,7 +181,6 @@ function AdminDealsPage() {
   const editOptions = useMemo(
     () => ({
       countries: uniqueStrings(deals.map((deal) => deal.country)),
-      products: uniqueStrings(deals.map((deal) => deal.product)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
       budgets: uniqueStrings(deals.map((deal) => deal.customer_budget ?? "")),
     }),
@@ -362,7 +361,7 @@ function AdminDealsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
             Administration
@@ -372,7 +371,7 @@ function AdminDealsPage() {
             Review strategic opportunities, request more detail, and clear approved deals.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
@@ -451,7 +450,7 @@ function AdminDealsPage() {
                       setNote(deal.notes);
                       setReviewOpen(true);
                     }}
-                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
+                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
                       selectedDeal?.id === deal.id ? "bg-muted/40" : ""
                     }`}
                   >
@@ -464,7 +463,7 @@ function AdminDealsPage() {
                         {deal.owner_name} · {deal.region} · {deal.stage}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <div className="font-medium">{deal.amount}</div>
                       <div className="text-xs text-muted-foreground">
                         {formatDealProbability(deal.probability)}
@@ -622,7 +621,7 @@ function AdminDealsPage() {
                         <div className="space-y-2">
                           <Label>Product</Label>
                           <LookupCombobox
-                            fieldName={LOOKUP_FIELDS.dealProduct}
+                            fieldName={LOOKUP_FIELDS.catalogProduct}
                             label="Product"
                             value={reviewDraft.product}
                             onValueChange={(value) =>
@@ -630,8 +629,9 @@ function AdminDealsPage() {
                                 current ? { ...current, product: value } : current,
                               )
                             }
-                            placeholder="Select or create product"
-                            options={editOptions.products}
+                            placeholder="Select or create product or combo"
+                            source="catalog"
+                            catalogKind="all"
                           />
                         </div>
                         <div className="space-y-2">

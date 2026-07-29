@@ -499,8 +499,8 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
   dataset({
     id: "portal-catalog-items",
     table: "portal_catalog_items",
-    label: "Product catalogue",
-    description: "LIVEY product and availability configuration.",
+    label: "Product Catalog",
+    description: "LIVEY product and combo configuration.",
     group: "governance",
     filenameStem: "livey-product-catalogue",
     visibleTo: SUPER_ADMIN_ONLY,
@@ -510,6 +510,7 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
       { key: "id", header: "ID" },
       { key: "sku", header: "SKU" },
       { key: "product_name", header: "Product" },
+      { key: "catalog_kind", header: "Module" },
       { key: "category", header: "Category" },
       { key: "partner_tier", header: "Partner Tier" },
       { key: "list_price", header: "List Price" },

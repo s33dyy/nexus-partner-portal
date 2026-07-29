@@ -1,4 +1,4 @@
-export type DropdownSourceKey = "account" | "client" | "poc" | "lookup";
+export type DropdownSourceKey = "account" | "catalog" | "client" | "poc" | "lookup";
 
 export type DropdownOption = {
   id: string;
@@ -36,6 +36,15 @@ export const DROPDOWN_SOURCES = {
     allowCreate: true,
     searchFields: ["company_name", "account_owner", "region", "segment", "mrr"],
   },
+  catalog: {
+    kind: "catalog",
+    table: "portal_catalog_items",
+    idField: "id",
+    labelField: "product_name",
+    descriptionField: "sku",
+    allowCreate: true,
+    searchFields: ["sku", "product_name", "category", "partner_tier", "catalog_kind"],
+  },
   poc: {
     kind: "poc",
     table: "profiles",
@@ -58,4 +67,3 @@ export const DROPDOWN_SOURCES = {
 export function isDropdownSourceKey(value: string): value is DropdownSourceKey {
   return value in DROPDOWN_SOURCES;
 }
-

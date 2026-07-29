@@ -162,12 +162,18 @@ function DashboardPage() {
           supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
         ]);
 
-      const dealResult = dealsRes.status === "fulfilled" ? dealsRes.value : { data: [], error: dealsRes.reason };
+      const dealResult =
+        dealsRes.status === "fulfilled" ? dealsRes.value : { data: [], error: dealsRes.reason };
       const customerResult =
-        customersRes.status === "fulfilled" ? customersRes.value : { data: [], error: customersRes.reason };
+        customersRes.status === "fulfilled"
+          ? customersRes.value
+          : { data: [], error: customersRes.reason };
       const partnerResult =
-        partnersRes.status === "fulfilled" ? partnersRes.value : { data: [], error: partnersRes.reason };
-      const newsResult = newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
+        partnersRes.status === "fulfilled"
+          ? partnersRes.value
+          : { data: [], error: partnersRes.reason };
+      const newsResult =
+        newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
       const notifResult =
         notifRes.status === "fulfilled" ? notifRes.value : { data: [], error: notifRes.reason };
       const rewardResult =
@@ -360,8 +366,8 @@ function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-1 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <Activity className="h-3 w-3" /> {roleLabel} · Overview
           </div>
@@ -372,7 +378,7 @@ function DashboardPage() {
             Here's what's happening across {profile?.company_name ?? "your workspace"} today.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary" className="gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
             {source === "database" ? "Live Postgres data" : "Empty state"}
@@ -463,8 +469,8 @@ function DashboardPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_360px]">
         <div className="space-y-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <div>
+            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <CardTitle className="text-base">News feed</CardTitle>
                 <CardDescription>
                   LIVEY updates, with images when they exist and text-only cards when they do not.
@@ -559,8 +565,8 @@ function DashboardPage() {
               {access.canAccessRewards && (
                 <QuickAction to="/rewards" icon={Trophy} label="View rewards" />
               )}
-              {access.canAccessDocuments && (
-                <QuickAction to="/documents" icon={FileText} label="Upload documents" />
+              {access.canAccessDealDocuments && (
+                <QuickAction to="/deal-documents" icon={FileText} label="Deal documents" />
               )}
               {hasRole("partner_admin") && (
                 <QuickAction to="/partner/onboarding" icon={Building2} label="Partner onboarding" />
@@ -649,7 +655,9 @@ function Kpi({
   }[tone];
 
   const content = (
-    <Card className={to ? "transition-colors hover:border-primary/40 hover:bg-accent/30" : undefined}>
+    <Card
+      className={to ? "transition-colors hover:border-primary/40 hover:bg-accent/30" : undefined}
+    >
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
           <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">

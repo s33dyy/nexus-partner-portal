@@ -122,7 +122,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           .order("updated_at", { ascending: false }),
         supabase
           .from("portal_catalog_items")
-          .select("id, product_name, category, partner_tier")
+          .select("id, product_name, category, partner_tier, catalog_kind")
           .order("updated_at", { ascending: false }),
       ])
         .then(([dealsRes, partnersRes, catalogRes]) => {
@@ -152,6 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   product_name: string;
                   category: string;
                   partner_tier: string;
+                  catalog_kind?: string | null;
                 }> | null) ?? [],
             }),
           );
@@ -191,18 +192,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppSidebar />
       <SidebarInset>
         {isAgreementAttention && <AgreementPendingBanner />}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">
-          <SidebarTrigger />
+        <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-start gap-3 border-b bg-background/80 px-3 py-2 backdrop-blur sm:items-center sm:px-4 sm:py-0">
+          <SidebarTrigger className="shrink-0" />
           <Popover open={showSearchResults}>
             <PopoverAnchor asChild>
-              <div className="relative hidden md:flex flex-1 max-w-md">
+              <div className="relative hidden flex-1 min-w-0 max-w-md md:flex">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder={
                     roles.includes("super_admin")
-                      ? "Search deals, partners, catalog..."
+                      ? "Search deals, partners, product catalog..."
                       : "Search partners, deals, customers…"
                   }
                   className="pl-8 h-9 bg-muted/50 border-transparent focus-visible:bg-background"
@@ -215,12 +216,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {searching ? (
                     <div className="px-4 py-3 text-sm text-muted-foreground">Searching…</div>
                   ) : (
-                    <CommandEmpty>No matching deals, partners, or catalog items.</CommandEmpty>
+                    <CommandEmpty>
+                      No matching deals, partners, or product catalog items.
+                    </CommandEmpty>
                   )}
                   {searchResults.map((group) => (
                     <CommandGroup key={group.group} heading={group.group}>
                       {group.items.map((item) => (
-                        <CommandItem key={item.id} value={`${group.group}-${item.id}`} onSelect={() => selectSearchResult(item.href)}>
+                        <CommandItem
+                          key={item.id}
+                          value={`${group.group}-${item.id}`}
+                          onSelect={() => selectSearchResult(item.href)}
+                        >
                           <div className="flex flex-col">
                             <span className="text-sm font-medium">{item.title}</span>
                             <span className="text-xs text-muted-foreground">{item.subtitle}</span>
@@ -233,7 +240,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Command>
             </PopoverContent>
           </Popover>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
             <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
               {statusLabel[status]}
             </Badge>
@@ -284,7 +291,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </DropdownMenu>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

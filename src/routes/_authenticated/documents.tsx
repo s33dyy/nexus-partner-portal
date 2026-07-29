@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { useAuth } from "@/hooks/use-auth";
-import { useRequireAccess } from "@/hooks/use-partner-access";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { type CsvColumn } from "@/lib/csv-export";
 
@@ -72,7 +72,8 @@ function DocumentsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const { profile, hasRole } = useAuth();
-  const access = useRequireAccess('partial');
+  const access = usePartnerAccess();
+  const navigate = useNavigate();
 
   function uniqueStrings(values: Array<string | null | undefined>) {
     return [
@@ -80,7 +81,7 @@ function DocumentsPage() {
     ];
   }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       let docQuery = supabase
@@ -119,11 +120,16 @@ function DocumentsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [hasRole, profile?.id, profile?.partner_id]);
 
   useEffect(() => {
+    if (access.loading) return;
+    if (!access.canAccessPartnerDocuments) {
+      navigate({ to: "/dashboard", replace: true });
+      return;
+    }
     void load();
-  }, []);
+  }, [access.canAccessPartnerDocuments, access.loading, load, navigate]);
 
   const partnerById = useMemo(
     () => new Map(partners.map((partner) => [partner.id, partner.company_name])),
@@ -247,10 +253,10 @@ function DocumentsPage() {
             <FileText className="h-3.5 w-3.5" />
             Workspace
           </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Documents</h1>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Onboarding documents</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Manage compliance files, preview uploads, and remove old records when you need to reset
-            the workspace.
+            Manage onboarding compliance files, preview uploads, and remove old records when you
+            need to reset the workspace.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -297,8 +303,8 @@ function DocumentsPage() {
           <CardHeader className="space-y-4 border-b">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <CardTitle className="text-base">Document library</CardTitle>
-                <CardDescription>Search and inspect uploaded partner files.</CardDescription>
+                <CardTitle className="text-base">Onboarding document library</CardTitle>
+                <CardDescription>Search and inspect uploaded onboarding files.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative w-full max-w-xs">

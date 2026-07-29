@@ -33,6 +33,13 @@ test("listVisibleExportDatasets keeps team exports available to partner admins",
   expect(visible).not.toContain("profiles");
 });
 
+test("product catalog export uses the new surface label", () => {
+  const dataset = EXPORT_DATASETS.find((entry) => entry.id === "portal-catalog-items");
+
+  expect(dataset?.label).toBe("Product Catalog");
+  expect(dataset?.description).toContain("product and combo");
+});
+
 test("resolveScopeFilters keeps partner users scoped to their own records", () => {
   expect(
     resolveScopeFilters(

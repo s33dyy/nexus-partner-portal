@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
+import type { CatalogKind } from "@/lib/catalog";
 import type { DropdownOption, DropdownSourceKey } from "@/lib/dropdown-sources";
 import type { CustomerRecord } from "@/lib/portal-records";
 
@@ -11,11 +12,32 @@ const listDropdownSourceValuesFn = createServerFn({ method: "GET" })
       q?: string;
       partnerId?: string | null;
       userId?: string | null;
+      catalogKind?: CatalogKind | "all";
     }) => input,
   )
   .handler(async ({ data }) => {
     const { listDropdownSourceValues } = await import("@/server/dropdown-sources.server");
     return listDropdownSourceValues(data);
+  });
+
+const createDropdownCatalogItemFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      product_name: string;
+      sku?: string;
+      category?: string;
+      partner_tier?: string;
+      list_price?: string;
+      margin?: string;
+      stock?: number;
+      availability?: string;
+      benefits?: string;
+      catalog_kind?: CatalogKind;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    const { createCatalogItemFromDropdown } = await import("@/server/dropdown-sources.server");
+    return createCatalogItemFromDropdown(data);
   });
 
 const createDropdownCustomerFn = createServerFn({ method: "POST" })
@@ -46,8 +68,24 @@ export async function listDropdownSourceValues(input: {
   q?: string;
   partnerId?: string | null;
   userId?: string | null;
+  catalogKind?: CatalogKind | "all";
 }): Promise<DropdownOption[]> {
   return listDropdownSourceValuesFn({ data: input });
+}
+
+export async function createDropdownCatalogItem(input: {
+  product_name: string;
+  sku?: string;
+  category?: string;
+  partner_tier?: string;
+  list_price?: string;
+  margin?: string;
+  stock?: number;
+  availability?: string;
+  benefits?: string;
+  catalog_kind?: CatalogKind;
+}) {
+  return createDropdownCatalogItemFn({ data: input });
 }
 
 export async function createDropdownCustomer(input: {
@@ -66,4 +104,3 @@ export async function createDropdownCustomer(input: {
 }): Promise<CustomerRecord> {
   return createDropdownCustomerFn({ data: input });
 }
-

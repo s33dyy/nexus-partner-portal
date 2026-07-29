@@ -104,6 +104,7 @@ export type CatalogItemRecord = {
   stock: number;
   availability: string;
   benefits: string;
+  catalog_kind?: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;
@@ -174,7 +175,7 @@ export type GlobalSearchResultItem = {
 };
 
 export type GlobalSearchResult = {
-  group: "Deals" | "Partners" | "Catalog";
+  group: "Deals" | "Partners" | "Product Catalog";
   items: GlobalSearchResultItem[];
 };
 

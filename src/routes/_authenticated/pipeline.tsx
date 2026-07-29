@@ -340,7 +340,7 @@ function PipelinePage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <Target className="h-3.5 w-3.5" />
             Workspace
@@ -350,7 +350,7 @@ function PipelinePage() {
             Visualize every deal by stage and push opportunities forward with a single action.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
@@ -427,7 +427,7 @@ function PipelinePage() {
                 Move records across the pipeline using the live Postgres records.
               </CardDescription>
             </div>
-            <div className="flex flex-col gap-2 md:flex-row">
+            <div className="flex w-full flex-col gap-2 md:flex-row lg:w-auto lg:justify-end">
               <div className="relative w-full max-w-sm">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -458,7 +458,7 @@ function PipelinePage() {
               Loading pipeline...
             </div>
           ) : (
-            <div className="grid min-w-[920px] gap-4 xl:grid-cols-7">
+            <div className="grid min-w-[840px] gap-4 md:min-w-[920px] xl:grid-cols-7">
               {grouped.map((column) => (
                 <div
                   key={column.stage}
@@ -480,7 +480,7 @@ function PipelinePage() {
                       </div>
                     ) : (
                       column.deals.map((deal) => (
-                      <div
+                        <div
                           key={deal.id}
                           className="group relative rounded-xl border border-border/70 bg-background p-3 pb-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-1 focus-within:ring-ring"
                         >
@@ -494,9 +494,15 @@ function PipelinePage() {
                           </div>
                           <div className="mt-3 grid gap-2 overflow-hidden text-xs text-muted-foreground transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-[28rem] lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-[28rem] lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
                             <div className="grid gap-2">
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.owner_name}</div>
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.region}</div>
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">{deal.product}</div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                {deal.owner_name}
+                              </div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                {deal.region}
+                              </div>
+                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                {deal.product}
+                              </div>
                               <div className="rounded-lg bg-muted/40 px-2.5 py-2">
                                 {formatDealProbability(deal.probability)}
                               </div>

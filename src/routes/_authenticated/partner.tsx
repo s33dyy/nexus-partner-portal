@@ -126,11 +126,20 @@ function PartnerPage() {
         supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
       ]);
 
-      const profileResult = profileRes.status === "fulfilled" ? profileRes.value : { data: null, error: profileRes.reason };
-      const partnerResult = partnerRes.status === "fulfilled" ? partnerRes.value : { data: null, error: partnerRes.reason };
-      const docsResult = docsRes.status === "fulfilled" ? docsRes.value : { data: [], error: docsRes.reason };
-      const notesResult = notesRes.status === "fulfilled" ? notesRes.value : { data: [], error: notesRes.reason };
-      const newsResult = newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
+      const profileResult =
+        profileRes.status === "fulfilled"
+          ? profileRes.value
+          : { data: null, error: profileRes.reason };
+      const partnerResult =
+        partnerRes.status === "fulfilled"
+          ? partnerRes.value
+          : { data: null, error: partnerRes.reason };
+      const docsResult =
+        docsRes.status === "fulfilled" ? docsRes.value : { data: [], error: docsRes.reason };
+      const notesResult =
+        notesRes.status === "fulfilled" ? notesRes.value : { data: [], error: notesRes.reason };
+      const newsResult =
+        newsRes.status === "fulfilled" ? newsRes.value : { data: [], error: newsRes.reason };
 
       const partialFailures = [
         profileResult.error,
@@ -216,7 +225,8 @@ function PartnerPage() {
 
   const status = profile?.partner_status ?? partner?.status ?? "pending_partner_registration";
   const progress = getStatusProgress(status);
-  const isReadOnly = status === "submitted" || status === "approved" || status === "signed_pending_review";
+  const isReadOnly =
+    status === "submitted" || status === "approved" || status === "signed_pending_review";
   const isOnboardingChild = pathname === "/partner/onboarding";
   const isPartnerChild = pathname !== "/partner";
 
@@ -380,9 +390,11 @@ function PartnerPage() {
                     )}
                     Submit for review
                   </Button>
-                  <Button asChild variant="outline">
-                    <Link to="/documents">Open documents</Link>
-                  </Button>
+                  {(hasRole("super_admin") || hasRole("partner_admin")) && (
+                    <Button asChild variant="outline">
+                      <Link to="/documents">Open documents</Link>
+                    </Button>
+                  )}
                 </div>
               </>
             ) : (
@@ -394,32 +406,34 @@ function PartnerPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Document checklist</CardTitle>
-              <CardDescription>See what is already uploaded for this partner.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-6">
-              {docs.length > 0 ? (
-                docs.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center justify-between rounded-lg border bg-muted/20 p-3 text-sm"
-                  >
-                    <div>
-                      <div className="font-medium">{doc.doc_type}</div>
-                      <div className="text-muted-foreground">{doc.file_name}</div>
+          {(hasRole("super_admin") || hasRole("partner_admin")) && (
+            <Card>
+              <CardHeader className="border-b">
+                <CardTitle className="text-base">Document checklist</CardTitle>
+                <CardDescription>See what is already uploaded for this partner.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-6">
+                {docs.length > 0 ? (
+                  docs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between rounded-lg border bg-muted/20 p-3 text-sm"
+                    >
+                      <div>
+                        <div className="font-medium">{doc.doc_type}</div>
+                        <div className="text-muted-foreground">{doc.file_name}</div>
+                      </div>
+                      <Badge variant="outline">Uploaded</Badge>
                     </div>
-                    <Badge variant="outline">Uploaded</Badge>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    No documents uploaded yet.
                   </div>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  No documents uploaded yet.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="border-b">
@@ -517,7 +531,7 @@ function PartnerPage() {
           </CardHeader>
           <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
             <div>Partner admins can manage onboarding, deals, team, and document workflows.</div>
-            <div>Partner users can handle deals, customers, analytics, and documents.</div>
+            <div>Partner users can handle deals, customers, analytics, and deal documents.</div>
             <Separator />
             <div>
               {status === "approved"

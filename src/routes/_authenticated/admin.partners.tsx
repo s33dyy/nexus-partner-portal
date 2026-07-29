@@ -138,7 +138,11 @@ function tierForTurnover(band: string | null): (typeof TIERS)[number] {
 }
 
 function inferAgreementRequestStatus(partner: Partner | null): string | null {
-  if (!partner?.agreement_envelope_id && !partner?.agreement_sent_at && !partner?.agreement_signed_at) {
+  if (
+    !partner?.agreement_envelope_id &&
+    !partner?.agreement_sent_at &&
+    !partner?.agreement_signed_at
+  ) {
     return null;
   }
 
@@ -155,11 +159,13 @@ function inferAgreementRequestStatus(partner: Partner | null): string | null {
 
 function formatAgreementRequestStatus(status: string | null): string {
   if (!status) return "Not sent";
-  return {
-    pending: "Pending signature",
-    completed: "Signed and awaiting review",
-    unknown: "Unknown",
-  }[status] ?? status.replace(/_/g, " ");
+  return (
+    {
+      pending: "Pending signature",
+      completed: "Signed and awaiting review",
+      unknown: "Unknown",
+    }[status] ?? status.replace(/_/g, " ")
+  );
 }
 
 function AdminPartners() {
@@ -284,7 +290,9 @@ function AdminPartners() {
     link.click();
   };
 
-  const decide = async (decision: "approved" | "rejected" | "under_review" | "need_more_info" | "partial_approval") => {
+  const decide = async (
+    decision: "approved" | "rejected" | "under_review" | "need_more_info" | "partial_approval",
+  ) => {
     if (!selected) return;
     if (
       decision === "approved" &&
@@ -298,7 +306,7 @@ function AdminPartners() {
     setActing(true);
     try {
       let patch: Partial<Partner>;
-      
+
       if (decision === "approved") {
         patch = { status: decision, tier: tierForTurnover(selected.annual_turnover) };
       } else if (decision === "partial_approval") {
@@ -306,7 +314,7 @@ function AdminPartners() {
       } else {
         patch = { status: decision };
       }
-      
+
       const { error } = await supabase.from("partners").update(patch).eq("id", selected.id);
       if (error) throw error;
 
@@ -344,13 +352,17 @@ function AdminPartners() {
         });
 
         // Add to news feed
-        const newsTitle = decision === "partial_approval" 
-          ? `Partner ${selected.company_name} partially approved (agreement pending)`
-          : `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`;
-        const newsCaption = decision === "partial_approval"
-          ? noteDraft.trim() || `The partner application for ${selected.company_name} was partially approved. Agreement will be prepared next.`
-          : noteDraft.trim() || `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`;
-          
+        const newsTitle =
+          decision === "partial_approval"
+            ? `Partner ${selected.company_name} partially approved (agreement pending)`
+            : `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`;
+        const newsCaption =
+          decision === "partial_approval"
+            ? noteDraft.trim() ||
+              `The partner application for ${selected.company_name} was partially approved. Agreement will be prepared next.`
+            : noteDraft.trim() ||
+              `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`;
+
         await supabase.from("portal_news_posts").insert({
           id: globalThis.crypto.randomUUID(),
           title: newsTitle,
@@ -468,7 +480,9 @@ function AdminPartners() {
 
       const tempPasswordResult = await supabase.auth.issueTemporaryPassword(selected.owner_user_id);
       if (tempPasswordResult.error || !tempPasswordResult.data) {
-        throw new Error(tempPasswordResult.error?.message ?? "Failed to issue a temporary password");
+        throw new Error(
+          tempPasswordResult.error?.message ?? "Failed to issue a temporary password",
+        );
       }
 
       if (noteDraft.trim()) {
@@ -544,14 +558,18 @@ function AdminPartners() {
       (p.gst_number ?? "").toLowerCase().includes(query.toLowerCase()),
   );
   const sourceAgreementDoc =
-    docs.find((doc) => doc.doc_type === "agreement_source" || doc.file_path === selected?.agreement_source_doc_path) ??
-    null;
-  const currentAgreementRequestStatus = agreementRequestStatus ?? inferAgreementRequestStatus(selected);
+    docs.find(
+      (doc) =>
+        doc.doc_type === "agreement_source" ||
+        doc.file_path === selected?.agreement_source_doc_path,
+    ) ?? null;
+  const currentAgreementRequestStatus =
+    agreementRequestStatus ?? inferAgreementRequestStatus(selected);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" /> Administration
           </div>
@@ -560,7 +578,7 @@ function AdminPartners() {
             Review incoming partner registrations, verify documents, and assign tiers.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <CsvExportButton
             label="Export CSV"
             filenameStem="livey-partner-applications"
@@ -630,7 +648,7 @@ function AdminPartners() {
                 <button
                   key={p.id}
                   onClick={() => void openPartner(p)}
-                  className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left transition hover:bg-muted/40"
+                  className="flex w-full flex-col gap-3 px-6 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -643,7 +661,7 @@ function AdminPartners() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                     <Badge variant="outline" className="capitalize">
                       {p.tier}
                     </Badge>
@@ -734,7 +752,7 @@ function AdminPartners() {
                       {docs.map((d) => (
                         <li
                           key={d.id}
-                          className="flex items-center justify-between rounded-md border p-3 text-sm"
+                          className="flex flex-col gap-3 rounded-md border p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -745,7 +763,7 @@ function AdminPartners() {
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
                             <Button variant="ghost" size="sm" onClick={() => void openDoc(d)}>
                               <ExternalLink className="mr-1 h-3.5 w-3.5" /> Open
                             </Button>
@@ -828,10 +846,7 @@ function AdminPartners() {
                   >
                     <XCircle className="mr-1 h-4 w-4" /> Reject
                   </Button>
-                  <Button
-                    onClick={() => void approveSignedAgreement()}
-                    disabled={acting}
-                  >
+                  <Button onClick={() => void approveSignedAgreement()} disabled={acting}>
                     {acting ? (
                       <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                     ) : (
@@ -868,7 +883,11 @@ function AdminPartners() {
                             </div>
                           </div>
                           {sourceAgreementDoc && (
-                            <Button variant="outline" size="sm" onClick={() => void openDoc(sourceAgreementDoc)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void openDoc(sourceAgreementDoc)}
+                            >
                               <ExternalLink className="mr-1 h-3.5 w-3.5" /> Open
                             </Button>
                           )}
@@ -877,15 +896,21 @@ function AdminPartners() {
 
                       {selected.agreement_envelope_id && (
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="secondary">Request ID {selected.agreement_envelope_id.slice(0, 8)}…</Badge>
+                          <Badge variant="secondary">
+                            Request ID {selected.agreement_envelope_id.slice(0, 8)}…
+                          </Badge>
                           {selected.agreement_sent_at && (
                             <Badge variant="outline">
                               Sent {new Date(selected.agreement_sent_at).toLocaleString("en-IN")}
                             </Badge>
                           )}
                           {selected.agreement_signed_at && (
-                            <Badge variant="outline" className="border-emerald-500/20 text-emerald-700">
-                              Signed {new Date(selected.agreement_signed_at).toLocaleString("en-IN")}
+                            <Badge
+                              variant="outline"
+                              className="border-emerald-500/20 text-emerald-700"
+                            >
+                              Signed{" "}
+                              {new Date(selected.agreement_signed_at).toLocaleString("en-IN")}
                             </Badge>
                           )}
                         </div>
@@ -894,7 +919,8 @@ function AdminPartners() {
                       {selected.status === "partial_approval" && (
                         <div className="space-y-3 rounded-md border bg-background/70 p-3">
                           <div className="text-sm text-muted-foreground">
-                            Upload a fresh PDF for this partner before preparing the Zoho Sign request.
+                            Upload a fresh PDF for this partner before preparing the Zoho Sign
+                            request.
                           </div>
                           <div className="space-y-2">
                             <Input
@@ -951,7 +977,9 @@ function AdminPartners() {
                           <div className="flex items-center gap-2 text-sm text-primary">
                             <FileSignature className="h-4 w-4 shrink-0" />
                             Agreement prepared via{" "}
-                            {selected.agreement_provider === "zohosign" ? "Zoho Sign" : selected.agreement_provider}
+                            {selected.agreement_provider === "zohosign"
+                              ? "Zoho Sign"
+                              : selected.agreement_provider}
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <Button
@@ -991,7 +1019,11 @@ function AdminPartners() {
                               )}
                               Refresh Zoho Status
                             </Button>
-                            <Button size="sm" onClick={() => void approveSignedAgreement()} disabled={acting}>
+                            <Button
+                              size="sm"
+                              onClick={() => void approveSignedAgreement()}
+                              disabled={acting}
+                            >
                               {acting ? (
                                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                               ) : (
@@ -1011,7 +1043,10 @@ function AdminPartners() {
         </SheetContent>
       </Sheet>
 
-      <Dialog open={!!credentialPreview} onOpenChange={(open) => !open && setCredentialPreview(null)}>
+      <Dialog
+        open={!!credentialPreview}
+        onOpenChange={(open) => !open && setCredentialPreview(null)}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>One-time partner credentials</DialogTitle>
@@ -1071,7 +1106,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <div>
       <div className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">{title}</div>
-      <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/20 p-4">{children}</div>
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-4 sm:grid-cols-2">{children}</div>
     </div>
   );
 }

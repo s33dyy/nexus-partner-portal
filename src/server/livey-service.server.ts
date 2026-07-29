@@ -123,6 +123,20 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
   ],
+  deal_documents: [
+    "id",
+    "deal_id",
+    "partner_id",
+    "uploaded_by",
+    "doc_type",
+    "file_name",
+    "file_path",
+    "mime_type",
+    "size_bytes",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
   partner_review_notes: [
     "id",
     "partner_id",
@@ -216,6 +230,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "stock",
     "availability",
     "benefits",
+    "catalog_kind",
     "is_seed",
     "created_at",
     "updated_at",
@@ -517,7 +532,7 @@ function normalizePdfText(value: string) {
   return value
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "?");
+    .replace(/[^\x20-\x7E]/g, "?");
 }
 
 function escapePdfText(value: string) {
@@ -595,7 +610,9 @@ function buildTextPdfBytes(input: { title: string; body: string }) {
     "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
   );
   push("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
-  push(`5 0 obj\n<< /Length ${Buffer.byteLength(contentStream, "utf8")} >>\nstream\n${contentStream}\nendstream\nendobj\n`);
+  push(
+    `5 0 obj\n<< /Length ${Buffer.byteLength(contentStream, "utf8")} >>\nstream\n${contentStream}\nendstream\nendobj\n`,
+  );
 
   const xrefStart = byteLength;
   const xrefEntries = ["xref\n0 6\n0000000000 65535 f \n"];
@@ -886,8 +903,7 @@ export async function getAuthContext(token?: string) {
     ? ({
         ...(profileRows[0] as Record<string, unknown>),
         id: String(profileRows[0].id),
-        partner_id:
-          profileRows[0].partner_id == null ? null : String(profileRows[0].partner_id),
+        partner_id: profileRows[0].partner_id == null ? null : String(profileRows[0].partner_id),
         partner_status: profileRows[0].partner_status as PartnerStatus,
       } as {
         id: string;
@@ -1063,7 +1079,8 @@ async function insertWorkspaceUserRecord(
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(input.password, 10);
   const partnerStatus =
-    input.partner_status ?? (input.role === "super_admin" ? "approved" : "pending_partner_registration");
+    input.partner_status ??
+    (input.role === "super_admin" ? "approved" : "pending_partner_registration");
   const partnerId =
     input.partner_id || (ctx.profile as { partner_id?: string | null } | null)?.partner_id || null;
 
@@ -1208,10 +1225,10 @@ export async function updatePasswordFromSession(password: string) {
     throw new Error("Unauthorized");
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`, [
-    passwordHash,
-    session.user.id,
-  ]);
+  await pool.query(
+    `UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`,
+    [passwordHash, session.user.id],
+  );
   return { ok: true };
 }
 
@@ -1270,10 +1287,10 @@ export async function completePasswordReset(token: string, password: string) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`, [
-    passwordHash,
-    row.user_id,
-  ]);
+  await pool.query(
+    `UPDATE profiles SET password_hash = $1, must_reset_password = false WHERE id = $2`,
+    [passwordHash, row.user_id],
+  );
   await pool.query(`UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = $1`, [
     tokenHash,
   ]);

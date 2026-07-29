@@ -790,7 +790,7 @@ function DealsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [selectedDealDraft?.amount, selectedDealDraft?.currency_code]);
+  }, [selectedDealDraft]);
 
   const kpis = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
@@ -837,7 +837,6 @@ function DealsPage() {
     return {
       countries: uniqueStrings(deals.map((deal) => deal.country)),
       regions: uniqueStrings(deals.map((deal) => deal.region)),
-      products: uniqueStrings(deals.map((deal) => deal.product)),
       sources: uniqueStrings(deals.map((deal) => deal.source)),
       budgets: uniqueStrings(deals.map((deal) => deal.customer_budget ?? "")),
     };
@@ -927,9 +926,8 @@ function DealsPage() {
     mode: hasRole("super_admin") ? ("super_admin" as const) : ("partner" as const),
   };
   const dealImportTemplateColumns = getDealImportTemplateColumns(dealImportTemplateOptions);
-  const dealImportTemplateDownloadColumns = getDealImportTemplateDownloadColumns(
-    dealImportTemplateOptions,
-  );
+  const dealImportTemplateDownloadColumns =
+    getDealImportTemplateDownloadColumns(dealImportTemplateOptions);
   const dealImportTemplateSample = getDealImportTemplateSample(dealImportTemplateOptions);
 
   const downloadImportTemplate = () => {
@@ -1188,39 +1186,39 @@ function DealsPage() {
       }
 
       const payloads = resolvedRows.map((resolvedRow) => ({
-          id: globalThis.crypto.randomUUID(),
-          partner_id: resolvedRow.partner_id,
-          customer_id: customerIdByKey.get(resolvedRow.customer_key) ?? null,
-          poc_profile_id: resolvedRow.poc_profile_id,
-          account_name: resolvedRow.account_name,
-          contact_name: resolvedRow.row.contact_name,
-          owner_name: resolvedRow.owner_name,
-          country: resolvedRow.row.country || "India",
-          region: resolvedRow.row.region,
-          product: resolvedRow.row.product,
-          stage: resolvedRow.row.stage,
-          status: getDealImportStatus(resolvedRow.row.stage, resolvedRow.autoApproved),
-          quantity: resolvedRow.row.quantity,
-          amount: resolvedRow.row.amount,
-          currency_code: resolvedRow.row.currency_code,
-          amount_value: resolvedRow.row.amount_value,
-          amount_inr: resolvedRow.row.amount_inr,
-          fx_rate: resolvedRow.row.fx_rate,
-          fx_provider: resolvedRow.row.fx_provider,
-          fx_rate_fetched_at: resolvedRow.row.fx_rate_fetched_at,
-          customer_budget: resolvedRow.row.customer_budget || null,
-          probability: resolvedRow.row.probability,
-          possible_close_date: resolvedRow.row.possible_close_date || null,
-          close_date: resolvedRow.row.possible_close_date || defaultCloseDate,
-          source: resolvedRow.row.source,
-          last_touch: `Imported from ${file.name}`,
-          notes: resolvedRow.row.notes,
-          user_id: profile?.id ?? null,
-          is_hidden_to_team: false,
-          reward_rate_percent: EMPTY_FORM.reward_rate_percent,
-          is_seed: false,
-          created_at: today,
-          updated_at: today,
+        id: globalThis.crypto.randomUUID(),
+        partner_id: resolvedRow.partner_id,
+        customer_id: customerIdByKey.get(resolvedRow.customer_key) ?? null,
+        poc_profile_id: resolvedRow.poc_profile_id,
+        account_name: resolvedRow.account_name,
+        contact_name: resolvedRow.row.contact_name,
+        owner_name: resolvedRow.owner_name,
+        country: resolvedRow.row.country || "India",
+        region: resolvedRow.row.region,
+        product: resolvedRow.row.product,
+        stage: resolvedRow.row.stage,
+        status: getDealImportStatus(resolvedRow.row.stage, resolvedRow.autoApproved),
+        quantity: resolvedRow.row.quantity,
+        amount: resolvedRow.row.amount,
+        currency_code: resolvedRow.row.currency_code,
+        amount_value: resolvedRow.row.amount_value,
+        amount_inr: resolvedRow.row.amount_inr,
+        fx_rate: resolvedRow.row.fx_rate,
+        fx_provider: resolvedRow.row.fx_provider,
+        fx_rate_fetched_at: resolvedRow.row.fx_rate_fetched_at,
+        customer_budget: resolvedRow.row.customer_budget || null,
+        probability: resolvedRow.row.probability,
+        possible_close_date: resolvedRow.row.possible_close_date || null,
+        close_date: resolvedRow.row.possible_close_date || defaultCloseDate,
+        source: resolvedRow.row.source,
+        last_touch: `Imported from ${file.name}`,
+        notes: resolvedRow.row.notes,
+        user_id: profile?.id ?? null,
+        is_hidden_to_team: false,
+        reward_rate_percent: EMPTY_FORM.reward_rate_percent,
+        is_seed: false,
+        created_at: today,
+        updated_at: today,
       }));
 
       const { error } = await supabase.from("portal_deals").insert(payloads);
@@ -1379,7 +1377,10 @@ function DealsPage() {
       toast.error("Fill in account, client, owner, region, product, amount, and source");
       return;
     }
-    if (selectedDealDraft.currency_code !== "INR" && (!selectedDealDraft.amount_inr || !selectedDealDraft.fx_rate)) {
+    if (
+      selectedDealDraft.currency_code !== "INR" &&
+      (!selectedDealDraft.amount_inr || !selectedDealDraft.fx_rate)
+    ) {
       toast.error("Wait for the INR conversion to load before saving this deal");
       return;
     }
@@ -1569,7 +1570,7 @@ function DealsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <Target className="h-3.5 w-3.5" />
             Workspace
@@ -1580,7 +1581,7 @@ function DealsPage() {
             real next step.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <Badge variant="secondary">
             {source === "database" ? "Live Postgres data" : "Empty state"}
           </Badge>
@@ -1720,7 +1721,7 @@ function DealsPage() {
                       setSelectedDealEditing(false);
                       setSelectedDealOpen(true);
                     }}
-                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
+                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
                       selectedDeal?.id === deal.id ? "bg-muted/40" : ""
                     }`}
                   >
@@ -1733,7 +1734,7 @@ function DealsPage() {
                         {deal.contact_name} · {deal.owner_name} · {deal.region}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <div className="font-medium">{deal.amount}</div>
                       <div className="text-xs text-muted-foreground">
                         {formatDealProbability(deal.probability)} · closes{" "}
@@ -1751,13 +1752,13 @@ function DealsPage() {
           <Card>
             <CardHeader className="border-b">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
+                <div className="min-w-0">
                   <CardTitle className="text-base">Create deal</CardTitle>
                   <CardDescription>
                     Add a new live opportunity or import a validated workbook.
                   </CardDescription>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 lg:justify-end">
                   <Button type="button" variant="outline" onClick={downloadImportTemplate}>
                     <Download className="mr-2 h-4 w-4" />
                     Download template
@@ -1921,14 +1922,15 @@ function DealsPage() {
                 <div className="space-y-2">
                   <Label htmlFor="product">Product</Label>
                   <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealProduct}
+                    fieldName={LOOKUP_FIELDS.catalogProduct}
                     label="Product"
                     value={draft.product}
                     onValueChange={(value) =>
                       setDraft((current) => ({ ...current, product: value }))
                     }
-                    placeholder="Select or create product"
-                    options={editOptions.products}
+                    placeholder="Select or create product or combo"
+                    source="catalog"
+                    catalogKind="all"
                     allowCreate={hasRole("super_admin")}
                   />
                 </div>
@@ -2200,13 +2202,19 @@ function DealsPage() {
                           />
                         </Field>
                         <Field label="Product">
-                          <Input
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.catalogProduct}
+                            label="Product"
                             value={selectedDealDraft.product}
-                            onChange={(e) =>
+                            onValueChange={(value) =>
                               setSelectedDealDraft((current) =>
-                                current ? { ...current, product: e.target.value } : current,
+                                current ? { ...current, product: value } : current,
                               )
                             }
+                            placeholder="Select or create product or combo"
+                            source="catalog"
+                            catalogKind="all"
+                            allowCreate={hasRole("super_admin")}
                           />
                         </Field>
                         <Field label="Quantity">
@@ -2295,7 +2303,9 @@ function DealsPage() {
                         </Field>
                       </div>
                     ) : null}
-                    {selectedDealEditing && selectedDealDraft && selectedDealDraft.currency_code !== "INR" ? (
+                    {selectedDealEditing &&
+                    selectedDealDraft &&
+                    selectedDealDraft.currency_code !== "INR" ? (
                       <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
                         <div className="font-medium">INR equivalent</div>
                         <div className="mt-1 text-muted-foreground">
