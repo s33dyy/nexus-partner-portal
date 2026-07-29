@@ -803,10 +803,21 @@ function toLocalUser(row: {
   };
 }
 
-export async function queryTableWithAuthContext(query: TableQuery, authContext: TablePolicyAuthContext) {
+export async function queryTableWithAuthContext(
+  query: TableQuery,
+  authContext: TablePolicyAuthContext,
+) {
   assertTable(query.table);
   const columns = TABLE_COLUMNS[query.table];
-  const policyQuery = await applyTablePolicy(query, authContext);
+  let policyQuery: TableQuery;
+  try {
+    policyQuery = await applyTablePolicy(query, authContext);
+  } catch {
+    return {
+      data: null,
+      error: { message: "Access denied" },
+    };
+  }
   const filters = policyQuery.filters ?? [];
   const order = policyQuery.order;
   const values = policyQuery.values;

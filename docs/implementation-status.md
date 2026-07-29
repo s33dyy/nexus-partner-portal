@@ -3,7 +3,7 @@
 ## Phase
 
 - Phase 1: Hierarchy and RBAC Foundation
-- Checkpoint: governed-context vertical slice + shell/accessibility slice complete
+- Checkpoint: central generic-table policy foundation complete
 - Previous checkpoint: Phase 0 (0A-0E) complete
 
 ## Repository Findings
@@ -41,13 +41,15 @@
 - Reworked the authenticated shell to show active governed context, remove the free-text global search affordance, and expose explicit loading, denied, and no-context fallback states.
 - Added focused coverage for shell context summaries and gate-state handling.
 - Added focused tests for geography ancestry, assignment validation, active-context issuance, and policy denials.
+- Added a central generic-table policy module and wired it into `queryTable()` so scoped reads/counts are enforced server-side before SQL executes.
+- Added targeted policy tests for bootstrap-safe lookup reads, anonymous denial, and scoped partner reads through the local table query path.
 - Verified the governed-context slice with targeted Bun tests, `bun run build`, and targeted ESLint on the touched files.
 
 ## Remaining Items
 
 - Update any legacy helpers that still need to import the canonical registries.
 - Add named assignment transition commands and session/context revocation flows.
-- Expand policy enforcement to read/count/list/export/import/file/worker paths beyond the current scaffold.
+- Expand policy enforcement beyond the local generic-table path to explicit row-action commands, export/import/file flows, assistant retrieval, and worker/webhook entrypoints.
 - Add route-level denial and fallback states for the remaining partner-facing screens.
 
 ## Migrations Created

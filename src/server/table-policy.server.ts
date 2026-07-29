@@ -246,14 +246,7 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
         ? { kind: "column", column: "partner_id", value: auth.partnerId, fallbackColumn: "user_id" }
         : { kind: "column", column: "user_id", value: auth.userId };
     case "portal_team_members":
-      return auth.companyName
-        ? {
-            kind: "column",
-            column: "company_name",
-            value: auth.companyName,
-            fallbackColumn: "user_id",
-          }
-        : { kind: "column", column: "user_id", value: auth.userId };
+      return { kind: "column", column: "company_name", value: auth.companyName };
     case "portal_deal_collaborators":
       return { kind: "linked-deal" };
     case "support_ticket_comments":
@@ -409,6 +402,10 @@ export async function applyTablePolicy(
   const filters = normalizeFilters(query.filters);
 
   if (scopeSpec?.kind === "column") {
+    if (scopeSpec.value == null && !superAdmin) {
+      throw new Error("Access denied");
+    }
+
     if (query.operation === "insert") {
       const rows = Array.isArray(query.values) ? query.values : [query.values ?? {}];
       const scopedRows = rows.map((row) => {
@@ -451,14 +448,18 @@ export async function applyTablePolicy(
   }
 
   if (scopeSpec?.kind === "linked-deal") {
-    const dealId =
+    const dealIds =
       query.operation === "insert"
-        ? Array.isArray(query.values)
-          ? extractRowValue(query.values[0] ?? {}, "deal_id")
-          : extractRowValue((query.values ?? {}) as Record<string, unknown>, "deal_id")
-        : extractFilterValue(filters, "deal_id");
+        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}])
+            .map((row) => {
+              if (typeof row !== "object" || row === null || Array.isArray(row)) {
+                throw new Error("Insert values must be objects");
+              }
+              return extractRowValue(row as Record<string, unknown>, "deal_id");
+            })
+        : [extractFilterValue(filters, "deal_id")];
 
-    if (!dealId) {
+    if (dealIds.some((dealId) => !dealId)) {
       if (query.operation === "select" || query.operation === "count") {
         if (auth.userId) {
           return {
@@ -470,19 +471,25 @@ export async function applyTablePolicy(
       throw new Error("Access denied");
     }
 
-    await assertLinkedDealAccess(dealId, auth);
+    for (const dealId of dealIds) {
+      await assertLinkedDealAccess(dealId as string, auth);
+    }
     return { ...query, filters };
   }
 
   if (scopeSpec?.kind === "linked-ticket") {
-    const ticketId =
+    const ticketIds =
       query.operation === "insert"
-        ? Array.isArray(query.values)
-          ? extractRowValue(query.values[0] ?? {}, "ticket_id")
-          : extractRowValue((query.values ?? {}) as Record<string, unknown>, "ticket_id")
-        : extractFilterValue(filters, "ticket_id");
+        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}])
+            .map((row) => {
+              if (typeof row !== "object" || row === null || Array.isArray(row)) {
+                throw new Error("Insert values must be objects");
+              }
+              return extractRowValue(row as Record<string, unknown>, "ticket_id");
+            })
+        : [extractFilterValue(filters, "ticket_id")];
 
-    if (!ticketId) {
+    if (ticketIds.some((ticketId) => !ticketId)) {
       if (query.operation === "select" || query.operation === "count") {
         if (auth.userId) {
           return {
@@ -494,7 +501,9 @@ export async function applyTablePolicy(
       throw new Error("Access denied");
     }
 
-    await assertLinkedTicketAccess(ticketId, auth);
+    for (const ticketId of ticketIds) {
+      await assertLinkedTicketAccess(ticketId as string, auth);
+    }
     return { ...query, filters };
   }
 

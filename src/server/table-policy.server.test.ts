@@ -79,11 +79,11 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
     const allowed = await queryTableWithAuthContext(
       { table: "portal_deals", operation: "select" },
       {
-        session: { user: { id: "user-a" } },
-        profile: { id: "user-a", partner_id: "partner-a" },
+        userId: "user-a",
         roles: ["partner_admin"],
-        assignment: null,
-        activeContext: null,
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
       },
     );
 
@@ -102,11 +102,11 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
     const denied = await queryTableWithAuthContext(
       { table: "portal_deals", operation: "select" },
       {
-        session: null,
-        profile: null,
+        userId: null,
         roles: [],
-        assignment: null,
-        activeContext: null,
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: false,
       },
     );
 
