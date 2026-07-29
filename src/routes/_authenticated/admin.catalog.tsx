@@ -288,10 +288,14 @@ function AdminCatalogPage() {
         ...draft,
         catalog_kind: draft.catalog_kind,
       });
-      await updateDropdownCatalogItem({
+      const updatedItem = (await updateDropdownCatalogItem({
         id: selectedItem.id,
         ...values,
-      });
+      })) as CatalogItemRecord;
+      setItems((current) =>
+        current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
+      );
+      setSelectedId(updatedItem.id);
       toast.success("Catalog item updated");
       setEditOpen(false);
       await load();

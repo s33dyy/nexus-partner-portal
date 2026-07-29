@@ -19,7 +19,7 @@ function likePattern(value: string) {
   return `%${value.replace(/[%_]/g, "\\$&")}%`;
 }
 
-const portalCatalogItemColumnsPromise = (async () => {
+async function getPortalCatalogItemColumns() {
   const result = await pool.query(
     `SELECT column_name
      FROM information_schema.columns
@@ -27,10 +27,6 @@ const portalCatalogItemColumnsPromise = (async () => {
        AND table_name = 'portal_catalog_items'`,
   );
   return new Set(result.rows.map((row) => String(row.column_name)));
-})();
-
-async function getPortalCatalogItemColumns() {
-  return portalCatalogItemColumnsPromise;
 }
 
 function toOption(row: Record<string, unknown>, source: DropdownSourceKey): DropdownOption {
