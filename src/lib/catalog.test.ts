@@ -66,6 +66,42 @@ test("catalog import rows inherit the current module kind and normalize values",
   ]);
 });
 
+test("catalog import rows accept human-readable CSV headers from the template", () => {
+  const result = validateCatalogImportRows(
+    [
+      {
+        SKU: "LIVEY-STD-011",
+        "Product Name": "LIVEY Collaboration Kit",
+        Category: "Accessories",
+        "Partner Tier": "Silver",
+        "List Price": "$350",
+        Margin: "20%",
+        Stock: "14",
+        Availability: "In stock",
+        Benefits: "Meeting-ready accessory pack",
+        "Catalog Kind": "combo",
+      },
+    ],
+    { kind: "combo" },
+  );
+
+  expect(result.errors).toEqual([]);
+  expect(result.rows).toEqual([
+    {
+      sku: "LIVEY-STD-011",
+      product_name: "LIVEY Collaboration Kit",
+      category: "Accessories",
+      partner_tier: "Silver",
+      list_price: "$350",
+      margin: "20%",
+      stock: 14,
+      availability: "In stock",
+      benefits: "Meeting-ready accessory pack",
+      catalog_kind: "combo",
+    },
+  ]);
+});
+
 test("catalog kind labels stay singular and plural for the new module split", () => {
   expect(getCatalogKindLabel("product")).toBe("Product");
   expect(getCatalogKindLabel("combo")).toBe("Combo");

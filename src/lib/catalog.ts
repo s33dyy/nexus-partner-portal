@@ -114,6 +114,20 @@ function normalizeString(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizeHeaderKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeCatalogImportRow(row: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [normalizeHeaderKey(key), value]),
+  );
+}
+
 function normalizeInteger(value: unknown) {
   const numeric = Number.parseInt(String(value ?? "").trim(), 10);
   return Number.isFinite(numeric) ? numeric : Number.NaN;
@@ -127,17 +141,20 @@ export function validateCatalogImportRows(
   const errors: Array<{ rowNumber: number; messages: string[] }> = [];
 
   rows.forEach((row, index) => {
+    const normalizedRow = normalizeCatalogImportRow(row);
     const rowNumber = index + 2;
-    const sku = normalizeString(row.sku);
-    const productName = normalizeString(row.product_name);
-    const category = normalizeString(row.category) || "General";
-    const partnerTier = normalizeString(row.partner_tier) || "Registered";
-    const listPrice = normalizeString(row.list_price) || "$0";
-    const margin = normalizeString(row.margin) || "0%";
-    const stock = normalizeInteger(row.stock);
-    const availability = normalizeString(row.availability) || "In stock";
-    const benefits = normalizeString(row.benefits);
-    const catalogKind = normalizeCatalogKind(normalizeString(row.catalog_kind) || options.kind);
+    const sku = normalizeString(normalizedRow.sku);
+    const productName = normalizeString(normalizedRow.product_name);
+    const category = normalizeString(normalizedRow.category) || "General";
+    const partnerTier = normalizeString(normalizedRow.partner_tier) || "Registered";
+    const listPrice = normalizeString(normalizedRow.list_price) || "$0";
+    const margin = normalizeString(normalizedRow.margin) || "0%";
+    const stock = normalizeInteger(normalizedRow.stock);
+    const availability = normalizeString(normalizedRow.availability) || "In stock";
+    const benefits = normalizeString(normalizedRow.benefits);
+    const catalogKind = normalizeCatalogKind(
+      normalizeString(normalizedRow.catalog_kind) || options.kind,
+    );
     const rowErrors: string[] = [];
 
     if (!sku) rowErrors.push("sku is required");
