@@ -125,6 +125,26 @@ function Gate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (!assignment) {
+    return (
+      <AuthStatePage
+        title="Assignment pending"
+        description="Your account is authenticated, but no governed assignment has been issued yet."
+        detail="LIVEY does not grant business access from identity alone. A valid Assignment must exist before an Active Context can be issued and the shell can open."
+        primaryActionLabel="Check again"
+        onPrimaryAction={async () => {
+          await refresh();
+        }}
+        secondaryActionLabel="Sign out"
+        onSecondaryAction={async () => {
+          await signOut();
+          navigate({ to: "/auth", replace: true });
+        }}
+        primaryHint="Assignments are issued server-side"
+      />
+    );
+  }
+
   if (gateState === "context-pending") {
     return (
       <AuthStatePage

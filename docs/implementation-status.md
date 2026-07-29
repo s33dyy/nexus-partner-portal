@@ -38,10 +38,10 @@
 - Added governed geography and assignment helpers in `src/domain/contracts/governance.ts`.
 - Seeded the bootstrap database with a livey-org tenant, a small governed geography tree, and a super-admin assignment plus active context.
 - Loaded governed assignment/context data through the local auth bridge and surfaced it in the app shell.
-- Reworked the authenticated shell to show active governed context, remove the free-text global search affordance, and expose explicit loading, denied, and no-context fallback states.
+- Reworked the authenticated shell to show active governed context, remove the free-text global search affordance, and expose explicit assignment-pending, loading, denied, and no-context fallback states.
 - Added focused coverage for shell context summaries and gate-state handling.
 - Added focused tests for geography ancestry, assignment validation, active-context issuance, and policy denials.
-- Added a central generic-table policy module and wired it into `queryTable()` so scoped reads/counts are enforced server-side before SQL executes.
+- Added a central generic-table policy module and wired it into `queryTable()` so scoped reads/counts are enforced server-side before SQL executes, including bootstrap-safe self-service reads for the auth bridge.
 - Added targeted policy tests for bootstrap-safe lookup reads, anonymous denial, and scoped partner reads through the local table query path.
 - Verified the governed-context slice with targeted Bun tests, `bun run build`, and targeted ESLint on the touched files.
 

@@ -19,7 +19,6 @@ import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { buildShellContextSummary } from "@/components/app-shell.utils";
-import { AccessDeniedPage } from "@/components/route-placeholder";
 
 const statusLabel: Record<string, string> = {
   pending_partner_registration: "Partner Registration Pending",

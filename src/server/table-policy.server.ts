@@ -58,11 +58,15 @@ const GOVERNANCE_TABLES = new Set([
   "governed_tenants",
   "geography_nodes",
   "geography_node_aliases",
-  "assignments",
   "assignment_events",
+]);
+
+const BOOTSTRAP_SELF_SERVICE_TABLES = new Set(["profiles", "partners"]);
+const BOOTSTRAP_READ_ONLY_TABLES = new Set([
+  "user_roles",
+  "assignments",
   "active_contexts",
   "sessions",
-  "user_roles",
 ]);
 
 type ScopeSpec =
@@ -228,6 +232,11 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
   switch (table) {
     case "profiles":
       return { kind: "column", column: "id", value: auth.userId };
+    case "user_roles":
+    case "assignments":
+    case "active_contexts":
+    case "sessions":
+      return { kind: "column", column: "user_id", value: auth.userId };
     case "partners":
       return auth.partnerId
         ? { kind: "column", column: "id", value: auth.partnerId }
@@ -424,6 +433,75 @@ export async function applyTablePolicy(
     return { ...query, filters: normalizeFilters(query.filters) };
   }
 
+  if (BOOTSTRAP_SELF_SERVICE_TABLES.has(query.table)) {
+    if (!auth.userId && !superAdmin) {
+      throw new Error("Authentication is required");
+    }
+
+    if (query.operation === "delete") {
+      throw new Error("Access denied");
+    }
+
+    if (!scopeSpec || scopeSpec.kind !== "column") {
+      throw new Error("Access denied");
+    }
+
+    if (scopeSpec.value == null && !superAdmin) {
+      throw new Error("Access denied");
+    }
+
+    const filters = normalizeFilters(query.filters);
+    if (query.operation === "insert") {
+      const rows = Array.isArray(query.values) ? query.values : [query.values ?? {}];
+      const scopedRows = rows.map((row) => {
+        if (typeof row !== "object" || row === null || Array.isArray(row)) {
+          throw new Error("Insert values must be objects");
+        }
+        return scopeValuesForRow(row as Record<string, unknown>, scopeSpec, auth);
+      });
+      return {
+        ...query,
+        values: Array.isArray(query.values) ? scopedRows : (scopedRows[0] ?? {}),
+        filters,
+      };
+    }
+
+    if (query.operation === "update") {
+      if (
+        typeof query.values !== "object" ||
+        query.values === null ||
+        Array.isArray(query.values)
+      ) {
+        throw new Error("Update values must be an object");
+      }
+    }
+
+    return {
+      ...query,
+      filters: appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
+    };
+  }
+
+  if (BOOTSTRAP_READ_ONLY_TABLES.has(query.table)) {
+    if (!auth.userId && !superAdmin) {
+      throw new Error("Authentication is required");
+    }
+    if (query.operation !== "select" && query.operation !== "count") {
+      throw new Error("Access denied");
+    }
+    if (!scopeSpec || scopeSpec.kind !== "column" || scopeSpec.value == null) {
+      throw new Error("Access denied");
+    }
+    return {
+      ...query,
+      filters: appendScopeFilter(
+        normalizeFilters(query.filters),
+        scopeSpec.column,
+        String(scopeSpec.value),
+      ),
+    };
+  }
+
   if (GOVERNANCE_TABLES.has(query.table)) {
     if (!superAdmin) {
       throw new Error("Access denied");
@@ -482,13 +560,12 @@ export async function applyTablePolicy(
   if (scopeSpec?.kind === "linked-deal") {
     const dealIds =
       query.operation === "insert"
-        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}])
-            .map((row) => {
-              if (typeof row !== "object" || row === null || Array.isArray(row)) {
-                throw new Error("Insert values must be objects");
-              }
-              return extractRowValue(row as Record<string, unknown>, "deal_id");
-            })
+        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}]).map((row) => {
+            if (typeof row !== "object" || row === null || Array.isArray(row)) {
+              throw new Error("Insert values must be objects");
+            }
+            return extractRowValue(row as Record<string, unknown>, "deal_id");
+          })
         : [extractFilterValue(filters, "deal_id")];
 
     if (dealIds.some((dealId) => !dealId)) {
@@ -512,13 +589,12 @@ export async function applyTablePolicy(
   if (scopeSpec?.kind === "linked-ticket") {
     const ticketIds =
       query.operation === "insert"
-        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}])
-            .map((row) => {
-              if (typeof row !== "object" || row === null || Array.isArray(row)) {
-                throw new Error("Insert values must be objects");
-              }
-              return extractRowValue(row as Record<string, unknown>, "ticket_id");
-            })
+        ? (Array.isArray(query.values) ? query.values : [query.values ?? {}]).map((row) => {
+            if (typeof row !== "object" || row === null || Array.isArray(row)) {
+              throw new Error("Insert values must be objects");
+            }
+            return extractRowValue(row as Record<string, unknown>, "ticket_id");
+          })
         : [extractFilterValue(filters, "ticket_id")];
 
     if (ticketIds.some((ticketId) => !ticketId)) {
