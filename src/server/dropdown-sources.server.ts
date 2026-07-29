@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
-
 import { pool } from "@/server/postgres.server";
 import {
+  buildCatalogInsertRow,
   buildCatalogCreateValues,
   getCatalogKindLabel,
   normalizeCatalogKind,
+  pickCatalogInsertColumns,
   type CatalogKind,
 } from "@/lib/catalog";
 
@@ -17,6 +17,20 @@ function normalizeTerm(value: string | undefined | null) {
 
 function likePattern(value: string) {
   return `%${value.replace(/[%_]/g, "\\$&")}%`;
+}
+
+const portalCatalogItemColumnsPromise = (async () => {
+  const result = await pool.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'portal_catalog_items'`,
+  );
+  return new Set(result.rows.map((row) => String(row.column_name)));
+})();
+
+async function getPortalCatalogItemColumns() {
+  return portalCatalogItemColumnsPromise;
 }
 
 function toOption(row: Record<string, unknown>, source: DropdownSourceKey): DropdownOption {
@@ -62,12 +76,22 @@ export async function listDropdownSourceValues(input: {
   if (input.source === "catalog") {
     const values: unknown[] = [];
     const where: string[] = [];
-    let sql = `SELECT id, sku, product_name AS label, category, partner_tier, catalog_kind
+    const columns = await getPortalCatalogItemColumns();
+    const hasCatalogKindColumn = columns.has("catalog_kind");
+    let sql = hasCatalogKindColumn
+      ? `SELECT id, sku, product_name AS label, category, partner_tier, catalog_kind
+               FROM portal_catalog_items`
+      : `SELECT id, sku, product_name AS label, category, partner_tier, 'product'::text AS catalog_kind
                FROM portal_catalog_items`;
 
     if (input.catalogKind && input.catalogKind !== "all") {
-      values.push(input.catalogKind);
-      where.push(`COALESCE(catalog_kind, 'product') = $${values.length}`);
+      if (!hasCatalogKindColumn && input.catalogKind === "combo") {
+        return [];
+      }
+      if (hasCatalogKindColumn) {
+        values.push(input.catalogKind);
+        where.push(`COALESCE(catalog_kind, 'product') = $${values.length}`);
+      }
     }
 
     if (term) {
@@ -191,30 +215,17 @@ export async function createCatalogItemFromDropdown(input: {
   benefits?: string;
   catalog_kind?: CatalogKind;
 }) {
-  const now = new Date().toISOString();
   const values = buildCatalogCreateValues(input);
+  const row = buildCatalogInsertRow(values);
+  const columns = await getPortalCatalogItemColumns();
+  const insert = pickCatalogInsertColumns(row, columns);
+  const placeholders = insert.columns.map((_, index) => `$${index + 1}`).join(", ");
 
   const result = await pool.query(
-    `INSERT INTO portal_catalog_items (
-       id, sku, product_name, category, partner_tier, list_price, margin, stock, availability,
-       benefits, catalog_kind, is_seed, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$13)
+    `INSERT INTO portal_catalog_items (${insert.columns.join(", ")})
+     VALUES (${placeholders})
      RETURNING *`,
-    [
-      randomUUID(),
-      values.sku,
-      values.product_name,
-      values.category,
-      values.partner_tier,
-      values.list_price,
-      values.margin,
-      values.stock,
-      values.availability,
-      values.benefits,
-      values.catalog_kind,
-      now,
-      now,
-    ],
+    insert.values,
   );
 
   return result.rows[0];

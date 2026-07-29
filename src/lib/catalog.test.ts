@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
 
 import {
+  buildCatalogInsertRow,
   filterCatalogItemsByKind,
   getCatalogKindLabel,
   getCatalogKindPluralLabel,
   getCatalogImportTemplateColumns,
   buildCatalogCreateValues,
+  pickCatalogInsertColumns,
   normalizeCatalogKind,
   validateCatalogImportRows,
 } from "@/lib/catalog";
@@ -96,6 +98,35 @@ test("buildCatalogCreateValues turns dropdown creates into real catalog rows", (
     benefits: "Video and audio",
     catalog_kind: "combo",
   });
+});
+
+test("catalog insert helpers skip columns that are missing in older databases", () => {
+  const row = buildCatalogInsertRow(
+    buildCatalogCreateValues({
+      product_name: "New Product 001",
+      catalog_kind: "combo",
+    }),
+  );
+
+  const insert = pickCatalogInsertColumns(row, [
+    "id",
+    "sku",
+    "product_name",
+    "category",
+    "partner_tier",
+    "list_price",
+    "margin",
+    "stock",
+    "availability",
+    "benefits",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ]);
+
+  expect(insert.columns).not.toContain("catalog_kind");
+  expect(insert.columns).toContain("product_name");
+  expect(insert.values).toHaveLength(insert.columns.length);
 });
 
 test("catalog filtering splits products and combos cleanly", () => {

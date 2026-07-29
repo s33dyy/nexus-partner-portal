@@ -51,6 +51,13 @@ export type CatalogCreateValues = {
   catalog_kind: CatalogKind;
 };
 
+export type CatalogInsertRow = CatalogCreateValues & {
+  id: string;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export function normalizeCatalogKind(value: string | null | undefined): CatalogKind {
   const normalized = value?.trim().toLowerCase();
   return normalized === "combo" ? "combo" : "product";
@@ -197,5 +204,45 @@ export function buildCatalogCreateValues(input: {
     availability: input.availability?.trim() || "In stock",
     benefits: input.benefits?.trim() || "",
     catalog_kind: normalizeCatalogKind(input.catalog_kind),
+  };
+}
+
+export function buildCatalogInsertRow(input: CatalogCreateValues): CatalogInsertRow {
+  const now = new Date().toISOString();
+  return {
+    id: randomUUID(),
+    ...input,
+    is_seed: false,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export function pickCatalogInsertColumns(
+  row: CatalogInsertRow,
+  availableColumns: Iterable<string>,
+) {
+  const available = new Set(Array.from(availableColumns).map((column) => column.trim()));
+  const orderedColumns: Array<keyof CatalogInsertRow> = [
+    "id",
+    "sku",
+    "product_name",
+    "category",
+    "partner_tier",
+    "list_price",
+    "margin",
+    "stock",
+    "availability",
+    "benefits",
+    "catalog_kind",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ];
+
+  const columns = orderedColumns.filter((column) => available.has(column));
+  return {
+    columns,
+    values: columns.map((column) => row[column]),
   };
 }
