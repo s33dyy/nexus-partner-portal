@@ -500,6 +500,7 @@ CREATE TABLE IF NOT EXISTS lookup_values (
   created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (field_name, value_key)
 );
 
@@ -714,6 +715,7 @@ ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS effective_to DATE;
 ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
 ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'seed';
 ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 UPDATE lookup_values
 SET label_snapshot = CASE WHEN label_snapshot = '' THEN value ELSE label_snapshot END
