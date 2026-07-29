@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { createDropdownCatalogItem } from "@/integrations/local/dropdown-sources";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
@@ -257,17 +258,9 @@ function AdminCatalogPage() {
         return;
       }
 
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("portal_catalog_items").insert(
-        validation.rows.map((row) => ({
-          id: crypto.randomUUID(),
-          ...row,
-          is_seed: false,
-          created_at: now,
-          updated_at: now,
-        })),
-      );
-      if (error) throw error;
+      for (const row of validation.rows) {
+        await createDropdownCatalogItem(row);
+      }
 
       setImportMessage(
         buildImportSummaryMessage(validation.rows.length, "catalog item", file.name),
@@ -318,15 +311,7 @@ function AdminCatalogPage() {
     setAdding(true);
     try {
       const values = buildCatalogCreateValues(draft);
-      const payload = {
-        id: crypto.randomUUID(),
-        ...values,
-        is_seed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      const { error } = await supabase.from("portal_catalog_items").insert(payload);
-      if (error) throw error;
+      await createDropdownCatalogItem(values);
       toast.success("Catalog item added");
       setDraft({ ...EMPTY_FORM, catalog_kind: moduleKind });
       await load();
