@@ -234,17 +234,49 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
         : { kind: "column", column: "owner_user_id", value: auth.userId };
     case "portal_deals":
     case "portal_customers":
-    case "portal_customer_activities":
-    case "partner_documents":
-    case "deal_documents":
-    case "partner_review_notes":
-    case "support_tickets":
     case "reward_point_events":
     case "reward_redemptions":
     case "notifications":
       return auth.partnerId
         ? { kind: "column", column: "partner_id", value: auth.partnerId, fallbackColumn: "user_id" }
         : { kind: "column", column: "user_id", value: auth.userId };
+    case "portal_customer_activities":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "actor_id",
+          }
+        : { kind: "column", column: "actor_id", value: auth.userId };
+    case "partner_documents":
+    case "deal_documents":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "uploaded_by",
+          }
+        : { kind: "column", column: "uploaded_by", value: auth.userId };
+    case "partner_review_notes":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "author_id",
+          }
+        : { kind: "column", column: "author_id", value: auth.userId };
+    case "support_tickets":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "created_by",
+          }
+        : { kind: "column", column: "created_by", value: auth.userId };
     case "portal_team_members":
       return { kind: "column", column: "company_name", value: auth.companyName };
     case "portal_deal_collaborators":
