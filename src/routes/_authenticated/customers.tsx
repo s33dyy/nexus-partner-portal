@@ -25,11 +25,23 @@ import {
   CUSTOMER_IMPORT_TEMPLATE_SAMPLE,
   validateCustomerImportRows,
 } from "@/lib/customer-import";
+import {
+  buildCustomerMergePlan,
+  buildParticipantPayload,
+  customerMergeRedirectPath,
+  detectCustomerDuplicateGroups,
+  participantVisibilitySummary,
+  shouldPropagateCustomerTagToDeals,
+} from "@/lib/customer-governance";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
-import { type CustomerActivityRecord, type CustomerRecord } from "@/lib/portal-records";
+import {
+  type CustomerActivityRecord,
+  type CustomerParticipantRecord,
+  type CustomerRecord,
+} from "@/lib/portal-records";
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
@@ -107,15 +119,27 @@ function CustomersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [activities, setActivities] = useState<CustomerActivityRecord[]>([]);
+  const [participants, setParticipants] = useState<CustomerParticipantRecord[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
   const [activityDraft, setActivityDraft] = useState("");
+  const [participantDraft, setParticipantDraft] = useState({
+    participant_type: "primary_owner",
+    source: "manual",
+    reason: "Coverage reviewed from customer screen",
+    valid_from: new Date().toISOString(),
+    valid_to: "",
+  });
+  const [mergeReason, setMergeReason] = useState("Unified duplicate customer record");
+  const [mergeCandidateId, setMergeCandidateId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingActivity, setSavingActivity] = useState(false);
+  const [savingParticipant, setSavingParticipant] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -132,6 +156,10 @@ function CustomersPage() {
         .from("portal_customer_activities")
         .select("*")
         .order("created_at", { ascending: false });
+      let participantQuery = supabase
+        .from("customer_participants")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       query = applyPartnerScope(query, {
         isSuperAdmin: hasRole("super_admin"),
@@ -144,24 +172,34 @@ function CustomersPage() {
         userId: profile?.id ?? null,
         fallbackColumn: "actor_id",
       });
+      participantQuery = applyPartnerScope(participantQuery, {
+        isSuperAdmin: hasRole("super_admin"),
+        partnerId: profile?.partner_id ?? null,
+        userId: profile?.id ?? null,
+      });
 
-      const [{ data, error }, { data: activityData, error: activityError }] = await Promise.all([
-        query,
-        activityQuery,
-      ]);
-      if (error || activityError) throw error ?? activityError;
+      const [
+        { data, error },
+        { data: activityData, error: activityError },
+        { data: participantData, error: participantError },
+      ] = await Promise.all([query, activityQuery, participantQuery]);
+      if (error || activityError || participantError)
+        throw error ?? activityError ?? participantError;
       const rows = ((data as CustomerRecord[] | null) ?? []).map((customer) => ({
         ...customer,
         renewal_date: toDateInputValue(customer.renewal_date),
       }));
       const activityRows = (activityData as CustomerActivityRecord[] | null) ?? [];
+      const participantRows = (participantData as CustomerParticipantRecord[] | null) ?? [];
       setCustomers(rows);
       setActivities(activityRows);
+      setParticipants(participantRows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
       setCustomers([]);
       setActivities([]);
+      setParticipants([]);
       setSource("empty");
       setSelectedId(null);
     } finally {
@@ -202,6 +240,51 @@ function CustomersPage() {
     () => activities.filter((activity) => activity.customer_id === selectedId),
     [activities, selectedId],
   );
+  const selectedParticipants = useMemo(
+    () => participants.filter((participant) => participant.customer_id === selectedId),
+    [participants, selectedId],
+  );
+  const duplicateGroups = useMemo(() => detectCustomerDuplicateGroups(customers), [customers]);
+  const selectedDuplicateCandidates = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const relatedIds = new Set<string>();
+    for (const group of duplicateGroups) {
+      if (!group.customerIds.includes(selectedCustomer.id)) continue;
+      for (const customerId of group.customerIds) {
+        if (customerId !== selectedCustomer.id) {
+          relatedIds.add(customerId);
+        }
+      }
+    }
+    return customers.filter((customer) => relatedIds.has(customer.id));
+  }, [customers, duplicateGroups, selectedCustomer]);
+  const selectedMergeCandidate = useMemo(
+    () =>
+      selectedDuplicateCandidates.find((candidate) => candidate.id === mergeCandidateId) ??
+      selectedDuplicateCandidates[0] ??
+      null,
+    [mergeCandidateId, selectedDuplicateCandidates],
+  );
+  const selectedMergePlan = useMemo(() => {
+    if (!selectedCustomer || !selectedMergeCandidate) return null;
+    return buildCustomerMergePlan({
+      canonicalRecord: selectedCustomer,
+      mergedRecord: selectedMergeCandidate,
+      reason: mergeReason,
+    });
+  }, [mergeReason, selectedCustomer, selectedMergeCandidate]);
+  const participantSummary = useMemo(
+    () =>
+      participantVisibilitySummary({
+        participantType: participantDraft.participant_type,
+        source: participantDraft.source,
+        validTo: participantDraft.valid_to.trim() || null,
+      }),
+    [participantDraft.participant_type, participantDraft.source, participantDraft.valid_to],
+  );
+  const mergeRedirectHref = selectedCustomer
+    ? customerMergeRedirectPath(selectedCustomer.id)
+    : null;
 
   const editOptions = useMemo(() => {
     return {
@@ -286,6 +369,15 @@ function CustomersPage() {
   useEffect(() => {
     if (!selectedCustomer) return;
     setActivityDraft("");
+    setParticipantDraft({
+      participant_type: "primary_owner",
+      source: "manual",
+      reason: `Coverage reviewed for ${selectedCustomer.company_name}`,
+      valid_from: new Date().toISOString(),
+      valid_to: "",
+    });
+    setMergeReason(`Merged into ${selectedCustomer.company_name}`);
+    setMergeCandidateId(null);
     setDraft({
       company_name: selectedCustomer.company_name,
       account_owner: selectedCustomer.account_owner,
@@ -299,6 +391,20 @@ function CustomersPage() {
       last_touch: selectedCustomer.last_touch,
     });
   }, [selectedCustomer]);
+
+  useEffect(() => {
+    if (!selectedDuplicateCandidates.length) {
+      setMergeCandidateId(null);
+      return;
+    }
+
+    if (
+      !mergeCandidateId ||
+      !selectedDuplicateCandidates.some((candidate) => candidate.id === mergeCandidateId)
+    ) {
+      setMergeCandidateId(selectedDuplicateCandidates[0]?.id ?? null);
+    }
+  }, [mergeCandidateId, selectedDuplicateCandidates]);
 
   const saveActivity = async () => {
     if (!selectedCustomer) return;
@@ -339,6 +445,146 @@ function CustomersPage() {
       toast.error(error instanceof Error ? error.message : "Failed to save activity");
     } finally {
       setSavingActivity(false);
+    }
+  };
+
+  const saveParticipant = async () => {
+    if (!selectedCustomer) return;
+    if (!participantDraft.reason.trim()) {
+      toast.error("Add a participant reason before saving");
+      return;
+    }
+
+    setSavingParticipant(true);
+    try {
+      const payload = buildParticipantPayload({
+        subjectType: "customer",
+        subjectId: selectedCustomer.id,
+        partnerId: selectedCustomer.partner_id ?? profile?.partner_id ?? null,
+        participantType: participantDraft.participant_type,
+        source: participantDraft.source,
+        actorId: profile?.id ?? null,
+        reason: participantDraft.reason,
+        validFrom: participantDraft.valid_from,
+        validTo: participantDraft.valid_to.trim() || null,
+        provenance: {
+          source: "customers.route",
+          customerId: selectedCustomer.id,
+          customerName: selectedCustomer.company_name,
+        },
+      });
+
+      const { error } = await supabase.from("customer_participants").insert(payload);
+      if (error) throw error;
+
+      toast.success("Customer participant saved");
+      setParticipantDraft((current) => ({
+        ...current,
+        reason: `Coverage reviewed for ${selectedCustomer.company_name}`,
+        valid_to: "",
+      }));
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save customer participant");
+    } finally {
+      setSavingParticipant(false);
+    }
+  };
+
+  const mergeCustomer = async () => {
+    if (!selectedCustomer || !selectedMergeCandidate || !selectedMergePlan) return;
+    if (selectedMergePlan.scopeRestriction.restricted) {
+      toast.error(
+        selectedMergePlan.scopeRestriction.reason ?? "Merge is not allowed for this scope",
+      );
+      return;
+    }
+
+    setMerging(true);
+    try {
+      const now = new Date().toISOString();
+      const canonicalExternalIds = Array.isArray(selectedCustomer.external_ids)
+        ? selectedCustomer.external_ids
+        : [];
+      const mergedExternalIds = Array.isArray(selectedMergeCandidate.external_ids)
+        ? selectedMergeCandidate.external_ids
+        : [];
+      const mergedIds = [...new Set([...canonicalExternalIds, ...mergedExternalIds])];
+
+      const canonicalUpdate = {
+        duplicate_review_status: "merged",
+        merged_into_customer_id: null,
+        merged_at: now,
+        merge_reason: mergeReason,
+        external_ids: mergedIds,
+        updated_at: now,
+      };
+      const duplicateUpdate = {
+        duplicate_review_status: "redirected",
+        merged_into_customer_id: selectedCustomer.id,
+        merged_at: now,
+        merge_reason: mergeReason,
+        master_customer_id: selectedCustomer.id,
+        updated_at: now,
+      };
+
+      const [
+        { error: canonicalError },
+        { error: duplicateError },
+        { error: activityError },
+        { error: participantError },
+        { error: mergeEventError },
+      ] = await Promise.all([
+        supabase.from("portal_customers").update(canonicalUpdate).eq("id", selectedCustomer.id),
+        supabase
+          .from("portal_customers")
+          .update(duplicateUpdate)
+          .eq("id", selectedMergeCandidate.id),
+        supabase
+          .from("portal_customer_activities")
+          .update({ customer_id: selectedCustomer.id })
+          .eq("customer_id", selectedMergeCandidate.id),
+        supabase
+          .from("customer_participants")
+          .update({ customer_id: selectedCustomer.id })
+          .eq("customer_id", selectedMergeCandidate.id),
+        supabase.from("customer_merge_events").insert({
+          id: globalThis.crypto.randomUUID(),
+          partner_id: selectedCustomer.partner_id ?? profile?.partner_id ?? null,
+          surviving_customer_id: selectedCustomer.id,
+          merged_customer_id: selectedMergeCandidate.id,
+          redirect_customer_id: selectedCustomer.id,
+          before_state: selectedMergePlan.beforeState,
+          after_state: selectedMergePlan.afterState,
+          external_id_snapshot: selectedMergePlan.externalIdSnapshot,
+          scope_restrictions: selectedMergePlan.scopeRestriction,
+          reason: mergeReason,
+          actor_id: profile?.id ?? null,
+          is_seed: false,
+          created_at: now,
+        }),
+      ]);
+
+      if (
+        canonicalError ||
+        duplicateError ||
+        activityError ||
+        participantError ||
+        mergeEventError
+      ) {
+        throw (
+          canonicalError ?? duplicateError ?? activityError ?? participantError ?? mergeEventError
+        );
+      }
+
+      toast.success(`Merged into ${selectedCustomer.company_name}`);
+      setMergeCandidateId(null);
+      await load();
+      navigate({ to: customerMergeRedirectPath(selectedCustomer.id) });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to merge customer records");
+    } finally {
+      setMerging(false);
     }
   };
 
@@ -845,6 +1091,207 @@ function CustomersPage() {
                       </div>
                     ))
                   )}
+                </div>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border bg-muted/20 p-4">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Duplicate review
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {selectedDuplicateCandidates.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        No governed duplicate candidates found for this customer.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm text-muted-foreground">
+                          {selectedDuplicateCandidates.length} candidate
+                          {selectedDuplicateCandidates.length === 1 ? "" : "s"} share governed
+                          identity fields with this account.
+                        </div>
+                        <div className="space-y-2">
+                          {selectedDuplicateCandidates.map((candidate) => (
+                            <button
+                              key={candidate.id}
+                              type="button"
+                              onClick={() => setMergeCandidateId(candidate.id)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left transition hover:bg-muted/40 ${
+                                candidate.id === selectedMergeCandidate?.id
+                                  ? "border-primary bg-primary/5"
+                                  : ""
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-medium">{candidate.company_name}</div>
+                                <Badge variant="outline">
+                                  {candidate.duplicate_review_status ?? "clean"}
+                                </Badge>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {candidate.region} · {candidate.segment} ·{" "}
+                                {candidate.country ?? "No country"}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                        <Field label="Merge reason">
+                          <Textarea
+                            value={mergeReason}
+                            onChange={(e) => setMergeReason(e.target.value)}
+                            placeholder="Explain why the duplicate should be merged"
+                          />
+                        </Field>
+                        <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                          <div>Redirect path: {mergeRedirectHref}</div>
+                          <div className="mt-1">
+                            {selectedMergePlan?.scopeRestriction.restricted
+                              ? selectedMergePlan.scopeRestriction.reason
+                              : "Merge stays within the selected customer scope and preserves external IDs."}
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => void mergeCustomer()}
+                          disabled={merging || !selectedMergeCandidate}
+                        >
+                          {merging ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Merge selected duplicate
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-4">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Coverage tags
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    <div className="text-sm text-muted-foreground">
+                      Customer tags stay on the customer record and do not automatically create deal
+                      tags.
+                    </div>
+                    <Field label="Participant type">
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.participantType}
+                        label="Participant type"
+                        value={participantDraft.participant_type}
+                        onValueChange={(value) =>
+                          setParticipantDraft((current) => ({
+                            ...current,
+                            participant_type: value,
+                          }))
+                        }
+                        placeholder="Select participant type"
+                        options={[
+                          "primary_owner",
+                          "collaborator",
+                          "approver",
+                          "observer",
+                          "support_contact",
+                        ]}
+                      />
+                    </Field>
+                    <Field label="Source">
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.tagType}
+                        label="Source"
+                        value={participantDraft.source}
+                        onValueChange={(value) =>
+                          setParticipantDraft((current) => ({ ...current, source: value }))
+                        }
+                        placeholder="manual"
+                        options={["manual", "automatic", "import", "migration"]}
+                      />
+                    </Field>
+                    <Field label="Reason">
+                      <Textarea
+                        value={participantDraft.reason}
+                        onChange={(e) =>
+                          setParticipantDraft((current) => ({ ...current, reason: e.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label="Valid from">
+                      <Input
+                        type="datetime-local"
+                        value={participantDraft.valid_from.slice(0, 16)}
+                        onChange={(e) =>
+                          setParticipantDraft((current) => ({
+                            ...current,
+                            valid_from: new Date(e.target.value).toISOString(),
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field label="Valid to">
+                      <Input
+                        type="datetime-local"
+                        value={participantDraft.valid_to.slice(0, 16)}
+                        onChange={(e) =>
+                          setParticipantDraft((current) => ({
+                            ...current,
+                            valid_to: e.target.value ? new Date(e.target.value).toISOString() : "",
+                          }))
+                        }
+                      />
+                    </Field>
+                    <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                      <div>
+                        Immediate access eligible:{" "}
+                        {participantSummary.immediateAccessEligible ? "Yes" : "No"}
+                      </div>
+                      <div>
+                        Notification eligible:{" "}
+                        {participantSummary.notificationEligible ? "Yes" : "No"}
+                      </div>
+                      <div>
+                        Open shared work: {participantSummary.openSharedWork ? "Yes" : "No"}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => void saveParticipant()}
+                      disabled={savingParticipant}
+                    >
+                      {savingParticipant ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save participant
+                    </Button>
+                    <div className="space-y-2">
+                      {selectedParticipants.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                          No customer participants have been recorded yet.
+                        </div>
+                      ) : (
+                        selectedParticipants.map((participant) => (
+                          <div
+                            key={participant.id}
+                            className="rounded-lg border bg-background p-3 text-sm"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium">{participant.participant_type}</span>
+                              <Badge variant="outline">{participant.source}</Badge>
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {participant.reason}
+                            </div>
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              {formatDateTimeLabel(participant.valid_from)}{" "}
+                              {participant.valid_to
+                                ? `→ ${formatDateTimeLabel(participant.valid_to)}`
+                                : "→ open"}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {shouldPropagateCustomerTagToDeals()
+                        ? "Customer tags are configured to propagate."
+                        : "Customer tags do not auto-create deal tags. Deal participants stay explicit."}
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">

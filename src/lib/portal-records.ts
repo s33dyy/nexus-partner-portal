@@ -67,6 +67,7 @@ export type CustomerRecord = {
   id: string;
   company_name: string;
   account_owner: string;
+  country?: string | null;
   region: string;
   segment: string;
   health_score: number;
@@ -75,11 +76,71 @@ export type CustomerRecord = {
   status: string;
   next_step: string;
   last_touch: string;
+  domain?: string | null;
+  phone?: string | null;
+  tax_registration_id?: string | null;
+  provider_customer_id?: string | null;
+  address?: string | null;
+  origin?: string | null;
+  duplicate_review_status?: string | null;
+  master_customer_id?: string | null;
+  merged_into_customer_id?: string | null;
+  merged_at?: string | null;
+  merge_reason?: string | null;
+  external_ids?: unknown;
   user_id: string | null;
   partner_id: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type CustomerParticipantRecord = {
+  id: string;
+  customer_id: string;
+  partner_id: string | null;
+  participant_type: string;
+  source: string;
+  actor_id: string | null;
+  reason: string;
+  valid_from: string;
+  valid_to: string | null;
+  provenance: unknown;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DealParticipantRecord = {
+  id: string;
+  deal_id: string;
+  partner_id: string | null;
+  participant_type: string;
+  source: string;
+  actor_id: string | null;
+  reason: string;
+  valid_from: string;
+  valid_to: string | null;
+  provenance: unknown;
+  is_seed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CustomerMergeEventRecord = {
+  id: string;
+  partner_id: string | null;
+  surviving_customer_id: string;
+  merged_customer_id: string;
+  redirect_customer_id: string | null;
+  before_state: unknown;
+  after_state: unknown;
+  external_id_snapshot: unknown;
+  scope_restrictions: unknown;
+  reason: string;
+  actor_id: string | null;
+  is_seed: boolean;
+  created_at: string;
 };
 
 export type CustomerActivityRecord = {

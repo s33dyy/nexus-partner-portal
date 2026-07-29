@@ -2,8 +2,8 @@
 
 ## Phase
 
-- Phase 1: Hierarchy and RBAC Foundation
-- Checkpoint: central generic-table policy foundation complete
+- Phase 2: Deals, Pricing, Pipeline, Tasks, and Rewards
+- Checkpoint: customer merge and participant governance slice landed; broader phase 2 still in progress
 - Previous checkpoint: Phase 0 (0A-0E) complete
 
 ## Repository Findings
@@ -44,9 +44,16 @@
 - Added a central generic-table policy module and wired it into `queryTable()` so scoped reads/counts are enforced server-side before SQL executes, including bootstrap-safe self-service reads for the auth bridge.
 - Added targeted policy tests for bootstrap-safe lookup reads, anonymous denial, and scoped partner reads through the local table query path.
 - Verified the governed-context slice with targeted Bun tests, `bun run build`, and targeted ESLint on the touched files.
+- Added governed customer duplicate detection, merge planning, participant tag history helpers, and customer merge redirect helpers in `src/lib/customer-governance.ts`.
+- Added customer merge and coverage-tag persistence tables plus merge-history metadata to `db/schema.sql`.
+- Extended customer records with merge and identity fields in `src/lib/portal-records.ts`.
+- Wired the customer screen to surface duplicate candidates, merge preview, participant history, and governed add/end flows in `src/routes/_authenticated/customers.tsx`.
+- Added focused tests for customer duplicate detection, merge planning, participant tag history, and route-compatible governance payloads.
 
 ## Remaining Items
 
+- Finish deal-side participant tagging and coverage propagation.
+- Expand phase 2 from customer governance into pricing, price books, deal aggregates, stage commands, PO review, tasks, activity, and rewards.
 - Update any legacy helpers that still need to import the canonical registries.
 - Add named assignment transition commands and session/context revocation flows.
 - Expand policy enforcement beyond the local generic-table path to explicit row-action commands, export/import/file flows, assistant retrieval, and worker/webhook entrypoints.
@@ -95,3 +102,9 @@
 - Result: passed with no warnings after the final Fast Refresh suppression
 - `bun run build`
 - Result: client, SSR, and Nitro builds completed successfully after the governed-context changes
+- `bun test src/lib/customer-governance.test.ts src/lib/portal-records.test.ts`
+- Result: `7 pass`, `0 fail`, `35 expect() calls`
+- `bunx eslint src/lib/customer-governance.ts src/lib/customer-governance.test.ts src/lib/portal-records.ts src/routes/_authenticated/customers.tsx`
+- Result: passed with no warnings after formatting
+- `bun run build`
+- Result: client, SSR, and Nitro builds completed successfully after the phase-2 customer-governance slice

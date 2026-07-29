@@ -354,6 +354,7 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   id UUID PRIMARY KEY,
   company_name TEXT NOT NULL,
   account_owner TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT 'India',
   region TEXT NOT NULL,
   segment TEXT NOT NULL,
   health_score INTEGER NOT NULL DEFAULT 0,
@@ -362,6 +363,18 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   status TEXT NOT NULL,
   next_step TEXT NOT NULL,
   last_touch TEXT NOT NULL,
+  domain TEXT,
+  phone TEXT,
+  tax_registration_id TEXT,
+  provider_customer_id TEXT,
+  address TEXT,
+  origin TEXT NOT NULL DEFAULT 'partner_portal',
+  duplicate_review_status TEXT NOT NULL DEFAULT 'clean',
+  master_customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL,
+  merged_into_customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL,
+  merged_at TIMESTAMPTZ,
+  merge_reason TEXT,
+  external_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -375,6 +388,54 @@ CREATE TABLE IF NOT EXISTS portal_customer_activities (
   actor_name TEXT NOT NULL,
   summary TEXT NOT NULL,
   next_step TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS customer_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES portal_customers(id) ON DELETE CASCADE,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  participant_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL,
+  valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+  valid_to TIMESTAMPTZ,
+  provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deal_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  participant_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL,
+  valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+  valid_to TIMESTAMPTZ,
+  provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS customer_merge_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  surviving_customer_id UUID NOT NULL REFERENCES portal_customers(id) ON DELETE CASCADE,
+  merged_customer_id UUID NOT NULL REFERENCES portal_customers(id) ON DELETE CASCADE,
+  redirect_customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL,
+  before_state JSONB NOT NULL,
+  after_state JSONB NOT NULL,
+  external_id_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  scope_restrictions JSONB NOT NULL DEFAULT '{}'::jsonb,
+  reason TEXT NOT NULL,
+  actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -614,6 +675,18 @@ BEFORE UPDATE ON portal_customers
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS customer_participants_updated_at ON customer_participants;
+CREATE TRIGGER customer_participants_updated_at
+BEFORE UPDATE ON customer_participants
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS deal_participants_updated_at ON deal_participants;
+CREATE TRIGGER deal_participants_updated_at
+BEFORE UPDATE ON deal_participants
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS portal_catalog_items_updated_at ON portal_catalog_items;
 CREATE TRIGGER portal_catalog_items_updated_at
 BEFORE UPDATE ON portal_catalog_items
@@ -754,6 +827,19 @@ ON CONFLICT (deal_id, user_id) DO NOTHING;
 
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'India';
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS domain TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS tax_registration_id TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS provider_customer_id TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'partner_portal';
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS duplicate_review_status TEXT NOT NULL DEFAULT 'clean';
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS master_customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS merged_into_customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS merged_at TIMESTAMPTZ;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS merge_reason TEXT;
+ALTER TABLE portal_customers ADD COLUMN IF NOT EXISTS external_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
