@@ -55,7 +55,7 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
 };
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { profile, user, roles, signOut } = useAuth();
+  const { profile, user, roles, activeContext, assignment, signOut } = useAuth();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,6 +70,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       .toUpperCase() ?? "U";
 
   const status = profile?.partner_status ?? "pending_partner_registration";
+  const contextLabel = activeContext
+    ? assignment?.roleKey
+      ? `${assignment.roleKey.replace(/_/g, " ")}${activeContext.workingScope ? ` · ${activeContext.workingScope}` : ""}`
+      : `Context ${activeContext.contextId.slice(0, 8)}`
+    : "Context pending";
 
   useEffect(() => {
     let active = true;
@@ -194,6 +199,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         {isAgreementAttention && <AgreementPendingBanner />}
         <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-start gap-3 border-b bg-background/80 px-3 py-2 backdrop-blur sm:items-center sm:px-4 sm:py-0">
           <SidebarTrigger className="shrink-0" />
+          <Badge variant={activeContext ? "outline" : "secondary"} className="shrink-0">
+            {contextLabel}
+          </Badge>
           <Popover open={showSearchResults}>
             <PopoverAnchor asChild>
               <div className="relative hidden flex-1 min-w-0 max-w-md md:flex">

@@ -43,6 +43,30 @@ EXCEPTION
 END
 $$;
 
+DO $$
+BEGIN
+  CREATE TYPE tenant_kind AS ENUM ('livey_organization', 'partner');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+  CREATE TYPE geography_node_type AS ENUM ('global', 'sales_region', 'country', 'province_state');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+  CREATE TYPE assignment_status AS ENUM ('scheduled', 'active', 'suspended', 'ended', 'revoked');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END
+$$;
+
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -119,6 +143,108 @@ DO $$ BEGIN
   ALTER TABLE partners ADD COLUMN IF NOT EXISTS agreement_provider TEXT DEFAULT 'zohosign';
 EXCEPTION WHEN others THEN NULL;
 END $$;
+
+CREATE TABLE IF NOT EXISTS governed_tenants (
+  tenant_id TEXT PRIMARY KEY,
+  tenant_kind tenant_kind NOT NULL,
+  display_name TEXT NOT NULL,
+  parent_tenant_id TEXT REFERENCES governed_tenants(tenant_id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS geography_nodes (
+  node_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  organization_tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  node_code TEXT NOT NULL UNIQUE,
+  node_type geography_node_type NOT NULL,
+  display_name TEXT NOT NULL,
+  parent_node_id TEXT REFERENCES geography_nodes(node_id) ON DELETE SET NULL,
+  valid_from TIMESTAMPTZ NOT NULL,
+  valid_to TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS geography_node_aliases (
+  alias_id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES geography_nodes(node_id) ON DELETE CASCADE,
+  legacy_value TEXT NOT NULL UNIQUE,
+  valid_from TIMESTAMPTZ NOT NULL,
+  valid_to TIMESTAMPTZ,
+  source TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS assignments (
+  assignment_id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  organization_tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  role_key TEXT NOT NULL,
+  team_domain TEXT NOT NULL,
+  geography_ceiling_node_id TEXT NOT NULL REFERENCES geography_nodes(node_id) ON DELETE RESTRICT,
+  partner_id UUID REFERENCES partners(id) ON DELETE SET NULL,
+  account_id TEXT,
+  portfolio_id TEXT,
+  queue_id TEXT,
+  manager_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  source TEXT NOT NULL,
+  approver_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  status assignment_status NOT NULL DEFAULT 'scheduled',
+  predecessor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  successor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  valid_from TIMESTAMPTZ NOT NULL,
+  valid_to TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  revocation_reason TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS assignment_events (
+  event_id TEXT PRIMARY KEY,
+  assignment_id TEXT NOT NULL REFERENCES assignments(assignment_id) ON DELETE CASCADE,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  actor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  reason TEXT,
+  before_state JSONB,
+  after_state JSONB,
+  effective_at TIMESTAMPTZ NOT NULL,
+  predecessor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  successor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  session_revocation_result TEXT,
+  correlation_id TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS active_contexts (
+  context_id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  assignment_id TEXT NOT NULL REFERENCES assignments(assignment_id) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  organization_tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  working_scope TEXT,
+  issued_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  revocation_link TEXT,
+  revoked_at TIMESTAMPTZ,
+  revocation_reason TEXT,
+  correlation_id TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Zoho Sign OAuth token storage (single org row)
 CREATE TABLE IF NOT EXISTS zoho_sign_tokens (
@@ -363,10 +489,84 @@ CREATE TABLE IF NOT EXISTS lookup_values (
   field_name TEXT NOT NULL,
   value TEXT NOT NULL,
   value_key TEXT NOT NULL,
+  domain_key TEXT NOT NULL DEFAULT 'general',
+  label_snapshot TEXT NOT NULL DEFAULT '',
+  value_version INTEGER NOT NULL DEFAULT 1,
+  effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  effective_to DATE,
+  retired_at TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'seed',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (field_name, value_key)
+);
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+  flag_key TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  owner TEXT NOT NULL,
+  cohort TEXT NOT NULL,
+  dependencies TEXT[] NOT NULL DEFAULT '{}',
+  metrics TEXT[] NOT NULL DEFAULT '{}',
+  expires_at DATE,
+  rollback TEXT NOT NULL,
+  audit_required BOOLEAN NOT NULL DEFAULT TRUE,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS domain_activity_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id TEXT NOT NULL,
+  organization_tenant_id TEXT NOT NULL,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT,
+  correlation_id TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS command_outbox (
+  outbox_id UUID PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  organization_tenant_id TEXT NOT NULL,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  idempotency_key TEXT,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  publish_after TIMESTAMPTZ,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS command_inbox (
+  inbox_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source TEXT NOT NULL,
+  source_message_id TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  tenant_id TEXT NOT NULL,
+  organization_tenant_id TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'pending',
+  UNIQUE (source, source_message_id)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -449,6 +649,46 @@ BEFORE UPDATE ON sessions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS lookup_values_updated_at ON lookup_values;
+CREATE TRIGGER lookup_values_updated_at
+BEFORE UPDATE ON lookup_values
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS feature_flags_updated_at ON feature_flags;
+CREATE TRIGGER feature_flags_updated_at
+BEFORE UPDATE ON feature_flags
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS governed_tenants_updated_at ON governed_tenants;
+CREATE TRIGGER governed_tenants_updated_at
+BEFORE UPDATE ON governed_tenants
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS geography_nodes_updated_at ON geography_nodes;
+CREATE TRIGGER geography_nodes_updated_at
+BEFORE UPDATE ON geography_nodes
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS assignments_updated_at ON assignments;
+CREATE TRIGGER assignments_updated_at
+BEFORE UPDATE ON assignments
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS active_contexts_updated_at ON active_contexts;
+CREATE TRIGGER active_contexts_updated_at
+BEFORE UPDATE ON active_contexts
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS revoked_by_context_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS revocation_reason TEXT;
+
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES partners(id) ON DELETE CASCADE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL;
@@ -465,6 +705,19 @@ ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_rate_fetched_at TIMESTAMPTZ
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS possible_close_date DATE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS is_hidden_to_team BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS reward_rate_percent NUMERIC(6,2) NOT NULL DEFAULT 5;
+
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS domain_key TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS label_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS value_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS effective_from DATE NOT NULL DEFAULT CURRENT_DATE;
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS effective_to DATE;
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'seed';
+ALTER TABLE lookup_values ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+UPDATE lookup_values
+SET label_snapshot = CASE WHEN label_snapshot = '' THEN value ELSE label_snapshot END
+WHERE label_snapshot = '';
 
 ALTER TABLE portal_deal_collaborators ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
 

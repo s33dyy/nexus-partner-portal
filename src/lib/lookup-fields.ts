@@ -35,8 +35,30 @@ export const LOOKUP_FIELDS = {
   partnerCountry: "partners.onboarding.country",
   partnerRegionPrefix: "partners.onboarding.region",
   partnerBusinessType: "partners.onboarding.business_type",
+  partnerYearsInBusiness: "partners.onboarding.years_in_business",
   partnerAnnualTurnover: "partners.onboarding.annual_turnover",
   partnerEmployeeCount: "partners.onboarding.employee_count",
+  partnerBusinessFocus: "partners.onboarding.business_focus",
+  teamDomain: "team.domain",
+  geographyNodeType: "governance.geography_node_type",
+  salesRegion: "governance.sales_region",
+  countryCode: "governance.country_code",
+  provinceStateCode: "governance.province_state_code",
+  taskCategory: "tasks.category",
+  documentCategory: "documents.category",
+  supportSeverity: "support.severity",
+  supportSla: "support.sla",
+  productReference: "products.reference_key",
+  rewardReference: "rewards.reference_key",
+  integrationProvider: "integrations.provider",
+  tagType: "governance.tag_type",
+  participantType: "governance.participant_type",
+  documentVisibility: "governance.document_visibility",
+  humanReadableIdNamespace: "governance.human_readable_id_namespace",
+  assignmentStatus: "governance.assignment_status",
+  ticketStatus: "governance.ticket_status",
+  leadStatus: "governance.lead_status",
+  shipmentStatus: "governance.shipment_status",
 } as const;
 
 export const ENTITY_DROPDOWN_FIELDS = {
@@ -79,8 +101,10 @@ export const LOOKUP_DROPDOWN_FIELDS = {
   partnerCountry: LOOKUP_FIELDS.partnerCountry,
   partnerRegionPrefix: LOOKUP_FIELDS.partnerRegionPrefix,
   partnerBusinessType: LOOKUP_FIELDS.partnerBusinessType,
+  partnerYearsInBusiness: LOOKUP_FIELDS.partnerYearsInBusiness,
   partnerAnnualTurnover: LOOKUP_FIELDS.partnerAnnualTurnover,
   partnerEmployeeCount: LOOKUP_FIELDS.partnerEmployeeCount,
+  partnerBusinessFocus: LOOKUP_FIELDS.partnerBusinessFocus,
 } as const;
 
 export type LookupFieldName = (typeof LOOKUP_FIELDS)[keyof typeof LOOKUP_FIELDS];

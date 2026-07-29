@@ -1,4 +1,4 @@
-// src/lib/partner-status.ts
+import { PARTNER_LIFECYCLE_STATUSES } from "@/domain/contracts/taxonomy";
 
 export type PartnerDocumentRole = "super_admin" | "partner_admin" | "partner_user";
 export type PartnerAccessInput = {
@@ -34,17 +34,7 @@ export type PartnerAccessFlags = {
 };
 
 /** All possible partner statuses in order */
-export const PARTNER_STATUSES = [
-  "pending_partner_registration",
-  "submitted",
-  "under_review",
-  "partial_approval",
-  "pending_agreement",
-  "signed_pending_review",
-  "approved",
-  "rejected",
-  "need_more_info",
-] as const;
+export const PARTNER_STATUSES = PARTNER_LIFECYCLE_STATUSES;
 
 export type PartnerStatus = (typeof PARTNER_STATUSES)[number];
 

@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 import type { PoolClient } from "pg";
 
+import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/governance";
 import { pool } from "@/server/postgres.server";
 import type { PartnerStatus } from "@/lib/partner-status";
 import {
@@ -82,6 +83,102 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "updated_at",
   ],
   user_roles: ["id", "user_id", "role", "is_seed", "created_at"],
+  governed_tenants: [
+    "tenant_id",
+    "tenant_kind",
+    "display_name",
+    "parent_tenant_id",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  geography_nodes: [
+    "node_id",
+    "tenant_id",
+    "organization_tenant_id",
+    "node_code",
+    "node_type",
+    "display_name",
+    "parent_node_id",
+    "valid_from",
+    "valid_to",
+    "version",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  geography_node_aliases: [
+    "alias_id",
+    "node_id",
+    "legacy_value",
+    "valid_from",
+    "valid_to",
+    "source",
+    "is_seed",
+    "created_at",
+  ],
+  assignments: [
+    "assignment_id",
+    "user_id",
+    "tenant_id",
+    "organization_tenant_id",
+    "role_key",
+    "team_domain",
+    "geography_ceiling_node_id",
+    "partner_id",
+    "account_id",
+    "portfolio_id",
+    "queue_id",
+    "manager_assignment_id",
+    "source",
+    "approver_user_id",
+    "status",
+    "predecessor_assignment_id",
+    "successor_assignment_id",
+    "valid_from",
+    "valid_to",
+    "revoked_at",
+    "revocation_reason",
+    "version",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
+  assignment_events: [
+    "event_id",
+    "assignment_id",
+    "actor_user_id",
+    "actor_assignment_id",
+    "action",
+    "reason",
+    "before_state",
+    "after_state",
+    "effective_at",
+    "predecessor_assignment_id",
+    "successor_assignment_id",
+    "session_revocation_result",
+    "correlation_id",
+    "is_seed",
+    "created_at",
+  ],
+  active_contexts: [
+    "context_id",
+    "user_id",
+    "assignment_id",
+    "tenant_id",
+    "organization_tenant_id",
+    "working_scope",
+    "issued_at",
+    "expires_at",
+    "version",
+    "revocation_link",
+    "revoked_at",
+    "revocation_reason",
+    "correlation_id",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
   partners: [
     "id",
     "owner_user_id",
@@ -843,7 +940,7 @@ export async function findSessionFromRequest() {
 export async function getSessionFromToken(token: string): Promise<LocalSession | null> {
   const sessionHash = hashSha256(token);
   const result = await pool.query(
-    `SELECT s.token_hash, s.expires_at, p.id, p.email, p.full_name, p.phone, p.company_name
+    `SELECT s.token_hash, s.expires_at, s.revoked_at, p.id, p.email, p.full_name, p.phone, p.company_name
      FROM sessions s
      JOIN profiles p ON p.id = s.user_id
      WHERE s.token_hash = $1
@@ -855,6 +952,7 @@ export async function getSessionFromToken(token: string): Promise<LocalSession |
     | {
         token_hash: string;
         expires_at: Date;
+        revoked_at: Date | null;
         id: string;
         email: string;
         full_name: string;
@@ -864,6 +962,11 @@ export async function getSessionFromToken(token: string): Promise<LocalSession |
     | undefined;
 
   if (!row) {
+    return null;
+  }
+
+  if (row.revoked_at) {
+    await pool.query(`DELETE FROM sessions WHERE token_hash = $1`, [sessionHash]);
     return null;
   }
 
@@ -882,13 +985,204 @@ export async function getSessionFromToken(token: string): Promise<LocalSession |
   };
 }
 
+function mapAssignmentRow(row: Record<string, unknown>): AssignmentRecord {
+  return {
+    assignmentId: String(row.assignment_id),
+    userId: String(row.user_id),
+    tenantId: String(row.tenant_id),
+    organizationTenantId: String(row.organization_tenant_id),
+    roleKey: row.role_key as AssignmentRecord["roleKey"],
+    teamDomain: row.team_domain as AssignmentRecord["teamDomain"],
+    geographyCeilingNodeId: String(row.geography_ceiling_node_id),
+    partnerId: row.partner_id == null ? null : String(row.partner_id),
+    accountId: row.account_id == null ? null : String(row.account_id),
+    portfolioId: row.portfolio_id == null ? null : String(row.portfolio_id),
+    queueId: row.queue_id == null ? null : String(row.queue_id),
+    status: row.status as AssignmentRecord["status"],
+    validFrom: String(row.valid_from),
+    validTo: row.valid_to == null ? null : String(row.valid_to),
+    managerAssignmentId:
+      row.manager_assignment_id == null ? null : String(row.manager_assignment_id),
+    source: String(row.source),
+    approverUserId: row.approver_user_id == null ? null : String(row.approver_user_id),
+    predecessorAssignmentId:
+      row.predecessor_assignment_id == null ? null : String(row.predecessor_assignment_id),
+    successorAssignmentId:
+      row.successor_assignment_id == null ? null : String(row.successor_assignment_id),
+    revokedAt: row.revoked_at == null ? null : String(row.revoked_at),
+    revocationReason: row.revocation_reason == null ? null : String(row.revocation_reason),
+    createdAt: String(row.assignment_created_at),
+    updatedAt: String(row.assignment_updated_at),
+    version: Number(row.assignment_version),
+    isSeed: Boolean(row.assignment_is_seed),
+  };
+}
+
+function mapActiveContextRow(row: Record<string, unknown>): ActiveContextRecord {
+  return {
+    contextId: String(row.context_id),
+    userId: String(row.user_id),
+    assignmentId: String(row.assignment_id),
+    assignmentStatus: row.assignment_status as ActiveContextRecord["assignmentStatus"],
+    tenantId: String(row.tenant_id),
+    organizationTenantId: String(row.organization_tenant_id),
+    workingScope: row.working_scope == null ? null : String(row.working_scope),
+    issuedAt: String(row.issued_at),
+    expiresAt: String(row.expires_at),
+    version: Number(row.version),
+    revocationLink: row.revocation_link == null ? null : String(row.revocation_link),
+    correlationId: String(row.correlation_id),
+    assignmentVersion: Number(row.assignment_version),
+    workingScopeNodeId: row.working_scope == null ? null : String(row.working_scope),
+    revokedAt: row.revoked_at == null ? null : String(row.revoked_at),
+    revocationReason: row.revocation_reason == null ? null : String(row.revocation_reason),
+    isSeed: Boolean(row.context_is_seed),
+    createdAt: String(row.context_created_at),
+    updatedAt: String(row.context_updated_at),
+  };
+}
+
+async function loadGovernedAuthState(userId: string) {
+  const { rows } = await pool.query(
+    `SELECT
+       ac.context_id,
+       ac.user_id,
+       ac.assignment_id,
+       ac.tenant_id,
+       ac.organization_tenant_id,
+       ac.working_scope,
+       ac.issued_at,
+       ac.expires_at,
+       ac.version,
+       ac.revocation_link,
+       ac.revoked_at,
+       ac.revocation_reason,
+       ac.correlation_id,
+       ac.is_seed AS context_is_seed,
+       ac.created_at AS context_created_at,
+       ac.updated_at AS context_updated_at,
+       a.assignment_id,
+       a.user_id,
+       a.tenant_id,
+       a.organization_tenant_id,
+       a.version AS assignment_version,
+       a.status AS assignment_status,
+       a.role_key,
+       a.team_domain,
+       a.geography_ceiling_node_id,
+       a.partner_id,
+       a.account_id,
+       a.portfolio_id,
+       a.queue_id,
+       a.manager_assignment_id,
+       a.source,
+       a.approver_user_id,
+       a.predecessor_assignment_id,
+       a.successor_assignment_id,
+       a.valid_from,
+       a.valid_to,
+       a.revoked_at,
+       a.revocation_reason,
+       a.created_at AS assignment_created_at,
+       a.updated_at AS assignment_updated_at,
+       a.is_seed AS assignment_is_seed
+     FROM active_contexts ac
+     JOIN assignments a ON a.assignment_id = ac.assignment_id
+     WHERE ac.user_id = $1 AND ac.revoked_at IS NULL
+     ORDER BY ac.issued_at DESC, ac.created_at DESC
+     LIMIT 1`,
+    [userId],
+  );
+
+  const contextRow = rows[0] as Record<string, unknown> | undefined;
+  if (!contextRow) {
+    const { rows: assignmentRows } = await pool.query(
+      `SELECT
+         a.assignment_id,
+         a.user_id,
+         a.tenant_id,
+         a.organization_tenant_id,
+         a.version AS assignment_version,
+         a.status AS assignment_status,
+         a.role_key,
+         a.team_domain,
+         a.geography_ceiling_node_id,
+         a.partner_id,
+         a.account_id,
+         a.portfolio_id,
+         a.queue_id,
+         a.manager_assignment_id,
+         a.source,
+         a.approver_user_id,
+         a.predecessor_assignment_id,
+         a.successor_assignment_id,
+         a.valid_from,
+         a.valid_to,
+         a.revoked_at,
+         a.revocation_reason,
+         a.created_at AS assignment_created_at,
+         a.updated_at AS assignment_updated_at,
+         a.is_seed AS assignment_is_seed
+       FROM assignments a
+       WHERE a.user_id = $1
+       ORDER BY a.valid_from DESC, a.created_at DESC
+       LIMIT 1`,
+      [userId],
+    );
+    const assignmentRow = assignmentRows[0] as Record<string, unknown> | undefined;
+    return {
+      assignment: assignmentRow ? mapAssignmentRow(assignmentRow) : null,
+      activeContext: null,
+    };
+  }
+
+  return {
+    assignment: mapAssignmentRow(contextRow),
+    activeContext: mapActiveContextRow(contextRow),
+  };
+}
+
+export async function revokeUserSessionsAndContexts(input: {
+  userId: string;
+  reason: string;
+  revokedByContextId?: string | null;
+}) {
+  const sessionsResult = await pool.query(
+    `UPDATE sessions
+     SET revoked_at = now(),
+         revoked_by_context_id = $2,
+         revocation_reason = $3
+     WHERE user_id = $1 AND revoked_at IS NULL`,
+    [input.userId, input.revokedByContextId ?? null, input.reason],
+  );
+
+  const contextsResult = await pool.query(
+    `UPDATE active_contexts
+     SET revoked_at = now(),
+         revocation_reason = $2
+     WHERE user_id = $1 AND revoked_at IS NULL`,
+    [input.userId, input.reason],
+  );
+
+  return {
+    revokedSessionCount: sessionsResult.rowCount ?? 0,
+    revokedContextCount: contextsResult.rowCount ?? 0,
+  };
+}
+
 export async function getAuthContext(token?: string) {
   const session = token ? await getSessionFromToken(token) : await findSessionFromRequest();
   if (!session) {
-    return { session: null, profile: null, roles: [] as AppRole[] };
+    return {
+      session: null,
+      profile: null,
+      roles: [] as AppRole[],
+      assignment: null,
+      activeContext: null,
+    };
   }
 
-  const [{ rows: profileRows }, { rows: roleRows }] = await Promise.all([
+  const [{ rows: profileRows }, { rows: roleRows }, governedState] = await Promise.all([
     pool.query(
       `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
        FROM profiles WHERE id = $1 LIMIT 1`,
@@ -897,6 +1191,7 @@ export async function getAuthContext(token?: string) {
     pool.query(`SELECT role FROM user_roles WHERE user_id = $1 ORDER BY created_at ASC`, [
       session.user.id,
     ]),
+    loadGovernedAuthState(session.user.id),
   ]);
 
   const profile = profileRows[0]
@@ -921,7 +1216,13 @@ export async function getAuthContext(token?: string) {
 
   const roles = roleRows.map((row: { role: AppRole }) => row.role);
 
-  return { session, profile, roles };
+  return {
+    session,
+    profile,
+    roles,
+    assignment: governedState.assignment,
+    activeContext: governedState.activeContext,
+  };
 }
 
 export async function signInWithPassword(email: string, password: string) {

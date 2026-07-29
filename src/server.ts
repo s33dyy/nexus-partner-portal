@@ -10,6 +10,7 @@ import {
   handleZohoResyncAgreement,
   handleZohoSignUrl,
 } from "./server/zoho-api.server";
+import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -56,44 +57,65 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const url = new URL(request.url);
-      
+      const correlationId = normalizeCorrelationId(request.headers.get(CORRELATION_ID_HEADER));
+
       // Manual API route interceptors since TanStack Start doesn't support them well here
       if (url.pathname === "/api/integrations/zoho-sign/connect") {
-        return await handleZohoConnect(request);
+        return attachCorrelationHeader(await handleZohoConnect(request), correlationId);
       }
       if (url.pathname === "/api/integrations/zoho-sign/callback") {
-        return await handleZohoCallback(request);
+        return attachCorrelationHeader(await handleZohoCallback(request), correlationId);
       }
       if (url.pathname === "/api/integrations/zoho-sign/webhook") {
-        return await handleZohoWebhook(request);
+        return attachCorrelationHeader(await handleZohoWebhook(request), correlationId);
       }
       if (url.pathname === "/api/integrations/zoho-sign/send-agreement") {
-        return await handleZohoSendAgreement(request);
+        return attachCorrelationHeader(await handleZohoSendAgreement(request), correlationId);
       }
       if (url.pathname === "/api/integrations/zoho-sign/resync-agreement") {
-        return await handleZohoResyncAgreement(request);
+        return attachCorrelationHeader(await handleZohoResyncAgreement(request), correlationId);
       }
       if (url.pathname === "/api/integrations/zoho-sign/sign-url") {
-        return await handleZohoSignUrl(request);
+        return attachCorrelationHeader(await handleZohoSignUrl(request), correlationId);
       }
 
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return attachCorrelationHeader(
+        await normalizeCatastrophicSsrResponse(response),
+        correlationId,
+      );
     } catch (error) {
       console.error(error);
       // Return JSON for API routes, HTML for others
       const url = new URL(request.url);
+      const correlationId = normalizeCorrelationId(request.headers.get(CORRELATION_ID_HEADER));
       if (url.pathname.startsWith("/api/")) {
-        return new Response(JSON.stringify({ error: "Internal server error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
+        return attachCorrelationHeader(
+          new Response(JSON.stringify({ error: "Internal server error" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }),
+          correlationId,
+        );
       }
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return attachCorrelationHeader(
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+        correlationId,
+      );
     }
   },
 };
+
+function attachCorrelationHeader(response: Response, correlationId: string) {
+  const headers = new Headers(response.headers);
+  headers.set(CORRELATION_ID_HEADER, correlationId);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
