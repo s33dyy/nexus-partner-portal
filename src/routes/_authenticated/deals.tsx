@@ -705,9 +705,11 @@ function DealsPage() {
     };
   }, [draft.amount, draft.currency_code]);
 
+  const selectedDealDraftAmount = selectedDealDraft?.amount ?? "";
+  const selectedDealDraftCurrencyCode = selectedDealDraft?.currency_code ?? "INR";
+
   useEffect(() => {
-    if (!selectedDealDraft) return;
-    if (selectedDealDraft.currency_code === "INR") {
+    if (selectedDealDraftCurrencyCode === "INR") {
       setSelectedDealConvertingCurrency(false);
       setSelectedCurrencyPreviewError(null);
       setSelectedDealDraft((current) =>
@@ -725,8 +727,8 @@ function DealsPage() {
       return;
     }
 
-    const amountValue = parseDealAmount(selectedDealDraft.amount);
-    if (!selectedDealDraft.amount.trim() || amountValue <= 0) {
+    const amountValue = parseDealAmount(selectedDealDraftAmount);
+    if (!selectedDealDraftAmount.trim() || amountValue <= 0) {
       setSelectedDealConvertingCurrency(false);
       setSelectedCurrencyPreviewError(null);
       setSelectedDealDraft((current) =>
@@ -750,7 +752,7 @@ function DealsPage() {
     const timer = window.setTimeout(() => {
       void (async () => {
         const { data, error } = await supabase.auth.quoteCurrencyToInr({
-          sourceCurrency: selectedDealDraft.currency_code,
+          sourceCurrency: selectedDealDraftCurrencyCode,
           amount: amountValue,
         });
         if (!active) return;
@@ -790,7 +792,7 @@ function DealsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [selectedDealDraft]);
+  }, [selectedDealDraftAmount, selectedDealDraftCurrencyCode]);
 
   const kpis = useMemo(() => {
     const pipeline = deals.reduce((sum, deal) => {
