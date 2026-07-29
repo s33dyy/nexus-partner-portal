@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { getAuthenticatedRedirect } from "@/lib/auth-routing";
+import { getAuthenticatedGateState, getAuthenticatedRedirect } from "@/lib/auth-routing";
 
 test("redirects users with must_reset_password to settings until they update it", () => {
   expect(
@@ -42,4 +42,34 @@ test("still routes pending partner admins into onboarding when password reset is
       },
     }),
   ).toBe("/partner/onboarding");
+});
+
+test("gate state flags missing governed context after profile load", () => {
+  expect(
+    getAuthenticatedGateState({
+      hasSession: true,
+      pathname: "/dashboard",
+      roles: ["partner_admin"],
+      profile: {
+        partner_status: "approved",
+        must_reset_password: false,
+      },
+      hasGovernedContext: false,
+    }),
+  ).toBe("context-pending");
+});
+
+test("gate state treats a governed super-admin session as ready", () => {
+  expect(
+    getAuthenticatedGateState({
+      hasSession: true,
+      pathname: "/dashboard",
+      roles: ["super_admin"],
+      profile: {
+        partner_status: "approved",
+        must_reset_password: false,
+      },
+      hasGovernedContext: true,
+    }),
+  ).toBe("ready");
 });

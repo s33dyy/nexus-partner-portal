@@ -8,6 +8,7 @@ import type { PoolClient } from "pg";
 
 import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/governance";
 import { pool } from "@/server/postgres.server";
+import { applyTablePolicy, type TablePolicyAuthContext } from "@/server/table-policy.server";
 import type { PartnerStatus } from "@/lib/partner-status";
 import {
   deleteFromCloudinary,
@@ -802,39 +803,40 @@ function toLocalUser(row: {
   };
 }
 
-export async function queryTable(query: TableQuery) {
+export async function queryTableWithAuthContext(query: TableQuery, authContext: TablePolicyAuthContext) {
   assertTable(query.table);
   const columns = TABLE_COLUMNS[query.table];
-  const filters = query.filters ?? [];
-  const order = query.order;
-  const values = query.values;
+  const policyQuery = await applyTablePolicy(query, authContext);
+  const filters = policyQuery.filters ?? [];
+  const order = policyQuery.order;
+  const values = policyQuery.values;
   const orderSql =
     order && columns.includes(order.column)
       ? ` ORDER BY ${quoteIdent(order.column)} ${order.ascending === false ? "DESC" : "ASC"}`
       : "";
 
-  if (query.operation === "select") {
+  if (policyQuery.operation === "select") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
-      `SELECT * FROM ${quoteIdent(query.table)}${whereSql}${orderSql}`,
+      `SELECT * FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}`,
       whereParams,
     );
     const data = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
-        query.single === "single"
+        policyQuery.single === "single"
           ? (data[0] ?? null)
-          : query.single === "maybeSingle"
+          : policyQuery.single === "maybeSingle"
             ? (data[0] ?? null)
             : data,
       error: null,
     };
   }
 
-  if (query.operation === "count") {
+  if (policyQuery.operation === "count") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
-      `SELECT count(*) AS count FROM ${quoteIdent(query.table)}${whereSql}`,
+      `SELECT count(*) AS count FROM ${quoteIdent(policyQuery.table)}${whereSql}`,
       whereParams,
     );
     return {
@@ -843,7 +845,7 @@ export async function queryTable(query: TableQuery) {
     };
   }
 
-  if (query.operation === "insert") {
+  if (policyQuery.operation === "insert") {
     const inserts = Array.isArray(values) ? values : [values ?? {}];
     if (inserts.length === 0) {
       return { data: [], error: null };
@@ -857,7 +859,7 @@ export async function queryTable(query: TableQuery) {
 
       const rowColumns = Object.keys(row).filter((column) => columns.includes(column));
       const rowParams = rowColumns.map((column) => row[column]);
-      const sql = `INSERT INTO ${quoteIdent(query.table)} (${rowColumns
+      const sql = `INSERT INTO ${quoteIdent(policyQuery.table)} (${rowColumns
         .map(quoteIdent)
         .join(
           ", ",
@@ -868,16 +870,16 @@ export async function queryTable(query: TableQuery) {
 
     return {
       data:
-        query.single === "single"
+        policyQuery.single === "single"
           ? (inserted[0] ?? null)
-          : query.single === "maybeSingle"
+          : policyQuery.single === "maybeSingle"
             ? (inserted[0] ?? null)
             : inserted,
       error: null,
     };
   }
 
-  if (query.operation === "update") {
+  if (policyQuery.operation === "update") {
     if (!isPlainObject(values)) {
       throw new Error("Update values must be an object");
     }
@@ -893,40 +895,51 @@ export async function queryTable(query: TableQuery) {
     const updateParams = updateColumns.map((column) => values[column]);
     const { whereSql, whereParams } = buildWhereClause(filters, columns, updateColumns.length);
     const result = await pool.query(
-      `UPDATE ${quoteIdent(query.table)} SET ${setSql}${whereSql} RETURNING *`,
+      `UPDATE ${quoteIdent(policyQuery.table)} SET ${setSql}${whereSql} RETURNING *`,
       [...updateParams, ...whereParams],
     );
     const rows = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
-        query.single === "single"
+        policyQuery.single === "single"
           ? (rows[0] ?? null)
-          : query.single === "maybeSingle"
+          : policyQuery.single === "maybeSingle"
             ? (rows[0] ?? null)
             : rows,
       error: null,
     };
   }
 
-  if (query.operation === "delete") {
+  if (policyQuery.operation === "delete") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
-      `DELETE FROM ${quoteIdent(query.table)}${whereSql} RETURNING *`,
+      `DELETE FROM ${quoteIdent(policyQuery.table)}${whereSql} RETURNING *`,
       whereParams,
     );
     const rows = result.rows.map((row) => serializeDbValue(row));
     return {
       data:
-        query.single === "single"
+        policyQuery.single === "single"
           ? (rows[0] ?? null)
-          : query.single === "maybeSingle"
+          : policyQuery.single === "maybeSingle"
             ? (rows[0] ?? null)
             : rows,
       error: null,
     };
   }
 
-  throw new Error(`Unsupported operation: ${query.operation}`);
+  throw new Error(`Unsupported operation: ${policyQuery.operation}`);
+}
+
+export async function queryTable(query: TableQuery) {
+  const authContext = await getAuthContext();
+  return queryTableWithAuthContext(query, {
+    userId: authContext.session?.user.id ?? null,
+    roles: authContext.roles,
+    partnerId: authContext.profile?.partner_id ?? null,
+    companyName: authContext.profile?.company_name ?? null,
+    hasGovernedContext: Boolean(authContext.activeContext),
+  });
 }
 
 export async function findSessionFromRequest() {

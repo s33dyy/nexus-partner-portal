@@ -3,7 +3,7 @@
 ## Phase
 
 - Phase 1: Hierarchy and RBAC Foundation
-- Checkpoint: governed-context vertical slice complete
+- Checkpoint: governed-context vertical slice + shell/accessibility slice complete
 - Previous checkpoint: Phase 0 (0A-0E) complete
 
 ## Repository Findings
@@ -38,15 +38,17 @@
 - Added governed geography and assignment helpers in `src/domain/contracts/governance.ts`.
 - Seeded the bootstrap database with a livey-org tenant, a small governed geography tree, and a super-admin assignment plus active context.
 - Loaded governed assignment/context data through the local auth bridge and surfaced it in the app shell.
+- Reworked the authenticated shell to show active governed context, remove the free-text global search affordance, and expose explicit loading, denied, and no-context fallback states.
+- Added focused coverage for shell context summaries and gate-state handling.
 - Added focused tests for geography ancestry, assignment validation, active-context issuance, and policy denials.
 - Verified the governed-context slice with targeted Bun tests, `bun run build`, and targeted ESLint on the touched files.
 
 ## Remaining Items
 
 - Update any legacy helpers that still need to import the canonical registries.
-- Wire explicit route-level denial and fallback states for partner-facing screens.
 - Add named assignment transition commands and session/context revocation flows.
 - Expand policy enforcement to read/count/list/export/import/file/worker paths beyond the current scaffold.
+- Add route-level denial and fallback states for the remaining partner-facing screens.
 
 ## Migrations Created
 
