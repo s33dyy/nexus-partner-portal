@@ -1303,14 +1303,17 @@ CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (dea
 -- Append-only conversation/audit log — no delete surface anywhere in the app.
 CREATE TABLE IF NOT EXISTS assistant_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  session_id TEXT NOT NULL,
-  user_text TEXT NOT NULL,
+  conversation_id UUID NOT NULL,
+  user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
   proposed_action TEXT,
+  action_payload JSONB,
   retrieved_deal_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
-  is_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+  confirmed BOOLEAN,
   outcome TEXT,
-  model_used TEXT NOT NULL,
+  model TEXT,
   correlation_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1421,7 +1424,7 @@ CREATE TABLE IF NOT EXISTS learning_enrollments (
   UNIQUE (user_id, track_id)
 );
 
-CREATE INDEX IF NOT EXISTS assistant_messages_conversation_id_idx ON assistant_messages (session_id);
+CREATE INDEX IF NOT EXISTS assistant_messages_conversation_id_idx ON assistant_messages (conversation_id);
 CREATE INDEX IF NOT EXISTS assistant_messages_user_id_idx ON assistant_messages (user_id);
 
 -- Phase 2: Tasks — first-class work items (blueprint Section 10). No delete
