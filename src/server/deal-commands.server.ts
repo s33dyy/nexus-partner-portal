@@ -41,13 +41,6 @@ const GOVERNANCE_GEOGRAPHY_GRAPH = (() => {
   return buildGeographyGraph(seedRows.geographyNodes, seedRows.geographyAliases);
 })();
 
-// The canonical blueprint defines eight deal stages with no "approved" stage —
-// "approved" belongs to the PO/outcome review status, not the pipeline. The
-// deployed pipeline UI (portal-records.ts DEAL_STAGE_ORDER) has always carried a
-// ninth "approved" stage between negotiation and won, and seeded/live deal rows
-// already use it. Reconciling the two is a product decision (would change the
-// visible pipeline columns), so this command module intentionally enforces the
-// stage order actually in production rather than the narrower canonical list.
 const TERMINAL_STAGES = new Set<DealStage>(["won", "lost"]);
 
 const FORWARD_NEXT_STAGE: Partial<Record<DealStage, DealStage>> = {};
@@ -69,7 +62,7 @@ export type DealCommandActor = GovernedActor;
 export type ResolveDealCommandActorInput = ResolveGovernedActorInput;
 export const resolveDealCommandActor = resolveGovernedActor;
 
-type DealSnapshot = {
+export type DealSnapshot = {
   id: string;
   stage: DealStage;
   status: string;
@@ -78,9 +71,10 @@ type DealSnapshot = {
   region: string | null;
   version: number;
   account_name: string;
+  commercial_approved: boolean;
 };
 
-function authorizeDealActor(
+export function authorizeDealActor(
   actor: DealCommandActor,
   deal: Pick<DealSnapshot, "partner_id" | "country" | "region">,
 ): PolicyDecision {
@@ -144,10 +138,10 @@ function authorizeDealActor(
   };
 }
 
-async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSnapshot | null> {
+export async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSnapshot | null> {
   const { rows } = await tx.query(
     `SELECT id, stage, status, partner_id, version, account_name
-            , country, region
+            , country, region, commercial_approved
      FROM portal_deals WHERE id = $1 FOR UPDATE`,
     [dealId],
   );
@@ -161,6 +155,7 @@ async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSn
         region: string | null;
         version: number;
         account_name: string;
+        commercial_approved: boolean;
       }
     | undefined;
   if (!row) return null;
@@ -173,10 +168,11 @@ async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSn
     region: row.region ?? null,
     version: Number(row.version),
     account_name: row.account_name,
+    commercial_approved: row.commercial_approved,
   };
 }
 
-async function recordTransitionAndOutbox(input: {
+export async function recordTransitionAndOutbox(input: {
   tx: PoolClient;
   actor: DealCommandActor;
   correlationId: string;
@@ -244,7 +240,7 @@ async function recordTransitionAndOutbox(input: {
   );
 }
 
-function validationFailure(message: string, field = "stage"): CommandFailureContract {
+export function validationFailure(message: string, field = "stage"): CommandFailureContract {
   return {
     code: "VALIDATION_FAILED",
     message,
@@ -554,8 +550,8 @@ export async function createDeal(input: {
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
-    const autoApproved = !requiresSuperAdminApproval(amountUsd ?? amountValue);
-    const status = autoApproved ? "approved" : "submitted";
+    const status = "draft"; // Replaces old autoApproved logic
+    const commercial_approved = false;
     const stage: DealStage = "sourced";
     const ownerName = data.ownerName?.trim() || (await resolveOwnerName(tx, input.actor.userId));
     const closeDate = data.closeDate || data.possibleCloseDate || todayIsoDate();
@@ -569,11 +565,11 @@ export async function createDeal(input: {
          stage, status, quantity, amount, currency_code, amount_value, amount_usd,
          fx_rate, fx_provider, customer_budget, probability, possible_close_date,
          close_date, source, last_touch, notes, is_hidden_to_team,
-         reward_rate_percent, is_seed, user_id, partner_id, customer_id,
+         reward_rate_percent, commercial_approved, is_seed, user_id, partner_id, customer_id,
          poc_profile_id, version
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,FALSE,$26,$27,$28,$29,1
+         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,FALSE,$27,$28,$29,$30,1
        )`,
       [
         dealId,
@@ -601,6 +597,7 @@ export async function createDeal(input: {
         data.notes?.trim() || "",
         false,
         rewardRatePercent,
+        commercial_approved,
         input.actor.userId,
         resolvedPartnerId,
         data.customerId ?? null,
@@ -677,5 +674,72 @@ export async function createDeal(input: {
       nextAuthorisedActions: nextAuthorisedActions(stage),
       correlationId,
     };
+  });
+}
+
+export type SubmitDealForRegistrationInput = {
+  dealId: string;
+};
+
+export async function submitDealForRegistration(input: {
+  actor: DealCommandActor;
+  data: SubmitDealForRegistrationInput;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  return withTransaction(async (tx) => {
+    const deal = await loadDealForUpdate(tx, input.data.dealId);
+    if (!deal) {
+      return { ok: false, failure: validationFailure("Deal not found"), correlationId };
+    }
+    const policy = authorizeDealActor(input.actor, deal);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (deal.status !== "draft" && deal.status !== "submitted") {
+      return { ok: false, failure: validationFailure("Deal has already been submitted for registration"), correlationId };
+    }
+
+    // Check pricing for $5,000 threshold
+    let dtpToEvaluate = 0;
+    const { rows: revRows } = await tx.query(
+      `SELECT total_dtp_usd FROM pricing_revisions WHERE deal_id = $1 ORDER BY revision_number DESC LIMIT 1`,
+      [input.data.dealId]
+    );
+    if (revRows.length > 0) {
+      dtpToEvaluate = Number(revRows[0].total_dtp_usd);
+    } else {
+      // Fallback if no revision exists yet
+      const { rows: amountRows } = await tx.query(`SELECT amount_usd, amount_value FROM portal_deals WHERE id = $1`, [input.data.dealId]);
+      dtpToEvaluate = Number(amountRows[0].amount_usd ?? amountRows[0].amount_value ?? 0);
+    }
+
+    const autoApproved = !requiresSuperAdminApproval(dtpToEvaluate);
+    
+    // For autoApproved deals, we set commercial_approved = true and move to negotiation
+    // if it hasn't reached it. If not autoApproved, we just set status = submitted.
+    const newStatus = autoApproved ? "approved" : "submitted";
+    const newCommercialApproved = autoApproved;
+    const newStage = autoApproved ? "negotiation" : deal.stage;
+
+    await tx.query(
+      `UPDATE portal_deals SET status = $1, commercial_approved = $2, stage = $3, updated_at = now() WHERE id = $4`,
+      [newStatus, newCommercialApproved, newStage, input.data.dealId]
+    );
+
+    await recordTransitionAndOutbox({
+      tx,
+      actor: input.actor,
+      correlationId,
+      commandName: "SubmitDealForRegistration",
+      eventName: autoApproved ? "DealRegistrationAutoApproved" : "DealRegistrationSubmitted",
+      deal,
+      toStage: newStage as DealStage,
+      toStatus: newStatus,
+      reason: autoApproved ? "Auto-approved based on DTP threshold" : "Submitted for commercial review",
+      payload: { dtp_evaluated: dtpToEvaluate },
+    });
+
+    return { ok: true, correlationId };
   });
 }

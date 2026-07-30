@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { supabase } from "@/integrations/local/client";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
@@ -299,9 +300,10 @@ function AdminDealsPage() {
           is_hidden_to_team: reviewDraft.is_hidden_to_team,
           reward_rate_percent: Number(reviewDraft.reward_rate_percent) || 5,
           status: status ?? reviewDraft.status,
+          commercial_approved: status === "approved" ? true : reviewDraft.commercial_approved,
           stage:
             status === "approved"
-              ? "approved"
+              ? "negotiation"
               : status === "won"
                 ? "won"
                 : status === "lost"
@@ -778,6 +780,8 @@ function AdminDealsPage() {
                       Reject
                     </Button>
                   </div>
+                  <Separator />
+                  <DealOutcomeReview dealId={selectedDeal.id} dealStage={selectedDeal.stage} commercialApproved={selectedDeal.commercial_approved} />
                 </>
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">

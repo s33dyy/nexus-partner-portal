@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Loader2, Send } from "lucide-react";
+import { Bot, Loader2, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -103,8 +103,14 @@ export function AssistantPanel() {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Assistant">
-          <Bot className="h-4 w-4" />
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label="Open LIVEY Assistant"
+          className="gap-2 border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
+        >
+          <Sparkles className="h-4 w-4" />
+          Assistant
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">

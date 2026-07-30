@@ -7,7 +7,6 @@ export const DEAL_STAGE_ORDER = [
   "qualified",
   "proposal",
   "negotiation",
-  "approved",
   "won",
   "lost",
 ] as const;
@@ -53,6 +52,7 @@ export type DealRecord = {
   partner_id: string | null;
   is_hidden_to_team: boolean;
   reward_rate_percent: number;
+  commercial_approved: boolean;
   version: number;
   is_seed: boolean;
   created_at: string;

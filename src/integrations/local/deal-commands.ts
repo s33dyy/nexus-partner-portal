@@ -127,3 +127,16 @@ export async function markDealLost(input: {
 }): Promise<CommandExecutionResult> {
   return markDealLostFn({ data: input });
 }
+
+const submitDealForRegistrationFn = createServerFn({ method: "POST" })
+  .validator((input: { dealId: string }) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { submitDealForRegistration } = await import("@/server/deal-commands.server");
+    return submitDealForRegistration({ actor: actorResult.actor, data });
+  });
+
+export async function submitDealForRegistration(input: { dealId: string }): Promise<CommandExecutionResult> {
+  return submitDealForRegistrationFn({ data: input });
+}

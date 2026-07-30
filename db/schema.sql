@@ -333,6 +333,8 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   notes TEXT NOT NULL,
   is_hidden_to_team BOOLEAN NOT NULL DEFAULT FALSE,
   reward_rate_percent NUMERIC(6,2) NOT NULL DEFAULT 5,
+  commercial_approved BOOLEAN NOT NULL DEFAULT FALSE,
+  version INTEGER NOT NULL DEFAULT 1,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -1301,22 +1303,125 @@ CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (dea
 -- Append-only conversation/audit log — no delete surface anywhere in the app.
 CREATE TABLE IF NOT EXISTS assistant_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  conversation_id UUID NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
-  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  user_text TEXT NOT NULL,
   proposed_action TEXT,
-  action_payload JSONB,
-  retrieved_deal_ids UUID[] NOT NULL DEFAULT '{}',
-  confirmed BOOLEAN,
+  retrieved_deal_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+  is_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
   outcome TEXT,
-  model TEXT,
+  model_used TEXT NOT NULL,
   correlation_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS assistant_messages_conversation_id_idx ON assistant_messages (conversation_id);
+-- MVP Added Tables
+
+CREATE TABLE IF NOT EXISTS deal_line_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  msrp_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ptp_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  discount_pct NUMERIC(6,2) NOT NULL DEFAULT 0,
+  dtp_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  proposed_selling_price_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  reward_eligible BOOLEAN NOT NULL DEFAULT TRUE,
+  snapshot_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pricing_revisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  revision_number INTEGER NOT NULL,
+  total_ptp_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_dtp_usd NUMERIC(14,2) NOT NULL DEFAULT 0,
+  is_final BOOLEAN NOT NULL DEFAULT FALSE,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  approved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (deal_id, revision_number)
+);
+
+CREATE TABLE IF NOT EXISTS deal_outcome_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'not_applicable',
+  po_document_url TEXT,
+  po_number TEXT,
+  po_date DATE,
+  po_amount NUMERIC(14,2),
+  currency_code TEXT DEFAULT 'USD',
+  reason TEXT,
+  actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (deal_id)
+);
+
+-- Insight Hub (Learning) placeholder tables
+CREATE TABLE IF NOT EXISTS learning_tracks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS learning_subjects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  track_id UUID NOT NULL REFERENCES learning_tracks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS learning_courses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject_id UUID NOT NULL REFERENCES learning_subjects(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS learning_lessons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  course_id UUID NOT NULL REFERENCES learning_courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  content_url TEXT,
+  content_type TEXT NOT NULL DEFAULT 'video',
+  duration_minutes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS learning_enrollments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  track_id UUID NOT NULL REFERENCES learning_tracks(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  score_percent NUMERIC(5,2),
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, track_id)
+);
+
+CREATE INDEX IF NOT EXISTS assistant_messages_conversation_id_idx ON assistant_messages (session_id);
 CREATE INDEX IF NOT EXISTS assistant_messages_user_id_idx ON assistant_messages (user_id);
 
 -- Phase 2: Tasks — first-class work items (blueprint Section 10). No delete

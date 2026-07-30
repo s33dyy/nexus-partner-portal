@@ -19,6 +19,11 @@ import { z } from "zod";
 import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
+import { DealLineItems } from "@/components/deal-line-items";
+import { DealRegistrationBadge } from "@/components/deal-registration-badge";
+import { DealOutcomeReview } from "@/components/deal-outcome-review";
+import { DealParticipantTags } from "@/components/deal-participant-tags";
+import { DealActivityTimeline } from "@/components/deal-activity-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2186,6 +2191,7 @@ function DealsPage() {
                 {selectedDeal ? (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
+                      <DealRegistrationBadge dealId={selectedDeal.id} status={selectedDeal.status} commercialApproved={selectedDeal.commercial_approved} onUpdated={load} />
                       <Badge>{selectedDeal.stage}</Badge>
                       <Badge variant="secondary">{selectedDeal.amount}</Badge>
                       <Badge variant="outline">{selectedDeal.currency_code || "USD"}</Badge>
@@ -2441,6 +2447,14 @@ function DealsPage() {
                         )
                       }
                     />
+                    <Separator />
+                    <DealLineItems dealId={selectedDeal.id} dealStage={selectedDeal.stage} />
+                    <Separator />
+                    <DealParticipantTags dealId={selectedDeal.id} />
+                    <Separator />
+                    <DealOutcomeReview dealId={selectedDeal.id} dealStage={selectedDeal.stage} commercialApproved={selectedDeal.commercial_approved} />
+                    <Separator />
+                    <DealActivityTimeline dealId={selectedDeal.id} />
                     <Separator />
                     <div className="space-y-2">
                       <Label>Quick note</Label>
