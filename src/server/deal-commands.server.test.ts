@@ -421,3 +421,113 @@ test("resolveDealCommandActor denies when the caller has no active context", asy
   const result = resolveDealCommandActor({ userId: null, assignment: null, activeContext: null });
   expect(result.ok).toBe(false);
 });
+
+function installFakeCreatePool() {
+  return async () => {
+    const { pool } = await import("@/server/postgres.server");
+    const calls: string[] = [];
+    const insertCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+    const fakeClient = {
+      query: async (sql: string, params?: unknown[]) => {
+        const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
+        calls.push(verb);
+        if (verb === "INSERT") {
+          insertCalls.push({ sql, params: params ?? [] });
+        }
+        return { rows: [], rowCount: 1 };
+      },
+      release: () => undefined,
+    };
+
+    const originalConnect = pool.connect.bind(pool);
+    pool.connect = (async () => fakeClient) as typeof pool.connect;
+
+    return {
+      calls,
+      insertCalls,
+      restore: () => {
+        pool.connect = originalConnect as typeof pool.connect;
+      },
+    };
+  };
+}
+
+test("createDeal rejects a request missing required fields", async () => {
+  const harness = await installFakeCreatePool()();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const actor = buildActor();
+    const result = await createDeal({
+      actor,
+      data: {
+        accountName: "",
+        contactName: "Jane Doe",
+        product: "WC350",
+        amount: "1000",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal forces a partner-scoped actor's own partner onto the new deal", async () => {
+  const harness = await installFakeCreatePool()();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "partner_admin",
+      teamDomain: "partner_success",
+      partnerId: "partner-own",
+    });
+    const result = await createDeal({
+      actor,
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        ownerName: "Jane Doe",
+        product: "WC350",
+        amount: "1000",
+        source: "manual",
+        partnerId: "partner-someone-elses",
+      },
+    });
+    expect(result.ok).toBe(true);
+    const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
+    expect(dealInsert?.params[26]).toBe("partner-own");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal succeeds and auto-approves a deal at or below the USD 5,000 threshold", async () => {
+  const harness = await installFakeCreatePool()();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const actor = buildActor();
+    const result = await createDeal({
+      actor,
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        ownerName: "Jane Doe",
+        product: "WC350",
+        amount: "5000",
+        source: "assistant",
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.newVersion).toBe(1);
+      expect(result.commandName).toBe("deal.create");
+    }
+    const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
+    expect(dealInsert?.params[8]).toBe("approved");
+  } finally {
+    harness.restore();
+  }
+});

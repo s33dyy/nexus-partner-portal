@@ -125,6 +125,11 @@ function getGenericScopeSpec(
         return buildGenericScope(`"company_name" = $1`, [companyName]);
       }
       return userId ? buildGenericScope(`"user_id" = $1`, [userId]) : null;
+    case "tasks":
+      if (partnerId) {
+        return buildGenericScope(`"partner_id" = $1`, [partnerId]);
+      }
+      return userId ? buildGenericScope(`"creator_id" = $1`, [userId]) : null;
     case "portal_deal_collaborators":
       if (partnerId) {
         return buildGenericScope(
@@ -286,6 +291,15 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
             fallbackColumn: "created_by",
           }
         : { kind: "column", column: "created_by", value: auth.userId };
+    case "tasks":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "creator_id",
+          }
+        : { kind: "column", column: "creator_id", value: auth.userId };
     case "portal_team_members":
       return { kind: "column", column: "company_name", value: auth.companyName };
     case "portal_deal_collaborators":

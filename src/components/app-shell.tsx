@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AssistantPanel } from "@/components/assistant-panel";
 import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { RegionFilterSelect } from "@/components/region-filter-select";
 import { supabase } from "@/integrations/local/client";
@@ -150,6 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
               {statusLabel[status]}
             </Badge>
+            <AssistantPanel />
             <Button asChild variant="ghost" size="icon" aria-label="Notifications">
               <Link to="/notifications" className="relative">
                 <Bell className="h-4 w-4" />

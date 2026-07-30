@@ -4,6 +4,7 @@
 
 - Phase 2: Deals, Pricing, Pipeline, Tasks, and Rewards
 - Checkpoint: deal lifecycle domain commands (2C slice: stage transitions, Won/Lost) landed; customer merge/participant governance and pricing foundations landed previously; identity.change_user_role added as a named command (closes a live "Edit user" bug); broader phase 2 still in progress
+- Checkpoint (2026-07-30): deal creation joined the named-command path (`deal.create`); a first slice of Phase 2's Tasks module landed end-to-end (schema, named commands, workspace route); named Ticket lifecycle commands landed over the existing Support module; a scoped Phase 3 slice landed — an Assistant (chatbot) restricted to drafting/creating a Deal and listing/monitoring the caller's own Deals, backed by OpenRouter with dynamic cheapest-model selection. See "2026-07-30 session" below for detail and explicitly deferred items.
 - Previous checkpoint: Phase 0 (0A-0E) complete
 - Phase 1 status: data model (tenant/geography/assignment/active-context) is in place, but a dedicated audit found Phase 1 enforcement is **not** at its exit gate — see "Phase 1 Audit Findings" below. Phase 2 work is proceeding on top of this partial foundation per explicit user direction rather than blocking on full Phase 1 closure.
 
@@ -84,6 +85,10 @@ While investigating a live report that "Users & Roles" showed only 1 user for a 
 - Added `src/integrations/local/deal-commands.ts` exposing the above as TanStack `createServerFn` calls, resolving the caller's actor from `getAuthContext()` server-side.
 - Wired `src/routes/_authenticated/deals.tsx` (`advance`, `closeAs`) and `src/routes/_authenticated/pipeline.tsx` (`moveDeal`) to call the new commands instead of writing `stage`/`status` directly via `supabase.from("portal_deals").update(...)`. Non-lifecycle field edits (notes, deal detail editing) still use the existing generic update path, since the "no direct stage/status writes" rule is specifically about lifecycle fields.
 - Added `src/server/deal-commands.server.test.ts`: policy allow/deny (assignment-inactive, partner-mismatch, geography fail-closed), optimistic-concurrency conflict, valid/invalid forward and backward transitions, terminal-stage rejection for Won/Lost, and existence-leak-safe denial for a missing deal.
+- Added `deal.create` named command and wired the manual deal-creation form to it (see "Added: `deal.create`..." below for full detail).
+- Added the Assistant (chatbot): `src/server/openrouter.server.ts`, `src/domain/contracts/assistant.ts`, `src/server/assistant.server.ts`, `src/integrations/local/assistant.ts`, `src/components/assistant-panel.tsx`, and the `assistant_messages` schema table — scoped to drafting/creating a Deal and listing the caller's own Deals only.
+- Added the Tasks module: `tasks`/`task_transitions` schema tables, `src/server/task-commands.server.ts`, `src/integrations/local/task-commands.ts`, `src/routes/_authenticated/tasks.tsx`, and a sidebar nav entry.
+- Added named Ticket lifecycle commands (`src/server/ticket-commands.server.ts`, `src/integrations/local/ticket-commands.ts`) and wired `support.tsx` to them in place of raw inserts/updates.
 
 ## Remaining Items
 
@@ -98,6 +103,10 @@ While investigating a live report that "Users & Roles" showed only 1 user for a 
 - Add route-level denial and fallback states for the remaining partner-facing screens.
 - Expand RBAC/tenant-isolation test coverage toward the full role × scope × assignment-state matrix required by the blueprint.
 - ~~Known broken feature: `admin.users.tsx`'s "Edit user" role-change flow~~ — **fixed** (see below). `assignments`/`active_contexts`/`sessions` remain read-only via the generic path with no named commands yet; that part of gap 4 is still open.
+- Insight Hub / learning (blueprint §14) — not started; needs its own schema and command layer.
+- PO-review-gated reward issuance (blueprint §15) — no PO-review workflow exists yet, so `Approved Won` is never reached and no reward is ever released; `PO_REVIEW_STATE_MACHINE` exists unwired in `domain/contracts/state-machine.ts`.
+- Real provider wiring for Zoho Books, WhatsApp Business Platform, GyFTR/QuickSilver, and DHL (blueprint §17) — no credentials/accounts exist in this environment.
+- This environment's `bun run dev` 404s on every route ("Cannot GET /") — reproduces on the unmodified codebase, so it predates and is unrelated to the 2026-07-30 session's changes, but it blocks interactive browser verification of any UI work until fixed.
 
 ### Fixed: "Edit user" role-change flow via a real named command (2026-07-30)
 
@@ -119,10 +128,37 @@ Since `seedGovernedReferenceData` only runs from the destructive `scripts/bootst
 
 Added `reference-data.test.ts`: asserts both buckets' seeded values are exactly `ROLE_KEYS` with no spaces.
 
+### Added: `deal.create` named command, a Tasks module, named Ticket commands, and a scoped Assistant/chatbot (2026-07-30)
+
+Session scope, per explicit user direction: extend the existing architecture (not a rewrite) as far down the blueprint's own priority order (§20.1) as one session reasonably allows, plus a chatbot restricted to creating and monitoring Deals only, backed by OpenRouter always auto-selecting the cheapest available chat model.
+
+**`deal.create`** (`src/server/deal-commands.server.ts`): the first named command for Deal *creation*, following the exact pattern of the existing stage-transition commands (governed policy check, transactional `portal_deals` insert plus `deal_transitions`/`domain_activity_events`/`command_outbox` rows). Partner-scoped actors always get their own `partner_id` forced onto the new deal (a client-supplied `partnerId` is ignored) rather than trusted from input. Region auto-resolves from country via the existing `world-geography.ts` Sales Region mapping when not given. `src/routes/_authenticated/deals.tsx`'s manual "create deal" form now calls this command instead of a raw `supabase.from("portal_deals").insert(...)`, so the UI and the new Assistant create deals through the identical governed path (blueprint §12.3/§18.5). 3 new regression tests added to `deal-commands.server.test.ts`.
+
+**Assistant (chatbot)** — deliberately narrow scope: it may only (a) draft a new Deal from free text for explicit user confirmation, or (b) list/describe the caller's own authorised Deals. Nothing else is wired up as a capability, so there's no reliance on the model "behaving" — the code simply has no handler for anything else.
+- `src/server/openrouter.server.ts`: fetches OpenRouter's `/models` pricing list and picks the cheapest chat-capable entry by `prompt + completion` price (cached ~1h; falls back to a small fixed model if the pricing fetch fails). `runChatCompletion()` calls `/chat/completions` with whichever model that resolves to.
+- The model is used only for intent classification and field extraction from free text, via a single-JSON-object response contract (`src/server/assistant.server.ts`'s `SYSTEM_PROMPT`) — every Deal list or draft preview shown to the user is built by server code from real `portal_deals` rows (via the existing `queryTable()`/`table-policy.server.ts` scoping, no new policy surface), never invented by the model. A malformed/unparseable model response degrades to showing the raw text with no action executed, rather than erroring.
+- Confirmation is a separate explicit step (`confirmAssistantDeal`) that calls `deal.create` — the model never executes a write itself.
+- New append-only `assistant_messages` table (`db/schema.sql`) logs every turn: user text, proposed action, retrieved deal IDs, confirmation, outcome, model used, correlation ID. No delete path anywhere.
+- UI: `src/components/assistant-panel.tsx`, a slide-over chat panel launched from a new header icon in `src/components/app-shell.tsx` (text-only, matching blueprint §12.1's release requirement — no voice).
+- `OPENROUTER_API_KEY` added to `.env` (and a placeholder in `.env.example`); never hardcoded in source.
+
+**Tasks module** (blueprint §10 — previously 0% built, only unused taxonomy constants existed): new `tasks`/`task_transitions` schema tables, `src/server/task-commands.server.ts` (`createTask`, `transitionTask`), and `src/routes/_authenticated/tasks.tsx` (My Tasks workspace with status tabs and lifecycle actions). The existing canonical `TASK_STATE_MACHINE` in `domain/contracts/state-machine.ts` is a generic placeholder (`draft/queued/open/in_progress/blocked/waiting/done/canceled`, with `done`/`canceled` as dead-end terminal states) that predates this module and doesn't match §10.2's specific 5-state model with reopen-with-reason transitions — this module implements §10.2 directly instead, the same way `deal-commands.server.ts` already intentionally diverges from the mismatched canonical 8-stage deal list. 8 regression tests added.
+
+**Named Ticket commands** over the existing partial Support implementation: `src/server/ticket-commands.server.ts` (`createTicket`, `addTicketReply`, `acceptTicket`, `markTicketWaitingOnPartner`, `closeTicket`, `requestReopen`, `decideReopen`), wired into `src/routes/_authenticated/support.tsx` in place of its previous raw inserts/updates. Same taxonomy-mismatch situation as Tasks: the canonical `TICKET_STATE_MACHINE` (8 states: `open/triaged/waiting_on_partner/waiting_on_livey/resolved/closed/reopened/canceled`) doesn't match §13.4's 5-label lifecycle or the `support_tickets.status` values already live in the database (`open/in_progress/waiting_on_partner/closed`) — this module implements §13.4's actual states/transitions directly. Only LIVEY Support/Super Admin can accept/close/decide-reopen; a Partner requester can only request a reopen, never reopen directly, matching §13.5. A reply only auto-transitions status in the one case §13.4 defines (`waiting_on_partner` → `in_progress` on a Partner reply); replying otherwise never changes status. 11 regression tests added.
+
+**Scope decision on "no deletions... create deals and monitor deals with chatbot"**: read as scoping the *chatbot's* own capabilities, not as a mandate to remove pre-existing unrelated delete affordances elsewhere in the app (e.g. `admin.news.tsx`/`admin.rewards.tsx` catalog-item delete, draft-document removal before submission). Those are untouched — flagged here in case that reading needs correcting.
+
+**Explicitly deferred, not silently dropped:**
+- Insight Hub / learning (blueprint §14) — no schema, no route, still only unused `LEARNING_STATUSES`/`LEARNING_STATE_MACHINE` taxonomy constants. Not attempted this session; would need its own schema (Track/Subject/Lesson/Enrollment/Assessment/Certificate) and command layer sized similarly to Tasks/Tickets above.
+- PO-review-gated reward issuance (blueprint §15) — `markDealWon` still does not create any reward, which is *correct* per §15.11 ("points are not created when Deal is merely marked Won"), but there is still no PO-review workflow to ever reach `Approved Won` and actually release one. `PO_REVIEW_STATE_MACHINE` already exists in `domain/contracts/state-machine.ts` unwired. Not attempted this session.
+- Zoho Books, WhatsApp Business Platform, GyFTR/QuickSilver, DHL (blueprint §17, phase 6) — no real provider credentials/accounts exist in this environment; building these now would only produce non-functional stubs, which the blueprint itself prohibits ("no client-only approximation of a later security requirement"). Zoho **Sign** (agreement e-signature) was already implemented before this session and is untouched.
+- Verification of this session's UI changes was via `bun test` (202/202 pass, including 36 new/updated tests), `bunx tsc --noEmit` (clean on every touched/new file), and `bun run build` (production build succeeds, all new route/command chunks bundle). Interactive browser verification could not be completed: this environment's `bun run dev` returns a bare 404 ("Cannot GET /") for every route, confirmed to reproduce identically on the unmodified pre-session codebase (via `git stash`), so it is a pre-existing environment issue unrelated to these changes, not something this session introduced or fixed.
+
 ## Migrations Created
 
 - No separate migration file yet; the additive changes are in `db/schema.sql`.
 - Latest additive changes: `portal_deals.version` (optimistic concurrency, default 1) and the append-only `deal_transitions` table with a `deal_transitions_deal_id_idx` index.
+- 2026-07-30: added `assistant_messages` (append-only chatbot conversation/audit log), `tasks` + `task_transitions` (Tasks module). No changes to `support_tickets`/`support_ticket_comments` schema — the new Ticket commands reuse the existing columns.
 
 ## Feature Flags
 

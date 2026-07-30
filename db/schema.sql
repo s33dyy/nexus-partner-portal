@@ -1296,3 +1296,73 @@ CREATE TABLE IF NOT EXISTS deal_transitions (
 );
 
 CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (deal_id);
+
+-- Phase 3 (partial): Assistant (chatbot), scoped to deal creation + monitoring.
+-- Append-only conversation/audit log — no delete surface anywhere in the app.
+CREATE TABLE IF NOT EXISTS assistant_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL,
+  user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  proposed_action TEXT,
+  action_payload JSONB,
+  retrieved_deal_ids UUID[] NOT NULL DEFAULT '{}',
+  confirmed BOOLEAN,
+  outcome TEXT,
+  model TEXT,
+  correlation_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS assistant_messages_conversation_id_idx ON assistant_messages (conversation_id);
+CREATE INDEX IF NOT EXISTS assistant_messages_user_id_idx ON assistant_messages (user_id);
+
+-- Phase 2: Tasks — first-class work items (blueprint Section 10). No delete
+-- surface: closing out work is a status ("cancelled"), never a row removal.
+CREATE TABLE IF NOT EXISTS tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'to_do',
+  priority TEXT NOT NULL DEFAULT 'medium',
+  related_type TEXT,
+  related_id UUID,
+  assignee_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  creator_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  due_at TIMESTAMPTZ,
+  blocked_reason TEXT,
+  completed_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS tasks_assignee_id_idx ON tasks (assignee_id);
+CREATE INDEX IF NOT EXISTS tasks_partner_id_idx ON tasks (partner_id);
+CREATE INDEX IF NOT EXISTS tasks_related_idx ON tasks (related_type, related_id);
+
+DROP TRIGGER IF EXISTS tasks_updated_at ON tasks;
+CREATE TRIGGER tasks_updated_at
+BEFORE UPDATE ON tasks
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS task_transitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  command_name TEXT NOT NULL,
+  from_status TEXT NOT NULL,
+  to_status TEXT NOT NULL,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  reason TEXT,
+  correlation_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS task_transitions_task_id_idx ON task_transitions (task_id);

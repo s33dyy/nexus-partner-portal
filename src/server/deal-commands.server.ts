@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { PoolClient } from "pg";
 
 import {
@@ -13,7 +15,13 @@ import {
   type PolicyDecision,
 } from "@/domain/contracts/governance";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
-import { DEAL_STAGE_ORDER, type DealStage } from "@/lib/portal-records";
+import { SALES_REGIONS, resolveCountryForText } from "@/domain/contracts/world-geography";
+import {
+  DEAL_STAGE_ORDER,
+  parseDealAmount,
+  requiresSuperAdminApproval,
+  type DealStage,
+} from "@/lib/portal-records";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
 import {
   resolveGovernedActor,
@@ -424,5 +432,217 @@ export async function markDealWon(input: {
       sql: "probability = $6, close_date = $7",
       values: [100, todayIsoDate()],
     }),
+  });
+}
+
+export type CreateDealInput = {
+  accountName: string;
+  contactName: string;
+  ownerName?: string | null;
+  country?: string | null;
+  region?: string | null;
+  product: string;
+  quantity?: number | null;
+  amount: string;
+  currencyCode?: string | null;
+  amountValue?: number | null;
+  amountUsd?: number | null;
+  customerBudget?: string | null;
+  possibleCloseDate?: string | null;
+  closeDate?: string | null;
+  source: string;
+  notes?: string | null;
+  partnerId?: string | null;
+  customerId?: string | null;
+  pocProfileId?: string | null;
+  rewardRatePercent?: number | null;
+};
+
+function resolveCreatePartnerId(actor: DealCommandActor, requested: string | null): string | null {
+  const role = actor.assignment.roleKey;
+  if (role === "partner_admin" || role === "partner_user" || role === "restricted_distributor") {
+    // Partner-scoped roles can only ever create a deal in their own partner
+    // tenant — a client-supplied partnerId is ignored rather than trusted,
+    // matching the "no trusted role/partner/org supplied by the client" rule.
+    return actor.assignment.partnerId ?? null;
+  }
+  return requested;
+}
+
+async function resolveOwnerName(tx: PoolClient, userId: string): Promise<string> {
+  const { rows } = await tx.query(
+    `SELECT full_name, company_name FROM profiles WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  const row = rows[0] as { full_name: string | null; company_name: string | null } | undefined;
+  return row?.full_name?.trim() || row?.company_name?.trim() || "Team Member";
+}
+
+function resolveRegionForCountry(country: string): string {
+  const match = resolveCountryForText(country);
+  if (!match) return "Unassigned";
+  const region = SALES_REGIONS.find((candidate) => candidate.key === match.regionKey);
+  return region?.name ?? "Unassigned";
+}
+
+export async function createDeal(input: {
+  actor: DealCommandActor;
+  data: CreateDealInput;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  const data = input.data;
+
+  const accountName = data.accountName.trim();
+  const contactName = data.contactName.trim();
+  const product = data.product.trim();
+  const amount = data.amount.trim();
+  const source = (data.source || "manual").trim();
+
+  if (!accountName || !contactName || !product || !amount) {
+    return {
+      ok: false,
+      failure: validationFailure(
+        "Account, contact, product, and amount are required",
+        "accountName",
+      ),
+      correlationId,
+    };
+  }
+
+  return withTransaction(async (tx) => {
+    const resolvedPartnerId = resolveCreatePartnerId(input.actor, data.partnerId ?? null);
+    const policy = authorizeDealActor(input.actor, { partner_id: resolvedPartnerId });
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    const country = data.country?.trim() || "India";
+    const region = data.region?.trim() || resolveRegionForCountry(country);
+    const currencyCode = (data.currencyCode?.trim() || "USD").toUpperCase();
+    const amountValue = data.amountValue ?? parseDealAmount(amount);
+    const amountUsd = currencyCode === "USD" ? amountValue : (data.amountUsd ?? null);
+    const autoApproved = !requiresSuperAdminApproval(amountUsd ?? amountValue);
+    const status = autoApproved ? "approved" : "submitted";
+    const stage: DealStage = "sourced";
+    const ownerName = data.ownerName?.trim() || (await resolveOwnerName(tx, input.actor.userId));
+    const closeDate = data.closeDate || data.possibleCloseDate || todayIsoDate();
+    const quantity = data.quantity && data.quantity > 0 ? Math.floor(data.quantity) : 1;
+    const rewardRatePercent = data.rewardRatePercent ?? 5;
+    const dealId = randomUUID();
+
+    await tx.query(
+      `INSERT INTO portal_deals (
+         id, account_name, contact_name, owner_name, country, region, product,
+         stage, status, quantity, amount, currency_code, amount_value, amount_usd,
+         fx_rate, fx_provider, customer_budget, probability, possible_close_date,
+         close_date, source, last_touch, notes, is_hidden_to_team,
+         reward_rate_percent, is_seed, user_id, partner_id, customer_id,
+         poc_profile_id, version
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,FALSE,$26,$27,$28,$29,1
+       )`,
+      [
+        dealId,
+        accountName,
+        contactName,
+        ownerName,
+        country,
+        region,
+        product,
+        stage,
+        status,
+        quantity,
+        amount,
+        currencyCode,
+        amountValue,
+        amountUsd,
+        currencyCode === "USD" ? 1 : null,
+        currencyCode === "USD" ? "internal" : null,
+        data.customerBudget?.trim() || null,
+        0,
+        data.possibleCloseDate || null,
+        closeDate,
+        source,
+        `Created via ${source}`.slice(0, 200),
+        data.notes?.trim() || "",
+        false,
+        rewardRatePercent,
+        input.actor.userId,
+        resolvedPartnerId,
+        data.customerId ?? null,
+        data.pocProfileId ?? null,
+      ],
+    );
+
+    const creationPayload = {
+      accountName,
+      product,
+      amount,
+      currencyCode,
+      amountUsd,
+      source,
+      autoApproved,
+    };
+
+    await tx.query(
+      `INSERT INTO deal_transitions (
+         deal_id, command_name, from_stage, to_stage, from_status, to_status,
+         actor_user_id, assignment_id, reason, correlation_id
+       ) VALUES ($1,$2,'(created)',$3,'(created)',$4,$5,$6,NULL,$7)`,
+      [
+        dealId,
+        "deal.create",
+        stage,
+        status,
+        input.actor.userId,
+        input.actor.assignment.assignmentId,
+        correlationId,
+      ],
+    );
+
+    await tx.query(
+      `INSERT INTO domain_activity_events (
+         tenant_id, organization_tenant_id, subject_type, subject_id,
+         actor_user_id, assignment_id, correlation_id, event_name, schema_version, payload
+       ) VALUES ($1,$2,'deal',$3,$4,$5,$6,'deal.created',$7,$8)`,
+      [
+        input.actor.assignment.tenantId,
+        input.actor.assignment.organizationTenantId,
+        dealId,
+        input.actor.userId,
+        input.actor.assignment.assignmentId,
+        correlationId,
+        DEAL_EVENT_SCHEMA_VERSION,
+        JSON.stringify(creationPayload),
+      ],
+    );
+
+    await appendOutboxEnvelope(
+      tx,
+      createOutboxEnvelope({
+        eventName: "deal.created",
+        schemaVersion: DEAL_EVENT_SCHEMA_VERSION,
+        aggregateType: "deal",
+        aggregateId: dealId,
+        tenantId: input.actor.assignment.tenantId,
+        organizationTenantId: input.actor.assignment.organizationTenantId,
+        actorUserId: input.actor.userId,
+        assignmentId: input.actor.assignment.assignmentId,
+        correlationId,
+        idempotencyKey: null,
+        publishAfter: null,
+        payload: creationPayload,
+      }),
+    );
+
+    return {
+      ok: true,
+      commandName: "deal.create",
+      subjectId: dealId,
+      newVersion: 1,
+      nextAuthorisedActions: nextAuthorisedActions(stage),
+      correlationId,
+    };
   });
 }

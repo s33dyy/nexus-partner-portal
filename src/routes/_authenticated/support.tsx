@@ -13,6 +13,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { supabase } from "@/integrations/local/client";
+import {
+  acceptTicket,
+  addTicketReply,
+  closeTicket,
+  createTicket as createTicketCommand,
+  decideReopen,
+  markTicketWaitingOnPartner,
+  requestReopen,
+} from "@/integrations/local/ticket-commands";
 import { formatDateTimeLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { type SupportTicketCommentRecord, type SupportTicketRecord } from "@/lib/portal-records";
@@ -134,28 +143,22 @@ function SupportPage() {
 
     setCreating(true);
     try {
-      const now = new Date().toISOString();
-      const ticketId = globalThis.crypto.randomUUID();
-      const { error } = await supabase.from("support_tickets").insert({
-        id: ticketId,
-        partner_id: profile?.partner_id ?? null,
-        created_by: profile?.id ?? null,
-        created_by_name: profile?.full_name ?? "LIVEY User",
-        subject: ticketDraft.subject.trim(),
-        description: ticketDraft.description.trim(),
-        status: "open",
+      const result = await createTicketCommand({
+        subject: ticketDraft.subject,
+        description: ticketDraft.description,
         priority: ticketDraft.priority,
-        assignee_name: null,
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
+        partnerId: profile?.partner_id ?? null,
+        creatorName: profile?.full_name ?? "LIVEY User",
       });
-      if (error) throw error;
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
 
       setTicketDraft({ subject: "", description: "", priority: "medium" });
       toast.success("Support ticket created");
       await loadTickets();
-      setSelectedId(ticketId);
+      setSelectedId(result.subjectId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create ticket");
     } finally {
@@ -163,22 +166,40 @@ function SupportPage() {
     }
   };
 
-  const saveTicketMeta = async () => {
-    if (!selectedTicket || !hasRole("super_admin")) return;
+  const applyTicketAction = async (
+    action: () => Promise<{ ok: boolean; failure?: { message: string } }>,
+    successMessage: string,
+  ) => {
+    if (!selectedTicket) return;
+    setSavingMeta(true);
+    try {
+      const result = await action();
+      if (!result.ok) {
+        toast.error(result.failure?.message ?? "That action failed");
+        return;
+      }
+      toast.success(successMessage);
+      await loadTickets();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update ticket");
+    } finally {
+      setSavingMeta(false);
+    }
+  };
 
+  const saveTicketPriority = async () => {
+    if (!selectedTicket || !hasRole("super_admin")) return;
     setSavingMeta(true);
     try {
       const { error } = await supabase
         .from("support_tickets")
         .update({
-          status: metaDraft.status,
           priority: metaDraft.priority,
           assignee_name: metaDraft.assignee_name.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedTicket.id);
       if (error) throw error;
-
       toast.success("Ticket updated");
       await loadTickets();
     } catch (error) {
@@ -197,27 +218,20 @@ function SupportPage() {
 
     setSavingReply(true);
     try {
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("support_ticket_comments").insert({
-        id: globalThis.crypto.randomUUID(),
-        ticket_id: selectedTicket.id,
-        author_id: profile?.id ?? null,
-        author_name: profile?.full_name ?? "LIVEY User",
-        author_role: hasRole("super_admin")
+      const result = await addTicketReply({
+        ticketId: selectedTicket.id,
+        body: replyDraft,
+        authorName: profile?.full_name ?? "LIVEY User",
+        authorRole: hasRole("super_admin")
           ? "super_admin"
           : hasRole("partner_admin")
             ? "partner_admin"
             : "partner_user",
-        body: replyDraft.trim(),
-        is_seed: false,
-        created_at: now,
       });
-      if (error) throw error;
-
-      await supabase
-        .from("support_tickets")
-        .update({ updated_at: now })
-        .eq("id", selectedTicket.id);
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
 
       setReplyDraft("");
       toast.success("Reply added");
@@ -249,7 +263,9 @@ function SupportPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{hasRole("super_admin") ? "All tickets" : "Partner-scoped"}</Badge>
+          <Badge variant="secondary">
+            {hasRole("super_admin") ? "All tickets" : "Partner-scoped"}
+          </Badge>
           <Button
             variant="outline"
             onClick={() => {
@@ -273,7 +289,9 @@ function SupportPage() {
           <Card>
             <CardHeader className="border-b">
               <CardTitle className="text-base">Create ticket</CardTitle>
-              <CardDescription>Start a new support conversation for your partner workspace.</CardDescription>
+              <CardDescription>
+                Start a new support conversation for your partner workspace.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-2">
@@ -342,7 +360,9 @@ function SupportPage() {
                   Loading tickets...
                 </div>
               ) : filteredTickets.length === 0 ? (
-                <div className="p-6 text-sm text-muted-foreground">No tickets found for this view.</div>
+                <div className="p-6 text-sm text-muted-foreground">
+                  No tickets found for this view.
+                </div>
               ) : (
                 <div className="divide-y">
                   {filteredTickets.map((ticket) => (
@@ -378,7 +398,9 @@ function SupportPage() {
 
         <Card>
           <CardHeader className="border-b">
-            <CardTitle className="text-base">{selectedTicket?.subject ?? "Ticket detail"}</CardTitle>
+            <CardTitle className="text-base">
+              {selectedTicket?.subject ?? "Ticket detail"}
+            </CardTitle>
             <CardDescription>
               {selectedTicket
                 ? "Review the current status and continue the conversation below."
@@ -406,55 +428,145 @@ function SupportPage() {
                 </div>
 
                 {hasRole("super_admin") ? (
-                  <div className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
-                    <div className="grid gap-2">
-                      <Label>Status</Label>
-                      <select
-                        value={metaDraft.status}
-                        onChange={(event) =>
-                          setMetaDraft((current) => ({ ...current, status: event.target.value }))
+                  <div className="space-y-3 rounded-xl border p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {selectedTicket.status === "open" && (
+                        <Button
+                          size="sm"
+                          disabled={savingMeta}
+                          onClick={() =>
+                            void applyTicketAction(
+                              () => acceptTicket({ ticketId: selectedTicket.id }),
+                              "Ticket accepted",
+                            )
+                          }
+                        >
+                          Accept
+                        </Button>
+                      )}
+                      {selectedTicket.status === "in_progress" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={savingMeta}
+                          onClick={() =>
+                            void applyTicketAction(
+                              () => markTicketWaitingOnPartner({ ticketId: selectedTicket.id }),
+                              "Marked waiting on partner",
+                            )
+                          }
+                        >
+                          Wait on partner
+                        </Button>
+                      )}
+                      {(selectedTicket.status === "open" ||
+                        selectedTicket.status === "in_progress" ||
+                        selectedTicket.status === "waiting_on_partner") && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={savingMeta}
+                          onClick={() =>
+                            void applyTicketAction(
+                              () => closeTicket({ ticketId: selectedTicket.id }),
+                              "Ticket closed",
+                            )
+                          }
+                        >
+                          Close
+                        </Button>
+                      )}
+                      {selectedTicket.status === "reopen_requested" && (
+                        <>
+                          <Button
+                            size="sm"
+                            disabled={savingMeta}
+                            onClick={() =>
+                              void applyTicketAction(
+                                () => decideReopen({ ticketId: selectedTicket.id, approve: true }),
+                                "Reopen approved",
+                              )
+                            }
+                          >
+                            Approve reopen
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={savingMeta}
+                            onClick={() =>
+                              void applyTicketAction(
+                                () => decideReopen({ ticketId: selectedTicket.id, approve: false }),
+                                "Reopen rejected",
+                              )
+                            }
+                          >
+                            Reject reopen
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label>Priority</Label>
+                        <select
+                          value={metaDraft.priority}
+                          onChange={(event) =>
+                            setMetaDraft((current) => ({
+                              ...current,
+                              priority: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                        </select>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Assignee</Label>
+                        <Input
+                          value={metaDraft.assignee_name}
+                          onChange={(event) =>
+                            setMetaDraft((current) => ({
+                              ...current,
+                              assignee_name: event.target.value,
+                            }))
+                          }
+                          placeholder="LIVEY owner"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => void saveTicketPriority()}
+                          disabled={savingMeta}
+                        >
+                          {savingMeta ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Save priority & assignee
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedTicket.status === "closed" ? (
+                  <div className="rounded-xl border p-4">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const reason = window.prompt("Why should this ticket reopen?");
+                        if (reason && reason.trim()) {
+                          void applyTicketAction(
+                            () =>
+                              requestReopen({ ticketId: selectedTicket.id, reason: reason.trim() }),
+                            "Reopen requested",
+                          );
                         }
-                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="open">Open</option>
-                        <option value="in_progress">In progress</option>
-                        <option value="waiting_on_partner">Waiting on partner</option>
-                        <option value="closed">Closed</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Priority</Label>
-                      <select
-                        value={metaDraft.priority}
-                        onChange={(event) =>
-                          setMetaDraft((current) => ({ ...current, priority: event.target.value }))
-                        }
-                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Assignee</Label>
-                      <Input
-                        value={metaDraft.assignee_name}
-                        onChange={(event) =>
-                          setMetaDraft((current) => ({
-                            ...current,
-                            assignee_name: event.target.value,
-                          }))
-                        }
-                        placeholder="LIVEY owner"
-                      />
-                    </div>
-                    <div className="md:col-span-3">
-                      <Button onClick={() => void saveTicketMeta()} disabled={savingMeta}>
-                        {savingMeta ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Save ticket updates
-                      </Button>
-                    </div>
+                      }}
+                    >
+                      Request reopen
+                    </Button>
                   </div>
                 ) : null}
 
@@ -471,7 +583,8 @@ function SupportPage() {
                       <div key={comment.id} className="rounded-lg border p-4">
                         <div className="text-sm font-medium">{comment.author_name}</div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          {comment.author_role.replace(/_/g, " ")} · {formatDateTimeLabel(comment.created_at)}
+                          {comment.author_role.replace(/_/g, " ")} ·{" "}
+                          {formatDateTimeLabel(comment.created_at)}
                         </div>
                         <div className="mt-3 text-sm">{comment.body}</div>
                       </div>

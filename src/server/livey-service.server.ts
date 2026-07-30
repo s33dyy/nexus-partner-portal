@@ -522,6 +522,26 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
   ],
+  tasks: [
+    "id",
+    "title",
+    "description",
+    "status",
+    "priority",
+    "related_type",
+    "related_id",
+    "assignee_id",
+    "creator_id",
+    "partner_id",
+    "due_at",
+    "blocked_reason",
+    "completed_at",
+    "cancelled_at",
+    "version",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
 };
 
 const SESSION_COOKIE = "livey_session";

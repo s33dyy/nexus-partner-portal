@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
+import type { CreateDealInput } from "@/server/deal-commands.server";
 import type { DealStage } from "@/lib/portal-records";
 
 async function resolveActorOrDenial() {
@@ -67,6 +68,15 @@ const markDealWonFn = createServerFn({ method: "POST" })
     });
   });
 
+const createDealFn = createServerFn({ method: "POST" })
+  .validator((input: CreateDealInput) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { createDeal } = await import("@/server/deal-commands.server");
+    return createDeal({ actor: actorResult.actor, data });
+  });
+
 const markDealLostFn = createServerFn({ method: "POST" })
   .validator((input: { dealId: string; expectedVersion: number; reason?: string | null }) => input)
   .handler(async ({ data }): Promise<CommandExecutionResult> => {
@@ -80,6 +90,10 @@ const markDealLostFn = createServerFn({ method: "POST" })
       reason: data.reason ?? null,
     });
   });
+
+export async function createDeal(input: CreateDealInput): Promise<CommandExecutionResult> {
+  return createDealFn({ data: input });
+}
 
 export async function moveDealStageForward(input: {
   dealId: string;

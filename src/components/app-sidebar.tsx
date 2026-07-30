@@ -14,6 +14,7 @@ import {
   Image,
   Sparkles,
   Trophy,
+  CheckSquare,
 } from "lucide-react";
 
 import {
@@ -43,6 +44,7 @@ type Item = {
 const workspace: Item[] = [
   { title: "Deals", url: "/deals", icon: Handshake },
   { title: "Pipeline", url: "/pipeline", icon: Kanban },
+  { title: "Tasks", url: "/tasks", icon: CheckSquare },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
 ];

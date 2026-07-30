@@ -39,6 +39,7 @@ import { listDropdownSourceValues } from "@/integrations/local/dropdown-sources"
 import { upsertLookupValue } from "@/integrations/local/lookups";
 import { supabase } from "@/integrations/local/client";
 import {
+  createDeal as createDealCommand,
   markDealLost,
   markDealWon,
   moveDealStageForward,
@@ -809,9 +810,7 @@ function DealsPage() {
     const pipeline = regionScopedDeals.reduce((sum, deal) => {
       return sum + getDealUsdAmount(deal);
     }, 0);
-    const open = regionScopedDeals.filter(
-      (deal) => !["won", "lost"].includes(deal.stage),
-    ).length;
+    const open = regionScopedDeals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
     const won = regionScopedDeals.filter((deal) => deal.stage === "won").length;
     const avgProbability = regionScopedDeals.length
       ? Math.round(
@@ -1296,45 +1295,47 @@ function DealsPage() {
     }
     setCreating(true);
     try {
-      const now = new Date().toISOString();
       const resolvedAmountValue = draft.amount_value ?? amountValue;
       const resolvedAmountUsd =
         draft.currency_code === "USD" ? resolvedAmountValue : (draft.amount_usd ?? null);
-      const payload = {
-        id: globalThis.crypto.randomUUID(),
-        ...draft,
-        partner_id: draft.partner_id ?? profile?.partner_id ?? null,
-        customer_id: draft.customer_id ?? null,
-        poc_profile_id: hasRole("partner_admin")
-          ? (profile?.id ?? null)
-          : isPartnerUser
-            ? (partnerAdminProfileId ?? profile?.id ?? null)
-            : (draft.poc_profile_id ?? profile?.id ?? null),
-        account_name: accountName,
-        contact_name: draft.contact_name.trim(),
-        owner_name: ownerName,
+      const pocProfileId = hasRole("partner_admin")
+        ? (profile?.id ?? null)
+        : isPartnerUser
+          ? (partnerAdminProfileId ?? profile?.id ?? null)
+          : (draft.poc_profile_id ?? profile?.id ?? null);
+
+      const result = await createDealCommand({
+        accountName,
+        contactName: draft.contact_name.trim(),
+        ownerName,
         country: draft.country || "India",
+        region: draft.region || null,
+        product: draft.product,
         quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
-        amount_value: resolvedAmountValue,
-        amount_usd: resolvedAmountUsd,
-        fx_rate: draft.currency_code === "USD" ? 1 : draft.fx_rate,
-        fx_provider: draft.currency_code === "USD" ? "internal" : draft.fx_provider,
-        fx_rate_fetched_at: draft.fx_rate_fetched_at ?? now,
-        customer_budget: draft.customer_budget.trim() || null,
-        possible_close_date: draft.possible_close_date || null,
-        close_date: draft.possible_close_date || draft.close_date || now.slice(0, 10),
-        status: autoApproved ? "approved" : "submitted",
-        probability: normalizeDealProbability(Number(draft.probability) || 0),
-        is_hidden_to_team: draft.is_hidden_to_team,
-        reward_rate_percent: Number(draft.reward_rate_percent) || 5,
-        user_id: profile?.id,
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
-      };
-      const { error } = await supabase.from("portal_deals").insert(payload);
-      if (error) throw error;
-      const collaboratorsSaved = await persistCollaboratorsSafely(payload.id, draftCollaborators);
+        amount: draft.amount,
+        currencyCode: draft.currency_code,
+        amountValue: resolvedAmountValue,
+        amountUsd: resolvedAmountUsd,
+        customerBudget: draft.customer_budget.trim() || null,
+        possibleCloseDate: draft.possible_close_date || null,
+        closeDate: draft.possible_close_date || draft.close_date || null,
+        source: draft.source || "manual",
+        notes: draft.notes || null,
+        partnerId: draft.partner_id ?? profile?.partner_id ?? null,
+        customerId: draft.customer_id ?? null,
+        pocProfileId,
+        rewardRatePercent: Number(draft.reward_rate_percent) || 5,
+      });
+
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+
+      const collaboratorsSaved = await persistCollaboratorsSafely(
+        result.subjectId,
+        draftCollaborators,
+      );
 
       await publishDealActivity({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
