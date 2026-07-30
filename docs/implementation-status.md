@@ -49,11 +49,15 @@
 - Extended customer records with merge and identity fields in `src/lib/portal-records.ts`.
 - Wired the customer screen to surface duplicate candidates, merge preview, participant history, and governed add/end flows in `src/routes/_authenticated/customers.tsx`.
 - Added focused tests for customer duplicate detection, merge planning, participant tag history, and route-compatible governance payloads.
+- Added fixed-point pricing helpers, canonical pricing tables, and timestamped FX snapshot support.
+- Added governed product, variant, SKU, combo, combo-component, price-book, and price-row builders plus archive/import validation helpers.
+- Added the canonical pricing validation bridge into the legacy catalog import path and surfaced pricing metadata on the admin catalog projection.
 
 ## Remaining Items
 
 - Finish deal-side participant tagging and coverage propagation.
-- Expand phase 2 from customer governance into pricing, price books, deal aggregates, stage commands, PO review, tasks, activity, and rewards.
+- Expand phase 2 into deal aggregates, stage commands, PO review, tasks, activity, and rewards.
+- Finish the remaining pricing projection polish once the canonical price-book editing flows are ready to land.
 - Update any legacy helpers that still need to import the canonical registries.
 - Add named assignment transition commands and session/context revocation flows.
 - Expand policy enforcement beyond the local generic-table path to explicit row-action commands, export/import/file flows, assistant retrieval, and worker/webhook entrypoints.

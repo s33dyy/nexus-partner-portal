@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { validatePricingImportRows } from "@/lib/pricing-domain";
+
 export const CATALOG_KINDS = ["product", "combo"] as const;
 
 export type CatalogKind = (typeof CATALOG_KINDS)[number];

@@ -174,3 +174,41 @@ test("catalog filtering splits products and combos cleanly", () => {
   expect(filterCatalogItemsByKind(items, "product").map((item) => item.id)).toEqual(["1"]);
   expect(filterCatalogItemsByKind(items, "combo").map((item) => item.id)).toEqual(["2"]);
 });
+
+test("legacy catalog imports keep the old export shape even when canonical pricing fields appear", () => {
+  const result = validateCatalogImportRows(
+    [
+      {
+        SKU: "LIVEY-LEGACY-001",
+        "Product Name": "LIVEY Legacy Bundle",
+        Category: "Hardware",
+        "Partner Tier": "Gold",
+        "List Price": "$350",
+        Margin: "20%",
+        Stock: "14",
+        Availability: "In stock",
+        Benefits: "Compatibility check",
+        "Catalog Kind": "combo",
+        price_book_code: "PB-LEGACY",
+        additional_discount: "$15",
+      },
+    ],
+    { kind: "combo" },
+  );
+
+  expect(result.errors).toEqual([]);
+  expect(result.rows).toEqual([
+    {
+      sku: "LIVEY-LEGACY-001",
+      product_name: "LIVEY Legacy Bundle",
+      category: "Hardware",
+      partner_tier: "Gold",
+      list_price: "$350",
+      margin: "20%",
+      stock: 14,
+      availability: "In stock",
+      benefits: "Compatibility check",
+      catalog_kind: "combo",
+    },
+  ]);
+});

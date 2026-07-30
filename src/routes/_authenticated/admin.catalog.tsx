@@ -48,6 +48,14 @@ import {
 } from "@/lib/catalog";
 import { useAuth } from "@/hooks/use-auth";
 
+type CatalogProjectionItem = CatalogItemRecord & {
+  product_code?: string | null;
+  product_status?: string | null;
+  price_book_code?: string | null;
+  price_book_version?: number | null;
+  archived_at?: string | null;
+};
+
 type CatalogForm = {
   sku: string;
   product_name: string;
@@ -98,7 +106,7 @@ export const Route = createFileRoute("/_authenticated/admin/catalog")({
 function AdminCatalogPage() {
   const { hasRole } = useAuth();
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [items, setItems] = useState<CatalogProjectionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -124,7 +132,7 @@ function AdminCatalogPage() {
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) throw error;
-      const rows = (data as CatalogItemRecord[] | null) ?? [];
+      const rows = (data as CatalogProjectionItem[] | null) ?? [];
       setItems(rows);
       setSource(rows.length > 0 ? "database" : "empty");
       const currentRows = filterCatalogItemsByKind(rows, moduleKind);
@@ -496,8 +504,16 @@ function AdminCatalogPage() {
                           {getCatalogKindLabel(normalizeCatalogKind(item.catalog_kind))}
                         </Badge>
                         <Badge variant="outline">{item.partner_tier}</Badge>
+                        {item.product_status ? <Badge variant="outline">{item.product_status}</Badge> : null}
+                        {item.price_book_code ? (
+                          <Badge variant="outline">
+                            {item.price_book_code}
+                            {item.price_book_version ? ` v${item.price_book_version}` : ""}
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
+                        {item.product_code ? `${item.product_code} · ` : ""}
                         {item.sku} · {item.category}
                       </div>
                     </div>

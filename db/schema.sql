@@ -439,6 +439,138 @@ CREATE TABLE IF NOT EXISTS customer_merge_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS products (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_code TEXT NOT NULL UNIQUE,
+  product_name TEXT NOT NULL,
+  product_family TEXT NOT NULL DEFAULT 'core',
+  category TEXT NOT NULL DEFAULT 'General',
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  variant_code TEXT NOT NULL UNIQUE,
+  variant_name TEXT NOT NULL,
+  variant_family TEXT NOT NULL DEFAULT 'standard',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS product_skus (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_variant_id UUID NOT NULL REFERENCES product_variants(id) ON DELETE RESTRICT,
+  sku TEXT NOT NULL UNIQUE,
+  currency_code TEXT NOT NULL DEFAULT 'USD',
+  msrp_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  partner_transfer_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  reward_eligible_dtp_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS combos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  combo_code TEXT NOT NULL UNIQUE,
+  combo_name TEXT NOT NULL,
+  currency_code TEXT NOT NULL DEFAULT 'USD',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS combo_components (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  combo_id UUID NOT NULL REFERENCES combos(id) ON DELETE RESTRICT,
+  product_sku_id UUID NOT NULL REFERENCES product_skus(id) ON DELETE RESTRICT,
+  component_quantity NUMERIC(18,6) NOT NULL DEFAULT 1,
+  component_role TEXT NOT NULL DEFAULT 'included',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS price_books (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  price_book_code TEXT NOT NULL UNIQUE,
+  price_book_name TEXT NOT NULL,
+  currency_code TEXT NOT NULL DEFAULT 'USD',
+  effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  effective_to DATE,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'governed',
+  description TEXT NOT NULL DEFAULT '',
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS price_rows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  price_book_id UUID NOT NULL REFERENCES price_books(id) ON DELETE RESTRICT,
+  product_id UUID REFERENCES products(id) ON DELETE RESTRICT,
+  product_variant_id UUID REFERENCES product_variants(id) ON DELETE RESTRICT,
+  product_sku_id UUID REFERENCES product_skus(id) ON DELETE RESTRICT,
+  combo_id UUID REFERENCES combos(id) ON DELETE RESTRICT,
+  combo_component_id UUID REFERENCES combo_components(id) ON DELETE RESTRICT,
+  row_kind TEXT NOT NULL DEFAULT 'sku',
+  currency_code TEXT NOT NULL DEFAULT 'USD',
+  msrp_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  partner_transfer_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  additional_discount_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  discounted_transfer_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  reward_eligible_dtp_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  pipeline_probability NUMERIC(8,6) NOT NULL DEFAULT 0,
+  margin_amount NUMERIC(18,6) NOT NULL DEFAULT 0,
+  effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  effective_to DATE,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fx_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_currency_code TEXT NOT NULL,
+  target_currency_code TEXT NOT NULL,
+  rate NUMERIC(18,8) NOT NULL,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  rate_source TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source_currency_code, target_currency_code, captured_at)
+);
+
 CREATE TABLE IF NOT EXISTS portal_catalog_items (
   id UUID PRIMARY KEY,
   sku TEXT NOT NULL,
@@ -451,6 +583,153 @@ CREATE TABLE IF NOT EXISTS portal_catalog_items (
   availability TEXT NOT NULL,
   benefits TEXT NOT NULL,
   catalog_kind TEXT NOT NULL DEFAULT 'product',
+  product_code TEXT,
+  currency_code TEXT NOT NULL DEFAULT 'USD',
+  price_book_code TEXT,
+  price_book_version INTEGER NOT NULL DEFAULT 1,
+  product_status TEXT NOT NULL DEFAULT 'active',
+  archived_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS products (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_code TEXT NOT NULL UNIQUE,
+  product_name TEXT NOT NULL,
+  product_description TEXT,
+  product_kind TEXT NOT NULL DEFAULT 'product',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  variant_code TEXT NOT NULL UNIQUE,
+  variant_name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS product_skus (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_variant_id UUID NOT NULL REFERENCES product_variants(id) ON DELETE RESTRICT,
+  sku_code TEXT NOT NULL UNIQUE,
+  currency_code TEXT NOT NULL,
+  msrp_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  partner_transfer_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  discounted_transfer_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  reward_eligible_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  additional_discount_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS combos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  combo_code TEXT NOT NULL UNIQUE,
+  combo_name TEXT NOT NULL,
+  combo_description TEXT,
+  currency_code TEXT NOT NULL,
+  bundle_msrp_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  bundle_transfer_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS combo_components (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  combo_id UUID NOT NULL REFERENCES combos(id) ON DELETE RESTRICT,
+  component_sku_id UUID NOT NULL REFERENCES product_skus(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS price_books (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  price_book_code TEXT NOT NULL UNIQUE,
+  price_book_name TEXT NOT NULL,
+  currency_code TEXT NOT NULL,
+  effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  effective_to DATE,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS price_rows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  price_book_id UUID NOT NULL REFERENCES price_books(id) ON DELETE RESTRICT,
+  product_id UUID REFERENCES products(id) ON DELETE RESTRICT,
+  product_variant_id UUID REFERENCES product_variants(id) ON DELETE RESTRICT,
+  product_sku_id UUID REFERENCES product_skus(id) ON DELETE RESTRICT,
+  combo_id UUID REFERENCES combos(id) ON DELETE RESTRICT,
+  row_kind TEXT NOT NULL DEFAULT 'sku',
+  currency_code TEXT NOT NULL,
+  msrp_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  partner_transfer_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  discount_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  discounted_transfer_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  reward_eligible_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  effective_to DATE,
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fx_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  snapshot_code TEXT NOT NULL UNIQUE,
+  source_currency_code TEXT NOT NULL,
+  target_currency_code TEXT NOT NULL,
+  source_amount NUMERIC(18, 4) NOT NULL,
+  target_amount NUMERIC(18, 4) NOT NULL,
+  rate NUMERIC(18, 8) NOT NULL,
+  captured_at TIMESTAMPTZ NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'internal',
+  status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -687,9 +966,105 @@ BEFORE UPDATE ON deal_participants
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS products_updated_at ON products;
+CREATE TRIGGER products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS product_variants_updated_at ON product_variants;
+CREATE TRIGGER product_variants_updated_at
+BEFORE UPDATE ON product_variants
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS product_skus_updated_at ON product_skus;
+CREATE TRIGGER product_skus_updated_at
+BEFORE UPDATE ON product_skus
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS combos_updated_at ON combos;
+CREATE TRIGGER combos_updated_at
+BEFORE UPDATE ON combos
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS combo_components_updated_at ON combo_components;
+CREATE TRIGGER combo_components_updated_at
+BEFORE UPDATE ON combo_components
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS price_books_updated_at ON price_books;
+CREATE TRIGGER price_books_updated_at
+BEFORE UPDATE ON price_books
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS price_rows_updated_at ON price_rows;
+CREATE TRIGGER price_rows_updated_at
+BEFORE UPDATE ON price_rows
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS fx_snapshots_updated_at ON fx_snapshots;
+CREATE TRIGGER fx_snapshots_updated_at
+BEFORE UPDATE ON fx_snapshots
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS portal_catalog_items_updated_at ON portal_catalog_items;
 CREATE TRIGGER portal_catalog_items_updated_at
 BEFORE UPDATE ON portal_catalog_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS products_updated_at ON products;
+CREATE TRIGGER products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS product_variants_updated_at ON product_variants;
+CREATE TRIGGER product_variants_updated_at
+BEFORE UPDATE ON product_variants
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS product_skus_updated_at ON product_skus;
+CREATE TRIGGER product_skus_updated_at
+BEFORE UPDATE ON product_skus
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS combos_updated_at ON combos;
+CREATE TRIGGER combos_updated_at
+BEFORE UPDATE ON combos
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS combo_components_updated_at ON combo_components;
+CREATE TRIGGER combo_components_updated_at
+BEFORE UPDATE ON combo_components
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS price_books_updated_at ON price_books;
+CREATE TRIGGER price_books_updated_at
+BEFORE UPDATE ON price_books
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS price_rows_updated_at ON price_rows;
+CREATE TRIGGER price_rows_updated_at
+BEFORE UPDATE ON price_rows
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS fx_snapshots_updated_at ON fx_snapshots;
+CREATE TRIGGER fx_snapshots_updated_at
+BEFORE UPDATE ON fx_snapshots
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

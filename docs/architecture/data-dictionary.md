@@ -9,6 +9,7 @@
 - Command, outbox, inbox, and denial contracts: `src/domain/contracts/commands.ts`
 - Feature-flag registry: `src/domain/contracts/feature-flags.ts`
 - Correlation and log redaction helpers: `src/domain/contracts/telemetry.ts`
+- Fixed-point pricing helpers and canonical pricing builders: `src/lib/money.ts`, `src/lib/pricing-domain.ts`
 
 ## Canonical Keys
 
@@ -26,4 +27,17 @@
 - Mutable commands must arrive as explicit envelopes with expected version, correlation ID, and trusted server time.
 - Governed lookup values must remain idempotent and versioned.
 - Money values are represented as fixed-point decimal strings and never as authoritative floating-point numbers.
+- Pricing values use fixed-point decimal strings in the application layer and `numeric`/`decimal` storage in PostgreSQL.
+- Currency-bearing records always carry explicit ISO currency codes and are normalized against the shared currency contract.
+- Rounding is deterministic and half-away-from-zero when a value must be reduced to a lower scale.
 
+## Canonical Pricing Nouns
+
+- `products`: canonical product families with versioning and archive metadata.
+- `product_variants`: product-level variants tied back to a canonical product.
+- `product_skus`: sellable SKU records with MSRP, transfer price, discount, and reward-eligible monetary fields.
+- `combos`: canonical bundle records with their own pricing context.
+- `combo_components`: bundle composition rows that link a combo to component SKUs.
+- `price_books`: effective-dated pricing containers that scope price rows to a currency and version.
+- `price_rows`: product, variant, SKU, or combo price projections for a given price book.
+- `fx_snapshots`: timestamped FX quotes that preserve source currency, target currency, rate, and captured amounts.
