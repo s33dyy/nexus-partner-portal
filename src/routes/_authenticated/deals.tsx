@@ -38,6 +38,11 @@ import {
 import { listDropdownSourceValues } from "@/integrations/local/dropdown-sources";
 import { upsertLookupValue } from "@/integrations/local/lookups";
 import { supabase } from "@/integrations/local/client";
+import {
+  markDealLost,
+  markDealWon,
+  moveDealStageForward,
+} from "@/integrations/local/deal-commands";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
@@ -73,7 +78,6 @@ import {
   DEAL_STAGE_ORDER,
   getDealInrAmount,
   nextDealStage,
-  nextDealStatus,
   parseDealAmount,
   requiresSuperAdminApproval,
   type DealRecord,
@@ -1454,14 +1458,30 @@ function DealsPage() {
       toast.error("Add a customer budget before moving this deal to qualified");
       return;
     }
-    await updateDeal({
-      stage,
-      status: nextDealStatus(selectedDeal.status, stage),
-      last_touch: "Advanced in pipeline",
-      close_date: selectedDeal.close_date || new Date().toISOString().slice(0, 10),
-      notes: note.trim() || selectedDeal.notes,
-      updated_at: new Date().toISOString(),
-    });
+
+    const trimmedNote = note.trim();
+    if (trimmedNote && trimmedNote !== selectedDeal.notes) {
+      await updateDeal({ notes: trimmedNote, updated_at: new Date().toISOString() });
+    }
+
+    // Reaching "won" always goes through the dedicated mark-won command, even
+    // when the user triggers it via the generic "advance" action, since Won is
+    // reward-eligible and gets its own audit trail distinct from ordinary stage moves.
+    const result =
+      selectedDeal.stage === "approved"
+        ? await markDealWon({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version })
+        : await moveDealStageForward({
+            dealId: selectedDeal.id,
+            expectedVersion: selectedDeal.version,
+            note: trimmedNote || null,
+          });
+
+    if (!result.ok) {
+      toast.error(result.failure.message);
+      return;
+    }
+
+    await load();
 
     await publishDealActivity({
       notificationTitle: `${selectedDeal.account_name} moved to ${stage}`,
@@ -1505,15 +1525,23 @@ function DealsPage() {
 
   const closeAs = async (status: "won" | "lost") => {
     if (!selectedDeal) return;
-    await updateDeal({
-      stage: status,
-      status,
-      probability: status === "won" ? 100 : 0,
-      last_touch: status === "won" ? "Closed won" : "Closed lost",
-      close_date: new Date().toISOString().slice(0, 10),
-      notes: note.trim() || selectedDeal.notes,
-      updated_at: new Date().toISOString(),
-    });
+
+    const trimmedNote = note.trim();
+    if (trimmedNote && trimmedNote !== selectedDeal.notes) {
+      await updateDeal({ notes: trimmedNote, updated_at: new Date().toISOString() });
+    }
+
+    const result =
+      status === "won"
+        ? await markDealWon({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version })
+        : await markDealLost({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version });
+
+    if (!result.ok) {
+      toast.error(result.failure.message);
+      return;
+    }
+
+    await load();
 
     await publishDealActivity({
       notificationTitle: status === "won" ? "Deal won" : "Deal lost",

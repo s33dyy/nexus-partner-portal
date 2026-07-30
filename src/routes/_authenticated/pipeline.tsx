@@ -19,12 +19,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
+import { markDealWon, moveDealStageForward } from "@/integrations/local/deal-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   getDealInrAmount,
   DEAL_STAGE_ORDER,
   nextDealStage,
-  nextDealStatus,
   type DealRecord,
 } from "@/lib/portal-records";
 import { awardDealWinPoints } from "@/lib/rewards";
@@ -229,20 +229,17 @@ function PipelinePage() {
       return;
     }
     try {
-      const { error } = await supabase
-        .from("portal_deals")
-        .update({
-          stage,
-          status: nextDealStatus(deal.status, stage),
-          last_touch: `Moved to ${stage}`,
-          close_date:
-            stage === "won" || stage === "lost"
-              ? new Date().toISOString().slice(0, 10)
-              : deal.close_date,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", deal.id);
-      if (error) throw error;
+      // Reaching "won" always goes through the dedicated mark-won command, since
+      // Won is reward-eligible and gets its own audit trail distinct from
+      // ordinary stage moves.
+      const result =
+        deal.stage === "approved"
+          ? await markDealWon({ dealId: deal.id, expectedVersion: deal.version })
+          : await moveDealStageForward({ dealId: deal.id, expectedVersion: deal.version });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
       toast.success(`${deal.account_name} moved to ${stage}`);
       await publishDealActivity(
         "deal_stage_change",

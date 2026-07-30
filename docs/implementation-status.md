@@ -3,8 +3,27 @@
 ## Phase
 
 - Phase 2: Deals, Pricing, Pipeline, Tasks, and Rewards
-- Checkpoint: customer merge and participant governance slice landed; broader phase 2 still in progress
+- Checkpoint: deal lifecycle domain commands (2C slice: stage transitions, Won/Lost) landed; customer merge/participant governance and pricing foundations landed previously; broader phase 2 still in progress
 - Previous checkpoint: Phase 0 (0A-0E) complete
+- Phase 1 status: data model (tenant/geography/assignment/active-context) is in place, but a dedicated audit found Phase 1 enforcement is **not** at its exit gate — see "Phase 1 Audit Findings" below. Phase 2 work is proceeding on top of this partial foundation per explicit user direction rather than blocking on full Phase 1 closure.
+
+## Phase 1 Audit Findings (2026-07-30)
+
+A gap analysis against the Phase 1 exit gate found:
+
+1. **Security-critical**: several server paths bypass policy entirely by querying the database directly — e.g. `uploadDocumentBlob`/`createDocumentDataUrl`/`removeDocumentBlobs` in `src/server/livey-service.server.ts`, and the inbound Zoho Sign webhook handler in `src/server/zoho-api.server.ts`.
+2. **Security-critical**: the "central policy module" (`src/server/table-policy.server.ts`, wired into `queryTable()`) only does flat `partner_id`/`user_id` ownership scoping. It never calls into `src/domain/contracts/governance.ts`'s role-power/geography-ceiling model, so the governed RBAC model is not actually enforced for generic table reads/writes yet. It also only covers the generic-table path — no export, import, file, assistant, notification, worker/job, or webhook surface consults it.
+3. **Security-critical**: `revokeUserSessionsAndContexts` (session/context revocation on offboarding) has zero callers anywhere in the app outside its own test — it is dead code today.
+4. No named commands exist yet to transition an Assignment's own lifecycle (Scheduled → Active → Suspended/Ended/Revoked) — there is currently no in-app way to do this at all.
+5. No Active Context chooser/switcher exists — the shell shows a single seeded context with a "refresh" action, not a real selector, narrowing-scope flow, deep-link handling, or context-switch audit event.
+6. Navigation (`app-sidebar.tsx`) is static role-key filtering, not capability/context-generated from the active Assignment or geography ceiling.
+7. RBAC/tenant-isolation test coverage (`governance.test.ts`, `table-policy.server.test.ts`) is a handful of tests, far short of the required role × scope × assignment-state matrix.
+
+Given this, the deal-command work below deliberately closes part of gap 2 for the deal domain specifically (real policy checks using `evaluateActiveContextPolicy` plus partner/geography scoping), rather than waiting on a full Phase 1 policy-layer rewrite. The remaining gaps (1, 3, 4, 5, 6, 7) are unresolved and should be treated as open risk for any future phase that assumes Phase 1 is complete.
+
+## Known Taxonomy Mismatch: Deal Stages
+
+`src/domain/contracts/taxonomy.ts`'s `DEAL_STAGES` (canonical, used by `DEAL_STATE_MACHINE`) has exactly eight stages with no "approved" stage, per the blueprint ("Approved is never a pipeline stage"). The deployed pipeline UI and schema (`src/lib/portal-records.ts` `DEAL_STAGE_ORDER`) has always carried a ninth "approved" stage between negotiation and won, and live/seeded deal rows already use it (e.g. the prod-demo "Northstar Cloud Suite" deal is seeded at stage "approved"). The new deal-command module (`src/server/deal-commands.server.ts`) intentionally enforces the nine-stage order actually in production, not the narrower canonical list, to avoid breaking existing data and UI. Reconciling the two (likely: rename the UI's "approved" pipeline column to a deal `status` value instead of a `stage`) is a product decision with visible UI impact and needs explicit sign-off before it's changed.
 
 ## Repository Findings
 
@@ -52,20 +71,29 @@
 - Added fixed-point pricing helpers, canonical pricing tables, and timestamped FX snapshot support.
 - Added governed product, variant, SKU, combo, combo-component, price-book, and price-row builders plus archive/import validation helpers.
 - Added the canonical pricing validation bridge into the legacy catalog import path and surfaced pricing metadata on the admin catalog projection.
+- Added `version` optimistic-concurrency column and an append-only `deal_transitions` table to `db/schema.sql` for deals.
+- Added `src/server/deal-commands.server.ts`: named domain commands `moveDealStageForward`, `moveDealStageBackward` (reasoned), `markDealWon`, `markDealLost`. Each command loads the canonical deal row with `SELECT ... FOR UPDATE`, evaluates governed policy (`evaluateActiveContextPolicy` plus partner/geography scoping — super_admin full access, partner-scoped roles must match the deal's `partner_id`, LIVEY-side roles fail closed unless their assignment has a Global geography ceiling), checks optimistic concurrency against the client's `expectedVersion`, validates the stage transition, and atomically writes the `portal_deals` row, a `deal_transitions` audit row, a `domain_activity_events` row, and a `command_outbox` envelope in one transaction.
+- Added `src/integrations/local/deal-commands.ts` exposing the above as TanStack `createServerFn` calls, resolving the caller's actor from `getAuthContext()` server-side.
+- Wired `src/routes/_authenticated/deals.tsx` (`advance`, `closeAs`) and `src/routes/_authenticated/pipeline.tsx` (`moveDeal`) to call the new commands instead of writing `stage`/`status` directly via `supabase.from("portal_deals").update(...)`. Non-lifecycle field edits (notes, deal detail editing) still use the existing generic update path, since the "no direct stage/status writes" rule is specifically about lifecycle fields.
+- Added `src/server/deal-commands.server.test.ts`: policy allow/deny (assignment-inactive, partner-mismatch, geography fail-closed), optimistic-concurrency conflict, valid/invalid forward and backward transitions, terminal-stage rejection for Won/Lost, and existence-leak-safe denial for a missing deal.
 
 ## Remaining Items
 
-- Finish deal-side participant tagging and coverage propagation.
-- Expand phase 2 into deal aggregates, stage commands, PO review, tasks, activity, and rewards.
+- Finish deal-side participant tagging and coverage propagation (`deal_participants` table exists, builders exist in `customer-governance.ts`, but no route wires them yet).
+- Expand phase 2 into full deal aggregates (line items, immutable Pricing Revision), registration decisions, discount request/decision workflow, PO/outcome review, tasks, activity feed, and rewards — the deal-command slice landed so far covers only stage lifecycle transitions and Won/Lost, not the rest of Checkpoint 2C/2D/2E/2G.
+- Resolve the deal-stage taxonomy mismatch (canonical 8-stage list vs. deployed 9-stage list with "approved") — needs a product decision since it affects visible pipeline columns.
 - Finish the remaining pricing projection polish once the canonical price-book editing flows are ready to land.
 - Update any legacy helpers that still need to import the canonical registries.
-- Add named assignment transition commands and session/context revocation flows.
-- Expand policy enforcement beyond the local generic-table path to explicit row-action commands, export/import/file flows, assistant retrieval, and worker/webhook entrypoints.
+- Add named assignment transition commands and session/context revocation flows (Phase 1 gap — `revokeUserSessionsAndContexts` is currently unused).
+- Expand policy enforcement beyond the local generic-table path and the new deal-command module to explicit row-action commands for other domains, export/import/file flows, assistant retrieval, and worker/webhook entrypoints. In particular, fix the direct-DB-write bypasses in `livey-service.server.ts` document-blob handlers and the Zoho Sign webhook handler.
+- Add a real Active Context chooser/switcher and make navigation capability-generated (Phase 1 gaps).
 - Add route-level denial and fallback states for the remaining partner-facing screens.
+- Expand RBAC/tenant-isolation test coverage toward the full role × scope × assignment-state matrix required by the blueprint.
 
 ## Migrations Created
 
 - No separate migration file yet; the additive changes are in `db/schema.sql`.
+- Latest additive changes: `portal_deals.version` (optimistic concurrency, default 1) and the append-only `deal_transitions` table with a `deal_transitions_deal_id_idx` index.
 
 ## Feature Flags
 
@@ -86,6 +114,8 @@
 - The inventory tool is intentionally conservative and may flag legacy text fields that are still tolerated by the current app.
 - The repository-wide `bun run lint` invocation took too long to finish in this session, so the phase 0 files were validated with a targeted ESLint pass instead.
 - The new governed-context code currently exposes the assignment/context shape and seeds the data, but it does not yet enforce every phase-1 route boundary or chooser flow.
+- The deal-command policy check fails closed for any LIVEY-side assignment (rm/pam/kam/isr/livey_support) whose geography ceiling is narrower than Global, because deal `country`/`region` are free-text and cannot yet be resolved to a governed geography node with confidence for most values (only Global/APAC/India/India West/Maharashtra have seed aliases). No such assignments exist in the current seed data, so this has not been exercised against real LIVEY-role deal traffic yet — once regional RM/PAM/KAM/ISR assignments are seeded, this will need either broader geography aliasing or an explicit scoped-access decision.
+- Deal participant tagging (`deal_participants` table, builders in `customer-governance.ts`) still is not wired into any deal route, so deal-level participant coverage (PAM/KAM/RM/ISR tagging) is not yet enforced or visible in the UI.
 
 ## Test Evidence
 
@@ -112,3 +142,13 @@
 - Result: passed with no warnings after formatting
 - `bun run build`
 - Result: client, SSR, and Nitro builds completed successfully after the phase-2 customer-governance slice
+- `bun test src/server/deal-commands.server.test.ts`
+- Result: `14 pass`, `0 fail`, `40 expect() calls`
+- `bun test` (full suite)
+- Result: `153 pass`, `0 fail`, `1586 expect() calls`
+- `bunx tsc --noEmit -p tsconfig.json` (scoped review of touched files; the repo has pre-existing unrelated type errors elsewhere that are not part of this slice)
+- Result: no errors in `deal-commands.server.ts`, `deal-commands.server.test.ts`, `integrations/local/deal-commands.ts`, `routes/_authenticated/deals.tsx`, `routes/_authenticated/pipeline.tsx`, `lib/portal-records.ts`
+- `bunx eslint src/server/deal-commands.server.ts src/server/deal-commands.server.test.ts src/integrations/local/deal-commands.ts src/routes/_authenticated/deals.tsx src/routes/_authenticated/pipeline.tsx src/lib/portal-records.ts`
+- Result: passed after auto-formatting
+- `bun run build`
+- Result: client, SSR, and Nitro builds completed successfully after the deal-command slice

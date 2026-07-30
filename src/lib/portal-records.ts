@@ -47,6 +47,7 @@ export type DealRecord = {
   partner_id: string | null;
   is_hidden_to_team: boolean;
   reward_rate_percent: number;
+  version: number;
   is_seed: boolean;
   created_at: string;
   updated_at: string;

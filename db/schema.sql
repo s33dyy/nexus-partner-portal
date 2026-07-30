@@ -1260,3 +1260,24 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Phase 2: deal lifecycle domain commands (optimistic concurrency + append-only transitions)
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS deal_transitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  command_name TEXT NOT NULL,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  from_status TEXT NOT NULL,
+  to_status TEXT NOT NULL,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
+  reason TEXT,
+  correlation_id TEXT NOT NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (deal_id);
