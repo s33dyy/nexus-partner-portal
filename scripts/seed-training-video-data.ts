@@ -19,7 +19,6 @@ import {
   TRAINING_REWARD_CATALOG_ITEMS,
   TRAINING_REWARD_POINT_EVENTS,
   TRAINING_REWARD_REDEMPTIONS,
-  TRAINING_USER_ROLE_IDS,
   TRAINING_TEAM_MEMBERS,
   TRAINING_USER_ROLES,
 } from "./training-video-fixtures";
@@ -87,14 +86,13 @@ async function upsertUserRole(
   pool: ReturnType<typeof createPool>,
   role: (typeof TRAINING_USER_ROLES)[number],
   userId: string,
-  roleId: string,
 ) {
   await pool.query(
     `INSERT INTO user_roles (id, user_id, role, is_seed)
      VALUES ($1, $2, $3, true)
      ON CONFLICT (user_id, role) DO UPDATE SET
        is_seed = true`,
-    [roleId, userId, role.role],
+    [userId, userId, role.role],
   );
 }
 
@@ -134,32 +132,12 @@ async function seedTrainingVideoData() {
     for (const profile of TRAINING_PROFILES) {
       const actualId = await upsertProfile(pool, profile);
       seededProfileIds.set(profile.email, actualId);
+      const role = TRAINING_USER_ROLES.find((entry) => entry.user_id === profile.id);
+      if (!role) {
+        throw new Error(`Missing role fixture for profile ${profile.email}`);
+      }
+      await upsertUserRole(pool, role, actualId);
     }
-
-    await upsertUserRole(
-      pool,
-      TRAINING_USER_ROLES[0],
-      seededProfileIds.get(TRAINING_ACCOUNTS.superAdmin.email) ?? TRAINING_PROFILES[0].id,
-      TRAINING_USER_ROLE_IDS.superAdmin,
-    );
-    await upsertUserRole(
-      pool,
-      TRAINING_USER_ROLES[1],
-      seededProfileIds.get(TRAINING_ACCOUNTS.partnerAdmin.email) ?? TRAINING_PROFILES[1].id,
-      TRAINING_USER_ROLE_IDS.partnerAdmin,
-    );
-    await upsertUserRole(
-      pool,
-      TRAINING_USER_ROLES[2],
-      seededProfileIds.get(TRAINING_ACCOUNTS.partnerUser.email) ?? TRAINING_PROFILES[2].id,
-      TRAINING_USER_ROLE_IDS.partnerUser,
-    );
-    await upsertUserRole(
-      pool,
-      TRAINING_USER_ROLES[3],
-      seededProfileIds.get("harbor.admin@livey.tech") ?? TRAINING_PROFILES[3].id,
-      TRAINING_USER_ROLE_IDS.submittedPartnerOwner,
-    );
 
     for (const partner of Object.values(TRAINING_PARTNERS)) {
       await upsertById(pool, "partners", partner);
@@ -226,7 +204,7 @@ async function seedTrainingVideoData() {
         ...event,
         approved_by:
           event.approved_by === TRAINING_PROFILES[0].id
-            ? seededProfileIds.get(TRAINING_ACCOUNTS.superAdmin.email) ?? TRAINING_PROFILES[0].id
+            ? (seededProfileIds.get(TRAINING_ACCOUNTS.superAdmin.email) ?? TRAINING_PROFILES[0].id)
             : event.approved_by,
       });
     }
@@ -261,9 +239,8 @@ async function seedTrainingVideoData() {
 }
 
 if (import.meta.main) {
-  seedTrainingVideoData()
-    .catch((error) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+  seedTrainingVideoData().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

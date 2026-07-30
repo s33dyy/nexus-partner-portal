@@ -34,3 +34,7 @@ docs/superpowers/plans/
 *.njsproj
 *.sln
 *.sw?
+
+# Generated scratch/output artifacts
+/tmp/
+/output/
