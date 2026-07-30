@@ -113,6 +113,12 @@ Known scoped limitation: `user_roles` has no version column, so this command doe
 
 Added 7 regression tests (`user-role-commands.server.test.ts`): unknown-role rejection, escalation denial, partner_admin granting partner_user, inactive-assignment denial, no-op when role is unchanged, existence-safe denial for a roleless user, and the full BEGIN/SELECT/DELETE/INSERT×2/COMMIT transaction shape.
 
+**Follow-up bug found while manually verifying this fix in production**: the "Edit user" role dropdown still failed after the command landed, now with a clear `"partner admin" is not a governed role` validation error instead of a generic one — real progress (no more silent failure), but still not usable. Root cause: `src/domain/contracts/reference-data.ts`'s `GOVERNED_REFERENCE_BUCKETS` seeds every bucket's lookup-value `value` as `valueKey.replace(/_/g, " ")` (a humanized label, e.g. "partner admin"), and `LookupCombobox` (`src/components/lookup-combobox.tsx`) submits an option's `value` directly as the field's stored value — it has no separate machine-key concept. For the `"users.role"` bucket this fed a Postgres enum (`app_role`) that only accepts `super_admin`/`partner_admin`/`partner_user`, so every selection failed the new command's role check (previously it likely failed the old blocked-write path just as silently). The same pattern feeds `"team.portal_role"`, which `partner.team.tsx` compares with exact `=== "partner_admin"` checks — same class of silent failure there. Fixed both buckets to seed `value: valueKey` instead. **This pattern (`valueKey.replace(/_/g, " ")`) appears in 13 other buckets in the same file** — not touched, since each needs individual verification of whether anything downstream does an exact match against it (most are likely fine as free-text display dropdowns); flagged as a follow-up audit, not fixed blindly.
+
+Since `seedGovernedReferenceData` only runs from the destructive `scripts/bootstrap-db.ts` (not on every deploy's `db:migrate`), the corrected values needed a one-off non-destructive backfill against the live DB — it's an idempotent `ON CONFLICT (field_name, value_key) DO UPDATE` upsert into `lookup_values`, so re-running it doesn't touch any other table or drop data.
+
+Added `reference-data.test.ts`: asserts both buckets' seeded values are exactly `ROLE_KEYS` with no spaces.
+
 ## Migrations Created
 
 - No separate migration file yet; the additive changes are in `db/schema.sql`.
@@ -216,3 +222,10 @@ Added a regression test (`livey-service.server.test.ts`) asserting every table n
 - Result: no errors, no warnings (after auto-formatting)
 - `bun run build`
 - Result: client, SSR, and Nitro builds completed successfully after the identity.change_user_role command
+
+- `bun test src/domain/contracts/reference-data.test.ts`
+- Result: `1 pass`, `0 fail`, `22 expect() calls`
+- `bun test` (full suite)
+- Result: `170 pass`, `0 fail`, `1668 expect() calls`
+- `bun run build` / `bunx eslint src/domain/contracts/reference-data.ts src/domain/contracts/reference-data.test.ts`
+- Result: build succeeded, lint clean

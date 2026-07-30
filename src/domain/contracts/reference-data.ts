@@ -98,12 +98,18 @@ const salesRegionItems = [
 
 export const GOVERNED_REFERENCE_BUCKETS: readonly ReferenceDataBucket[] = [
   {
+    // value must stay the exact machine key here (not a "space" display
+    // form like the other buckets in this file): LookupCombobox submits
+    // `value` directly as the field's stored value, and this feeds
+    // user_roles.role, a Postgres enum restricted to super_admin/
+    // partner_admin/partner_user. A humanized value would fail enum
+    // validation or the identity.change_user_role command's role check.
     fieldName: "users.role",
     domainKey: "role_keys",
     owner: "Identity and Policy",
     items: ROLE_KEYS.map((valueKey) => ({
       valueKey,
-      value: valueKey.replace(/_/g, " "),
+      value: valueKey,
       version: 1,
       effectiveFrom: EFFECTIVE_FROM,
       effectiveTo: null,
@@ -112,12 +118,15 @@ export const GOVERNED_REFERENCE_BUCKETS: readonly ReferenceDataBucket[] = [
     })),
   },
   {
+    // Same reasoning as "users.role" above: partner.team.tsx does exact
+    // string comparisons like `draft.portal_role === "partner_admin"`
+    // against this value.
     fieldName: "team.portal_role",
     domainKey: "role_keys",
     owner: "Identity and Policy",
     items: ROLE_KEYS.map((valueKey) => ({
       valueKey,
-      value: valueKey.replace(/_/g, " "),
+      value: valueKey,
       version: 1,
       effectiveFrom: EFFECTIVE_FROM,
       effectiveTo: null,
