@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "start": "node .output/server/index.mjs",
+    "start": "HOST=0.0.0.0 node .output/server/index.mjs",
     "preview": "vite preview",
     "db:migrate": "bun scripts/apply-migrations.ts",
     "db:bootstrap": "bun scripts/bootstrap-db.ts",
