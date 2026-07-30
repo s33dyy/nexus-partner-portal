@@ -204,3 +204,67 @@ test("getAuthContext resolves an active governed assignment's status correctly",
     pool.query = originalQuery as typeof pool.query;
   }
 });
+
+test("every table queried by the client UI is registered in the generic query path", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => ({ rows: [], rowCount: 0 })) as typeof pool.query;
+
+  // Every table name that appears in a client `.from("...")` call across
+  // src/routes, src/lib, src/hooks, and src/components as of the customer
+  // governance and deal-participant work. customer_participants and
+  // customer_merge_events were previously missing here, which crashed the
+  // Customers page (assertTable throws "Unsupported table", the Promise.all
+  // in customers.tsx's load() rejects, and the page silently falls back to
+  // an empty state for every user).
+  const tablesUsedByClientRoutes = [
+    "active_contexts",
+    "assignments",
+    "customer_merge_events",
+    "customer_participants",
+    "deal_documents",
+    "notifications",
+    "partner_documents",
+    "partner_review_notes",
+    "partners",
+    "portal_audit_events",
+    "portal_catalog_items",
+    "portal_customer_activities",
+    "portal_customers",
+    "portal_deal_collaborators",
+    "portal_deals",
+    "portal_news_posts",
+    "portal_team_members",
+    "profiles",
+    "reward_catalog_items",
+    "reward_point_events",
+    "reward_redemptions",
+    "support_ticket_comments",
+    "support_tickets",
+    "user_roles",
+  ];
+
+  const superAdmin = {
+    userId: "user-a",
+    roles: ["super_admin"] as ("super_admin" | "partner_admin" | "partner_user")[],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+  };
+
+  try {
+    for (const table of tablesUsedByClientRoutes) {
+      const result = await queryTableWithAuthContext(
+        { table, operation: "select", filters: [] },
+        superAdmin,
+      );
+      expect(result.error).toBeNull();
+    }
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});

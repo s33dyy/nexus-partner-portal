@@ -221,3 +221,27 @@ test("non-super-admin reads remain scoped to their own profile row", async () =>
   );
   expect(profilesQuery.filters).toEqual([{ column: "id", value: "user-a", operator: "eq" }]);
 });
+
+test("customer_participants, deal_participants, and customer_merge_events are partner-scoped", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  for (const table of ["customer_participants", "deal_participants", "customer_merge_events"]) {
+    const scoped = await applyTablePolicy(
+      { table, operation: "select", filters: [] },
+      {
+        userId: "user-a",
+        roles: ["partner_admin"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+      },
+    );
+    expect(scoped.filters).toEqual([{ column: "partner_id", value: "partner-a", operator: "eq" }]);
+
+    const unscopedForSuperAdmin = await applyTablePolicy(
+      { table, operation: "select", filters: [] },
+      SUPER_ADMIN_AUTH,
+    );
+    expect(unscopedForSuperAdmin.filters).toEqual([]);
+  }
+});

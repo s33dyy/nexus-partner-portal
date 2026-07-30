@@ -292,6 +292,17 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
       return { kind: "linked-deal" };
     case "support_ticket_comments":
       return { kind: "linked-ticket" };
+    case "customer_participants":
+    case "deal_participants":
+    case "customer_merge_events":
+      return auth.partnerId
+        ? {
+            kind: "column",
+            column: "partner_id",
+            value: auth.partnerId,
+            fallbackColumn: "actor_id",
+          }
+        : { kind: "column", column: "actor_id", value: auth.userId };
     default:
       return null;
   }
