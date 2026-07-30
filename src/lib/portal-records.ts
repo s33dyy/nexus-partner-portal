@@ -216,6 +216,8 @@ export type SupportTicketRecord = {
   created_by_name: string;
   subject: string;
   description: string;
+  product_sku?: string | null;
+  serial_number?: string | null;
   status: string;
   priority: string;
   assignee_name: string | null;
@@ -231,6 +233,7 @@ export type SupportTicketCommentRecord = {
   author_name: string;
   author_role: string;
   body: string;
+  is_internal: boolean;
   is_seed: boolean;
   created_at: string;
 };

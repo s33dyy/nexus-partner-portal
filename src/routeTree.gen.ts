@@ -30,6 +30,7 @@ import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedAdminAuditRouteImport } from './routes/_authenticated/admin.audit'
 import { Route as AuthenticatedAdminCatalogRouteImport } from './routes/_authenticated/admin.catalog'
 import { Route as AuthenticatedAdminDealsRouteImport } from './routes/_authenticated/admin.deals'
+import { Route as AuthenticatedAdminIntegrationsRouteImport } from './routes/_authenticated/admin.integrations'
 import { Route as AuthenticatedAdminLearningRouteImport } from './routes/_authenticated/admin.learning'
 import { Route as AuthenticatedAdminNewsRouteImport } from './routes/_authenticated/admin.news'
 import { Route as AuthenticatedAdminPartnersRouteImport } from './routes/_authenticated/admin.partners'
@@ -146,6 +147,12 @@ const AuthenticatedAdminDealsRoute = AuthenticatedAdminDealsRouteImport.update({
   path: '/admin/deals',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedAdminIntegrationsRoute =
+  AuthenticatedAdminIntegrationsRouteImport.update({
+    id: '/admin/integrations',
+    path: '/admin/integrations',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminLearningRoute =
   AuthenticatedAdminLearningRouteImport.update({
     id: '/admin/learning',
@@ -214,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/admin/integrations': typeof AuthenticatedAdminIntegrationsRoute
   '/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
@@ -244,6 +252,7 @@ export interface FileRoutesByTo {
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/admin/integrations': typeof AuthenticatedAdminIntegrationsRoute
   '/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
@@ -276,6 +285,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/_authenticated/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/_authenticated/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/_authenticated/admin/integrations': typeof AuthenticatedAdminIntegrationsRoute
   '/_authenticated/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/_authenticated/admin/news': typeof AuthenticatedAdminNewsRoute
   '/_authenticated/admin/partners': typeof AuthenticatedAdminPartnersRoute
@@ -308,6 +318,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/catalog'
     | '/admin/deals'
+    | '/admin/integrations'
     | '/admin/learning'
     | '/admin/news'
     | '/admin/partners'
@@ -338,6 +349,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/catalog'
     | '/admin/deals'
+    | '/admin/integrations'
     | '/admin/learning'
     | '/admin/news'
     | '/admin/partners'
@@ -369,6 +381,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/audit'
     | '/_authenticated/admin/catalog'
     | '/_authenticated/admin/deals'
+    | '/_authenticated/admin/integrations'
     | '/_authenticated/admin/learning'
     | '/_authenticated/admin/news'
     | '/_authenticated/admin/partners'
@@ -535,6 +548,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminDealsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/integrations': {
+      id: '/_authenticated/admin/integrations'
+      path: '/admin/integrations'
+      fullPath: '/admin/integrations'
+      preLoaderRoute: typeof AuthenticatedAdminIntegrationsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/learning': {
       id: '/_authenticated/admin/learning'
       path: '/admin/learning'
@@ -627,6 +647,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminAuditRoute: typeof AuthenticatedAdminAuditRoute
   AuthenticatedAdminCatalogRoute: typeof AuthenticatedAdminCatalogRoute
   AuthenticatedAdminDealsRoute: typeof AuthenticatedAdminDealsRoute
+  AuthenticatedAdminIntegrationsRoute: typeof AuthenticatedAdminIntegrationsRoute
   AuthenticatedAdminLearningRoute: typeof AuthenticatedAdminLearningRoute
   AuthenticatedAdminNewsRoute: typeof AuthenticatedAdminNewsRoute
   AuthenticatedAdminPartnersRoute: typeof AuthenticatedAdminPartnersRoute
@@ -652,6 +673,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminAuditRoute: AuthenticatedAdminAuditRoute,
   AuthenticatedAdminCatalogRoute: AuthenticatedAdminCatalogRoute,
   AuthenticatedAdminDealsRoute: AuthenticatedAdminDealsRoute,
+  AuthenticatedAdminIntegrationsRoute: AuthenticatedAdminIntegrationsRoute,
   AuthenticatedAdminLearningRoute: AuthenticatedAdminLearningRoute,
   AuthenticatedAdminNewsRoute: AuthenticatedAdminNewsRoute,
   AuthenticatedAdminPartnersRoute: AuthenticatedAdminPartnersRoute,

@@ -221,6 +221,8 @@ export type CreateTicketInput = {
   priority?: string | null;
   partnerId?: string | null;
   creatorName?: string | null;
+  productSku?: string | null;
+  serialNumber?: string | null;
 };
 
 export async function createTicket(input: {
@@ -250,8 +252,8 @@ export async function createTicket(input: {
     await tx.query(
       `INSERT INTO support_tickets (
          id, partner_id, created_by, created_by_name, subject, description,
-         status, priority, is_seed
-       ) VALUES ($1,$2,$3,$4,$5,$6,'open',$7,FALSE)`,
+         status, priority, is_seed, product_sku, serial_number
+       ) VALUES ($1,$2,$3,$4,$5,$6,'open',$7,FALSE,$8,$9)`,
       [
         ticketId,
         partnerId,
@@ -260,6 +262,8 @@ export async function createTicket(input: {
         subject,
         description,
         input.data.priority?.trim() || "medium",
+        input.data.productSku?.trim() || null,
+        input.data.serialNumber?.trim() || null,
       ],
     );
 
@@ -406,6 +410,7 @@ export type AddTicketReplyInput = {
   body: string;
   authorName?: string | null;
   authorRole?: string | null;
+  isInternal?: boolean;
 };
 
 /**
@@ -457,8 +462,8 @@ export async function addTicketReply(input: {
 
     await tx.query(
       `INSERT INTO support_ticket_comments (
-         id, ticket_id, author_id, author_name, author_role, body, is_seed
-       ) VALUES ($1,$2,$3,$4,$5,$6,FALSE)`,
+         id, ticket_id, author_id, author_name, author_role, body, is_seed, is_internal
+       ) VALUES ($1,$2,$3,$4,$5,$6,FALSE,$7)`,
       [
         randomUUID(),
         ticket.id,
@@ -466,6 +471,7 @@ export async function addTicketReply(input: {
         input.data.authorName?.trim() || "Portal user",
         input.data.authorRole?.trim() || input.actor.assignment.roleKey,
         body,
+        input.data.isInternal ?? false,
       ],
     );
 

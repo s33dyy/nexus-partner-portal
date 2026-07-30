@@ -48,12 +48,15 @@ function SupportPage() {
     subject: "",
     description: "",
     priority: "medium",
+    productSku: "",
+    serialNumber: "",
   });
   const [metaDraft, setMetaDraft] = useState({
     status: "open",
     priority: "medium",
     assignee_name: "",
   });
+  const [replyIsInternal, setReplyIsInternal] = useState(false);
 
   const loadTickets = async () => {
     setLoading(true);
@@ -119,9 +122,14 @@ function SupportPage() {
         return;
       }
 
-      setComments((data as SupportTicketCommentRecord[] | null) ?? []);
+      // Filter out internal comments if the user is a partner
+      const allComments = (data as SupportTicketCommentRecord[] | null) ?? [];
+      const isSupportUser = hasRole("super_admin") || hasRole("livey_support");
+      setComments(
+        isSupportUser ? allComments : allComments.filter((c) => !c.is_internal),
+      );
     })();
-  }, [selectedTicket]);
+  }, [selectedTicket, hasRole]);
 
   const filteredTickets = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -147,6 +155,8 @@ function SupportPage() {
         subject: ticketDraft.subject,
         description: ticketDraft.description,
         priority: ticketDraft.priority,
+        productSku: ticketDraft.productSku || null,
+        serialNumber: ticketDraft.serialNumber || null,
         partnerId: profile?.partner_id ?? null,
         creatorName: profile?.full_name ?? "LIVEY User",
       });
@@ -155,7 +165,7 @@ function SupportPage() {
         return;
       }
 
-      setTicketDraft({ subject: "", description: "", priority: "medium" });
+      setTicketDraft({ subject: "", description: "", priority: "medium", productSku: "", serialNumber: "" });
       toast.success("Support ticket created");
       await loadTickets();
       setSelectedId(result.subjectId);
@@ -221,6 +231,7 @@ function SupportPage() {
       const result = await addTicketReply({
         ticketId: selectedTicket.id,
         body: replyDraft,
+        isInternal: replyIsInternal,
         authorName: profile?.full_name ?? "LIVEY User",
         authorRole: hasRole("super_admin")
           ? "super_admin"
@@ -234,6 +245,7 @@ function SupportPage() {
       }
 
       setReplyDraft("");
+      if (replyIsInternal) setReplyIsInternal(false);
       toast.success("Reply added");
       await loadTickets();
       const commentRes = await supabase
@@ -241,7 +253,12 @@ function SupportPage() {
         .select("*")
         .eq("ticket_id", selectedTicket.id)
         .order("created_at", { ascending: true });
-      setComments((commentRes.data as SupportTicketCommentRecord[] | null) ?? []);
+      
+      const allComments = (commentRes.data as SupportTicketCommentRecord[] | null) ?? [];
+      const isSupportUser = hasRole("super_admin") || hasRole("livey_support");
+      setComments(
+        isSupportUser ? allComments : allComments.filter((c) => !c.is_internal),
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add reply");
     } finally {
@@ -319,6 +336,30 @@ function SupportPage() {
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="ticket-product-sku">Product SKU (Optional)</Label>
+                  <Input
+                    id="ticket-product-sku"
+                    value={ticketDraft.productSku}
+                    onChange={(event) =>
+                      setTicketDraft((current) => ({ ...current, productSku: event.target.value }))
+                    }
+                    placeholder="e.g. HW-1000"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="ticket-serial">Serial Number (Optional)</Label>
+                  <Input
+                    id="ticket-serial"
+                    value={ticketDraft.serialNumber}
+                    onChange={(event) =>
+                      setTicketDraft((current) => ({ ...current, serialNumber: event.target.value }))
+                    }
+                    placeholder="e.g. SN-99812-XX"
+                  />
+                </div>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="ticket-description">Description</Label>
@@ -425,6 +466,22 @@ function SupportPage() {
                     ) : null}
                   </div>
                   <div className="mt-3 text-sm">{selectedTicket.description}</div>
+                  {(selectedTicket.product_sku || selectedTicket.serial_number) && (
+                    <div className="mt-4 flex flex-wrap gap-4 rounded-lg bg-background p-3 text-xs">
+                      {selectedTicket.product_sku && (
+                        <div>
+                          <span className="font-semibold text-muted-foreground">Product SKU:</span>{" "}
+                          {selectedTicket.product_sku}
+                        </div>
+                      )}
+                      {selectedTicket.serial_number && (
+                        <div>
+                          <span className="font-semibold text-muted-foreground">Serial:</span>{" "}
+                          {selectedTicket.serial_number}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {hasRole("super_admin") ? (
@@ -580,8 +637,20 @@ function SupportPage() {
                     </div>
                   ) : (
                     comments.map((comment) => (
-                      <div key={comment.id} className="rounded-lg border p-4">
-                        <div className="text-sm font-medium">{comment.author_name}</div>
+                      <div
+                        key={comment.id}
+                        className={`rounded-lg border p-4 ${
+                          comment.is_internal ? "border-amber-200 bg-amber-500/5" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium">{comment.author_name}</div>
+                          {comment.is_internal && (
+                            <Badge variant="outline" className="border-amber-200 text-amber-600">
+                              Internal Note
+                            </Badge>
+                          )}
+                        </div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           {comment.author_role.replace(/_/g, " ")} ·{" "}
                           {formatDateTimeLabel(comment.created_at)}
@@ -600,14 +669,27 @@ function SupportPage() {
                     onChange={(event) => setReplyDraft(event.target.value)}
                     placeholder="Share the next step, answer, or follow-up."
                   />
-                  <Button onClick={() => void addReply()} disabled={savingReply}>
-                    {savingReply ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="mr-2 h-4 w-4" />
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <Button onClick={() => void addReply()} disabled={savingReply}>
+                      {savingReply ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="mr-2 h-4 w-4" />
+                      )}
+                      Post reply
+                    </Button>
+                    {(hasRole("super_admin") || hasRole("livey_support")) && (
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={replyIsInternal}
+                          onChange={(e) => setReplyIsInternal(e.target.checked)}
+                          className="rounded border-input text-primary"
+                        />
+                        Mark as internal note (hidden from partner)
+                      </label>
                     )}
-                    Post reply
-                  </Button>
+                  </div>
                 </div>
               </>
             )}

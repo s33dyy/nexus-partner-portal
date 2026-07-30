@@ -16,6 +16,7 @@ import {
   Trophy,
   CheckSquare,
   GraduationCap,
+  Activity,
 } from "lucide-react";
 
 import {
@@ -71,6 +72,7 @@ const admin: Item[] = [
   { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
   { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
   { title: "Learning", url: "/admin/learning", icon: GraduationCap, roles: ["super_admin"] },
+  { title: "Integrations", url: "/admin/integrations", icon: Activity, roles: ["super_admin"] },
   { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
 ];
 
