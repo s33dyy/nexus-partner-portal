@@ -18,6 +18,7 @@ import {
   TICKET_STATUSES,
   type CurrencyCode,
 } from "./taxonomy";
+import { SALES_REGIONS, WORLD_COUNTRIES } from "./world-geography";
 
 export type ReferenceDataItem = {
   fieldName: string;
@@ -41,29 +42,6 @@ export type ReferenceDataBucket = {
 
 const EFFECTIVE_FROM = "2026-07-29";
 
-const COUNTRY_CODES = [
-  ["IN", "India", "Asia"],
-  ["US", "United States", "Americas"],
-  ["SG", "Singapore", "APAC"],
-  ["AE", "United Arab Emirates", "EMEA"],
-  ["SA", "Saudi Arabia", "EMEA"],
-  ["QA", "Qatar", "EMEA"],
-  ["KW", "Kuwait", "EMEA"],
-  ["OM", "Oman", "EMEA"],
-  ["BH", "Bahrain", "EMEA"],
-  ["MY", "Malaysia", "APAC"],
-  ["ID", "Indonesia", "APAC"],
-  ["PH", "Philippines", "APAC"],
-  ["TH", "Thailand", "APAC"],
-  ["VN", "Vietnam", "APAC"],
-  ["ZA", "South Africa", "EMEA"],
-  ["NG", "Nigeria", "EMEA"],
-  ["KE", "Kenya", "EMEA"],
-  ["GB", "United Kingdom", "EMEA"],
-  ["CA", "Canada", "Americas"],
-  ["AU", "Australia", "APAC"],
-] as const;
-
 const PROVINCE_STATE_CODES = [
   ["IN-GJ", "Gujarat", "IN"],
   ["IN-MH", "Maharashtra", "IN"],
@@ -78,23 +56,19 @@ const PROVINCE_STATE_CODES = [
   ["US-FL", "Florida", "US"],
 ] as const;
 
-const salesRegionItems = [
-  { valueKey: "india-west", value: "India West", metadata: { countries: ["IN"] } },
-  { valueKey: "india-south", value: "India South", metadata: { countries: ["IN"] } },
-  { valueKey: "india-north", value: "India North", metadata: { countries: ["IN"] } },
-  { valueKey: "india-east", value: "India East", metadata: { countries: ["IN"] } },
-  {
-    valueKey: "apac",
-    value: "APAC",
-    metadata: { countries: ["SG", "MY", "ID", "PH", "TH", "VN", "AU"] },
+// Sales Region and country reference data is derived from world-geography.ts
+// (the same source the governed geography tree in governance.ts builds
+// from), so this dropdown data and the RBAC geography tree can never drift
+// out of sync the way the old hand-maintained 7-country/4-region lists did.
+const salesRegionItems = SALES_REGIONS.map((region) => ({
+  valueKey: region.key,
+  value: region.name,
+  metadata: {
+    countries: WORLD_COUNTRIES.filter((country) => country.regionKey === region.key).map(
+      (country) => country.code,
+    ),
   },
-  {
-    valueKey: "emea",
-    value: "EMEA",
-    metadata: { countries: ["AE", "SA", "QA", "KW", "OM", "BH", "ZA", "NG", "KE", "GB"] },
-  },
-  { valueKey: "americas", value: "Americas", metadata: { countries: ["US", "CA"] } },
-] as const;
+}));
 
 export const GOVERNED_REFERENCE_BUCKETS: readonly ReferenceDataBucket[] = [
   {
@@ -180,14 +154,33 @@ export const GOVERNED_REFERENCE_BUCKETS: readonly ReferenceDataBucket[] = [
     fieldName: "governance.country_code",
     domainKey: "country_codes",
     owner: "Governance and Geography",
-    items: COUNTRY_CODES.map(([valueKey, value]) => ({
-      valueKey,
-      value,
+    items: WORLD_COUNTRIES.map((country) => ({
+      valueKey: country.code,
+      value: country.name,
       version: 1,
       effectiveFrom: EFFECTIVE_FROM,
       effectiveTo: null,
       retiredAt: null,
-      metadata: { region: "global" },
+      metadata: { region: country.regionKey, currencyCode: country.currencyCode },
+    })),
+  },
+  {
+    // Reference/display currency per country. Not the authoritative money
+    // model — CurrencyCode (taxonomy.ts, USD/INR) remains the only set
+    // accepted by MoneyDTO for fixed-point commercial calculations. This
+    // bucket exists so a country's local reference currency can be looked
+    // up/displayed without touching that authoritative set.
+    fieldName: "geography.country_currency",
+    domainKey: "country_currencies",
+    owner: "Governance and Geography",
+    items: WORLD_COUNTRIES.map((country) => ({
+      valueKey: country.code,
+      value: country.currencyCode,
+      version: 1,
+      effectiveFrom: EFFECTIVE_FROM,
+      effectiveTo: null,
+      retiredAt: null,
+      metadata: { countryName: country.name },
     })),
   },
   {

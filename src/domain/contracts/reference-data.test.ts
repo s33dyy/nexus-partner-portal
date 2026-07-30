@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { GOVERNED_REFERENCE_BUCKETS } from "@/domain/contracts/reference-data";
 import { ROLE_KEYS } from "@/domain/contracts/taxonomy";
+import { SALES_REGIONS, WORLD_COUNTRIES } from "@/domain/contracts/world-geography";
 
 // LookupCombobox submits an option's `value` (not its `valueKey`) as the
 // field's stored value. "users.role" feeds user_roles.role, a Postgres enum
@@ -21,4 +22,51 @@ test("users.role and team.portal_role reference data use exact role keys, not hu
       expect(value.includes(" ")).toBe(false);
     }
   }
+});
+
+test("governance.country_code covers every world country and stays in sync with world-geography.ts", () => {
+  const bucket = GOVERNED_REFERENCE_BUCKETS.find(
+    (entry) => entry.fieldName === "governance.country_code",
+  );
+  expect(bucket).toBeDefined();
+  expect(bucket!.items).toHaveLength(WORLD_COUNTRIES.length);
+  const byKey = new Map(bucket!.items.map((item) => [item.valueKey, item]));
+  for (const country of WORLD_COUNTRIES) {
+    const item = byKey.get(country.code);
+    expect(item?.value).toBe(country.name);
+    expect(item?.metadata).toEqual({
+      region: country.regionKey,
+      currencyCode: country.currencyCode,
+    });
+  }
+});
+
+test("geography.country_currency maps every country to its reference currency", () => {
+  const bucket = GOVERNED_REFERENCE_BUCKETS.find(
+    (entry) => entry.fieldName === "geography.country_currency",
+  );
+  expect(bucket).toBeDefined();
+  expect(bucket!.items).toHaveLength(WORLD_COUNTRIES.length);
+  for (const country of WORLD_COUNTRIES) {
+    const item = bucket!.items.find((entry) => entry.valueKey === country.code);
+    expect(item?.value).toBe(country.currencyCode);
+  }
+});
+
+test("governance.sales_region partitions every world country exactly once", () => {
+  const bucket = GOVERNED_REFERENCE_BUCKETS.find(
+    (entry) => entry.fieldName === "governance.sales_region",
+  );
+  expect(bucket).toBeDefined();
+  expect(bucket!.items).toHaveLength(SALES_REGIONS.length);
+
+  const seen = new Set<string>();
+  for (const item of bucket!.items) {
+    const countries = (item.metadata as { countries: readonly string[] }).countries;
+    for (const code of countries) {
+      expect(seen.has(code)).toBe(false);
+      seen.add(code);
+    }
+  }
+  expect(seen.size).toBe(WORLD_COUNTRIES.length);
 });

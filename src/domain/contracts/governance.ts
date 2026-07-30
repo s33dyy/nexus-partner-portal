@@ -11,6 +11,7 @@ import {
   type RoleKey,
   type TeamDomainKey,
 } from "./taxonomy";
+import { SALES_REGIONS, WORLD_COUNTRIES } from "./world-geography";
 
 export const TENANT_KINDS = ["livey_organization", "partner"] as const;
 export type TenantKind = (typeof TENANT_KINDS)[number];
@@ -19,12 +20,26 @@ export const GOVERNANCE_TENANT_IDS = {
   liveyOrganization: "tenant-livey-org",
 } as const;
 
+/** Stable, derivable node IDs for the governed geography tree (Global ->
+ * Sales Region -> Country -> Province/State). Region/country membership is
+ * data-driven from world-geography.ts, so these are functions rather than a
+ * fixed enumeration of every node. */
+export function salesRegionNodeId(regionKey: string): string {
+  return `geo-region-${regionKey}`;
+}
+
+export function countryNodeId(countryCode: string): string {
+  return `geo-country-${countryCode.toLowerCase()}`;
+}
+
+export function provinceNodeId(countryCode: string, slug: string): string {
+  return `geo-province-${countryCode.toLowerCase()}-${slug}`;
+}
+
 export const GOVERNANCE_GEOGRAPHY_NODE_IDS = {
   global: "geo-global",
-  apac: "geo-apac",
-  india: "geo-india",
-  indiaWest: "geo-india-west",
-  maharashtra: "geo-in-maharashtra",
+  india: countryNodeId("IN"),
+  maharashtra: provinceNodeId("IN", "maharashtra"),
 } as const;
 
 export const GOVERNANCE_ASSIGNMENT_IDS = {
@@ -513,6 +528,112 @@ export function evaluateActiveContextPolicy(input: {
   };
 }
 
+/** Builds the full governed geography tree — Global, every LIVEY Sales
+ * Region, and every world country/territory under its region — from
+ * world-geography.ts. Also seeds a single illustrative Province/State node
+ * (Maharashtra under India) rather than exhaustively enumerating every
+ * country's subdivisions, which is out of scope for this dataset. */
+export function buildWorldGeographyRows(issuedAt: string): {
+  nodes: GeographyNodeRecord[];
+  aliases: GeographyAliasRecord[];
+} {
+  const nodes: GeographyNodeRecord[] = [];
+  const aliases: GeographyAliasRecord[] = [];
+  let aliasIndex = 0;
+
+  const addAlias = (nodeId: string, legacyValue: string) => {
+    aliasIndex += 1;
+    aliases.push({
+      aliasId: `alias-${aliasIndex}-${legacyValue
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")}`,
+      nodeId,
+      legacyValue,
+      validFrom: issuedAt,
+      validTo: null,
+      source: "bootstrap",
+      isSeed: true,
+      createdAt: issuedAt,
+    });
+  };
+
+  const baseNode = (
+    overrides: Pick<
+      GeographyNodeRecord,
+      "nodeId" | "nodeCode" | "nodeType" | "displayName" | "parentNodeId"
+    >,
+  ): GeographyNodeRecord => ({
+    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+    validFrom: issuedAt,
+    validTo: null,
+    version: 1,
+    isSeed: true,
+    createdAt: issuedAt,
+    updatedAt: issuedAt,
+    ...overrides,
+  });
+
+  nodes.push(
+    baseNode({
+      nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      nodeCode: "global",
+      nodeType: "global",
+      displayName: "Global",
+      parentNodeId: null,
+    }),
+  );
+  addAlias(GOVERNANCE_GEOGRAPHY_NODE_IDS.global, "Global");
+
+  for (const region of SALES_REGIONS) {
+    const regionNodeId = salesRegionNodeId(region.key);
+    nodes.push(
+      baseNode({
+        nodeId: regionNodeId,
+        nodeCode: region.key,
+        nodeType: "sales_region",
+        displayName: region.name,
+        parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      }),
+    );
+    // Deliberately no name-based alias here: nothing in the app resolves a
+    // Sales Region from free text (only countries, e.g. a deal's `country`
+    // field, need that) and the "India" region shares its display name with
+    // the India country — legacy_value has a global uniqueness constraint,
+    // so aliasing both would collide. Regions are addressed by their stable
+    // derived ID (salesRegionNodeId(key)) instead.
+  }
+
+  for (const country of WORLD_COUNTRIES) {
+    const nodeId = countryNodeId(country.code);
+    nodes.push(
+      baseNode({
+        nodeId,
+        nodeCode: country.code.toLowerCase(),
+        nodeType: "country",
+        displayName: country.name,
+        parentNodeId: salesRegionNodeId(country.regionKey),
+      }),
+    );
+    addAlias(nodeId, country.name);
+    addAlias(nodeId, country.code);
+  }
+
+  nodes.push(
+    baseNode({
+      nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.maharashtra,
+      nodeCode: "in-mh",
+      nodeType: "province_state",
+      displayName: "Maharashtra",
+      parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+    }),
+  );
+  addAlias(GOVERNANCE_GEOGRAPHY_NODE_IDS.maharashtra, "Maharashtra");
+
+  return { nodes, aliases };
+}
+
 export function buildGovernanceSeedRows(input: {
   superAdminUserId: string;
   issuedAt?: string;
@@ -533,85 +654,7 @@ export function buildGovernanceSeedRows(input: {
     isSeed: true,
   };
 
-  const globalNode: GeographyNodeRecord = {
-    nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
-    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    nodeCode: "global",
-    nodeType: "global",
-    displayName: "Global",
-    parentNodeId: null,
-    validFrom: issuedAt,
-    validTo: null,
-    version: 1,
-    isSeed: true,
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
-  };
-
-  const apacNode: GeographyNodeRecord = {
-    nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.apac,
-    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    nodeCode: "apac",
-    nodeType: "sales_region",
-    displayName: "APAC",
-    parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
-    validFrom: issuedAt,
-    validTo: null,
-    version: 1,
-    isSeed: true,
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
-  };
-
-  const indiaNode: GeographyNodeRecord = {
-    nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
-    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    nodeCode: "in",
-    nodeType: "country",
-    displayName: "India",
-    parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.apac,
-    validFrom: issuedAt,
-    validTo: null,
-    version: 1,
-    isSeed: true,
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
-  };
-
-  const indiaWestNode: GeographyNodeRecord = {
-    nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.indiaWest,
-    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    nodeCode: "india-west",
-    nodeType: "sales_region",
-    displayName: "India West",
-    parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.apac,
-    validFrom: issuedAt,
-    validTo: null,
-    version: 1,
-    isSeed: true,
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
-  };
-
-  const maharashtraNode: GeographyNodeRecord = {
-    nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.maharashtra,
-    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
-    nodeCode: "in-mh",
-    nodeType: "province_state",
-    displayName: "Maharashtra",
-    parentNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
-    validFrom: issuedAt,
-    validTo: null,
-    version: 1,
-    isSeed: true,
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
-  };
+  const { nodes: geographyNodes, aliases: geographyAliases } = buildWorldGeographyRows(issuedAt);
 
   const assignment: AssignmentRecord = {
     assignmentId: GOVERNANCE_ASSIGNMENT_IDS.superAdmin,
@@ -643,59 +686,8 @@ export function buildGovernanceSeedRows(input: {
 
   return {
     tenants: [liveyTenant],
-    geographyNodes: [globalNode, apacNode, indiaNode, indiaWestNode, maharashtraNode],
-    geographyAliases: [
-      {
-        aliasId: "alias-global",
-        nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
-        legacyValue: "Global",
-        validFrom: issuedAt,
-        validTo: null,
-        source: "bootstrap",
-        isSeed: true,
-        createdAt: issuedAt,
-      },
-      {
-        aliasId: "alias-apac",
-        nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.apac,
-        legacyValue: "APAC",
-        validFrom: issuedAt,
-        validTo: null,
-        source: "bootstrap",
-        isSeed: true,
-        createdAt: issuedAt,
-      },
-      {
-        aliasId: "alias-india",
-        nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
-        legacyValue: "India",
-        validFrom: issuedAt,
-        validTo: null,
-        source: "bootstrap",
-        isSeed: true,
-        createdAt: issuedAt,
-      },
-      {
-        aliasId: "alias-india-west",
-        nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.indiaWest,
-        legacyValue: "India West",
-        validFrom: issuedAt,
-        validTo: null,
-        source: "bootstrap",
-        isSeed: true,
-        createdAt: issuedAt,
-      },
-      {
-        aliasId: "alias-maharashtra",
-        nodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.maharashtra,
-        legacyValue: "Maharashtra",
-        validFrom: issuedAt,
-        validTo: null,
-        source: "bootstrap",
-        isSeed: true,
-        createdAt: issuedAt,
-      },
-    ],
+    geographyNodes,
+    geographyAliases,
     assignments: [assignment],
     activeContexts: [
       issueActiveContextFromAssignment({

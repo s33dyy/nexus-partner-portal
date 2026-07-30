@@ -35,6 +35,7 @@ function buildDeal(overrides: Partial<DealRecord>): DealRecord {
     partner_id: null,
     is_hidden_to_team: false,
     reward_rate_percent: 5,
+    version: 1,
     is_seed: false,
     created_at: "2026-07-27T00:00:00.000Z",
     updated_at: "2026-07-27T00:00:00.000Z",

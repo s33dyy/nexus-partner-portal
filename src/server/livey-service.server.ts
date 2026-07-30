@@ -1226,12 +1226,15 @@ async function loadGovernedAuthState(userId: string) {
   };
 }
 
-export async function revokeUserSessionsAndContexts(input: {
-  userId: string;
-  reason: string;
-  revokedByContextId?: string | null;
-}) {
-  const sessionsResult = await pool.query(
+export async function revokeUserSessionsAndContexts(
+  input: {
+    userId: string;
+    reason: string;
+    revokedByContextId?: string | null;
+  },
+  client: Pick<PoolClient, "query"> = pool,
+) {
+  const sessionsResult = await client.query(
     `UPDATE sessions
      SET revoked_at = now(),
          revoked_by_context_id = $2,
@@ -1240,7 +1243,7 @@ export async function revokeUserSessionsAndContexts(input: {
     [input.userId, input.revokedByContextId ?? null, input.reason],
   );
 
-  const contextsResult = await pool.query(
+  const contextsResult = await client.query(
     `UPDATE active_contexts
      SET revoked_at = now(),
          revocation_reason = $2

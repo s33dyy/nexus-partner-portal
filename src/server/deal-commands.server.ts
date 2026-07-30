@@ -90,11 +90,13 @@ function authorizeDealActor(
     return { allowed: true, reason: null };
   }
 
-  // LIVEY-side roles (rm/pam/kam/isr/livey_support): a deal's free-text
-  // country/region cannot yet be resolved to a governed geography node with
-  // confidence, so only an assignment with a Global ceiling is trusted. This is
-  // a deliberate fail-closed choice rather than inferring scope from ambiguous
-  // legacy geography strings.
+  // LIVEY-side roles (rm/pam/kam/isr/livey_support): the governed geography
+  // tree now has full country/region data and aliases (world-geography.ts),
+  // but this command does not yet load that graph to resolve a deal's
+  // free-text country/region against a non-Global assignment ceiling — no
+  // such assignment exists in production today (only super_admin), so this
+  // is a deliberate fail-closed placeholder pending that follow-up, not
+  // evidence the data can't be resolved.
   if (actor.assignment.geographyCeilingNodeId === GOVERNANCE_GEOGRAPHY_NODE_IDS.global) {
     return { allowed: true, reason: null };
   }

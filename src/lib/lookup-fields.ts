@@ -43,6 +43,7 @@ export const LOOKUP_FIELDS = {
   geographyNodeType: "governance.geography_node_type",
   salesRegion: "governance.sales_region",
   countryCode: "governance.country_code",
+  countryCurrency: "geography.country_currency",
   provinceStateCode: "governance.province_state_code",
   taskCategory: "tasks.category",
   documentCategory: "documents.category",
