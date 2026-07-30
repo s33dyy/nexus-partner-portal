@@ -19,6 +19,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDealDocumentsRouteImport } from './routes/_authenticated/deal-documents'
 import { Route as AuthenticatedDealsRouteImport } from './routes/_authenticated/deals'
 import { Route as AuthenticatedDocumentsRouteImport } from './routes/_authenticated/documents'
+import { Route as AuthenticatedInsightHubRouteImport } from './routes/_authenticated/insight-hub'
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as AuthenticatedPartnerRouteImport } from './routes/_authenticated/partner'
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
@@ -29,6 +30,7 @@ import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedAdminAuditRouteImport } from './routes/_authenticated/admin.audit'
 import { Route as AuthenticatedAdminCatalogRouteImport } from './routes/_authenticated/admin.catalog'
 import { Route as AuthenticatedAdminDealsRouteImport } from './routes/_authenticated/admin.deals'
+import { Route as AuthenticatedAdminLearningRouteImport } from './routes/_authenticated/admin.learning'
 import { Route as AuthenticatedAdminNewsRouteImport } from './routes/_authenticated/admin.news'
 import { Route as AuthenticatedAdminPartnersRouteImport } from './routes/_authenticated/admin.partners'
 import { Route as AuthenticatedAdminRewardsRouteImport } from './routes/_authenticated/admin.rewards'
@@ -87,6 +89,11 @@ const AuthenticatedDocumentsRoute = AuthenticatedDocumentsRouteImport.update({
   path: '/documents',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedInsightHubRoute = AuthenticatedInsightHubRouteImport.update({
+  id: '/insight-hub',
+  path: '/insight-hub',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedNotificationsRoute =
   AuthenticatedNotificationsRouteImport.update({
     id: '/notifications',
@@ -139,6 +146,12 @@ const AuthenticatedAdminDealsRoute = AuthenticatedAdminDealsRouteImport.update({
   path: '/admin/deals',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedAdminLearningRoute =
+  AuthenticatedAdminLearningRouteImport.update({
+    id: '/admin/learning',
+    path: '/admin/learning',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminNewsRoute = AuthenticatedAdminNewsRouteImport.update({
   id: '/admin/news',
   path: '/admin/news',
@@ -190,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/deal-documents': typeof AuthenticatedDealDocumentsRoute
   '/deals': typeof AuthenticatedDealsRoute
   '/documents': typeof AuthenticatedDocumentsRoute
+  '/insight-hub': typeof AuthenticatedInsightHubRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
@@ -200,6 +214,7 @@ export interface FileRoutesByFullPath {
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
@@ -218,6 +233,7 @@ export interface FileRoutesByTo {
   '/deal-documents': typeof AuthenticatedDealDocumentsRoute
   '/deals': typeof AuthenticatedDealsRoute
   '/documents': typeof AuthenticatedDocumentsRoute
+  '/insight-hub': typeof AuthenticatedInsightHubRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
@@ -228,6 +244,7 @@ export interface FileRoutesByTo {
   '/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
@@ -248,6 +265,7 @@ export interface FileRoutesById {
   '/_authenticated/deal-documents': typeof AuthenticatedDealDocumentsRoute
   '/_authenticated/deals': typeof AuthenticatedDealsRoute
   '/_authenticated/documents': typeof AuthenticatedDocumentsRoute
+  '/_authenticated/insight-hub': typeof AuthenticatedInsightHubRoute
   '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
   '/_authenticated/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
@@ -258,6 +276,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/audit': typeof AuthenticatedAdminAuditRoute
   '/_authenticated/admin/catalog': typeof AuthenticatedAdminCatalogRoute
   '/_authenticated/admin/deals': typeof AuthenticatedAdminDealsRoute
+  '/_authenticated/admin/learning': typeof AuthenticatedAdminLearningRoute
   '/_authenticated/admin/news': typeof AuthenticatedAdminNewsRoute
   '/_authenticated/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/_authenticated/admin/rewards': typeof AuthenticatedAdminRewardsRoute
@@ -278,6 +297,7 @@ export interface FileRouteTypes {
     | '/deal-documents'
     | '/deals'
     | '/documents'
+    | '/insight-hub'
     | '/notifications'
     | '/partner'
     | '/pipeline'
@@ -288,6 +308,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/catalog'
     | '/admin/deals'
+    | '/admin/learning'
     | '/admin/news'
     | '/admin/partners'
     | '/admin/rewards'
@@ -306,6 +327,7 @@ export interface FileRouteTypes {
     | '/deal-documents'
     | '/deals'
     | '/documents'
+    | '/insight-hub'
     | '/notifications'
     | '/partner'
     | '/pipeline'
@@ -316,6 +338,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/catalog'
     | '/admin/deals'
+    | '/admin/learning'
     | '/admin/news'
     | '/admin/partners'
     | '/admin/rewards'
@@ -335,6 +358,7 @@ export interface FileRouteTypes {
     | '/_authenticated/deal-documents'
     | '/_authenticated/deals'
     | '/_authenticated/documents'
+    | '/_authenticated/insight-hub'
     | '/_authenticated/notifications'
     | '/_authenticated/partner'
     | '/_authenticated/pipeline'
@@ -345,6 +369,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/audit'
     | '/_authenticated/admin/catalog'
     | '/_authenticated/admin/deals'
+    | '/_authenticated/admin/learning'
     | '/_authenticated/admin/news'
     | '/_authenticated/admin/partners'
     | '/_authenticated/admin/rewards'
@@ -433,6 +458,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDocumentsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/insight-hub': {
+      id: '/_authenticated/insight-hub'
+      path: '/insight-hub'
+      fullPath: '/insight-hub'
+      preLoaderRoute: typeof AuthenticatedInsightHubRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/notifications': {
       id: '/_authenticated/notifications'
       path: '/notifications'
@@ -501,6 +533,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/deals'
       fullPath: '/admin/deals'
       preLoaderRoute: typeof AuthenticatedAdminDealsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/admin/learning': {
+      id: '/_authenticated/admin/learning'
+      path: '/admin/learning'
+      fullPath: '/admin/learning'
+      preLoaderRoute: typeof AuthenticatedAdminLearningRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/admin/news': {
@@ -577,6 +616,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedDealDocumentsRoute: typeof AuthenticatedDealDocumentsRoute
   AuthenticatedDealsRoute: typeof AuthenticatedDealsRoute
   AuthenticatedDocumentsRoute: typeof AuthenticatedDocumentsRoute
+  AuthenticatedInsightHubRoute: typeof AuthenticatedInsightHubRoute
   AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
   AuthenticatedPartnerRoute: typeof AuthenticatedPartnerRouteWithChildren
   AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
@@ -587,6 +627,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminAuditRoute: typeof AuthenticatedAdminAuditRoute
   AuthenticatedAdminCatalogRoute: typeof AuthenticatedAdminCatalogRoute
   AuthenticatedAdminDealsRoute: typeof AuthenticatedAdminDealsRoute
+  AuthenticatedAdminLearningRoute: typeof AuthenticatedAdminLearningRoute
   AuthenticatedAdminNewsRoute: typeof AuthenticatedAdminNewsRoute
   AuthenticatedAdminPartnersRoute: typeof AuthenticatedAdminPartnersRoute
   AuthenticatedAdminRewardsRoute: typeof AuthenticatedAdminRewardsRoute
@@ -600,6 +641,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedDealDocumentsRoute: AuthenticatedDealDocumentsRoute,
   AuthenticatedDealsRoute: AuthenticatedDealsRoute,
   AuthenticatedDocumentsRoute: AuthenticatedDocumentsRoute,
+  AuthenticatedInsightHubRoute: AuthenticatedInsightHubRoute,
   AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
   AuthenticatedPartnerRoute: AuthenticatedPartnerRouteWithChildren,
   AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
@@ -610,6 +652,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminAuditRoute: AuthenticatedAdminAuditRoute,
   AuthenticatedAdminCatalogRoute: AuthenticatedAdminCatalogRoute,
   AuthenticatedAdminDealsRoute: AuthenticatedAdminDealsRoute,
+  AuthenticatedAdminLearningRoute: AuthenticatedAdminLearningRoute,
   AuthenticatedAdminNewsRoute: AuthenticatedAdminNewsRoute,
   AuthenticatedAdminPartnersRoute: AuthenticatedAdminPartnersRoute,
   AuthenticatedAdminRewardsRoute: AuthenticatedAdminRewardsRoute,

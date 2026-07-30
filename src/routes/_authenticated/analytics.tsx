@@ -135,21 +135,35 @@ function AnalyticsPage() {
       return sum + resolveUsdAmount(deal);
     }, 0);
     const won = deals.filter((deal) => deal.stage === "won").length;
+    const lost = deals.filter((deal) => deal.stage === "lost").length;
     const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
+    const total = won + lost;
+    const winRate = total > 0 ? Math.round((won / total) * 100) : 0;
     const avgHealth = customers.length
       ? Math.round(
           customers.reduce((sum, customer) => sum + customer.health_score, 0) / customers.length,
         )
       : 0;
-    return { pipeline, won, open, avgHealth };
+    return { pipeline, won, lost, open, avgHealth, winRate };
   }, [customers, deals]);
 
   const stageData = useMemo(() => {
     return DEAL_STAGE_ORDER.map((stage) => ({
       stage,
       count: deals.filter((deal) => deal.stage === stage).length,
+      value: deals
+        .filter((deal) => deal.stage === stage)
+        .reduce((sum, deal) => sum + resolveUsdAmount(deal), 0),
     }));
   }, [deals]);
+
+  const winLossFunnel = useMemo(() => [
+    { label: "Won", count: deals.filter((d) => d.stage === "won").length, color: "bg-emerald-500" },
+    { label: "Lost", count: deals.filter((d) => d.stage === "lost").length, color: "bg-destructive" },
+    { label: "Open", count: totals.open, color: "bg-primary" },
+  ], [deals, totals.open]);
+
+  const maxWinLoss = Math.max(1, ...winLossFunnel.map((i) => i.count));
 
   const healthBands = useMemo(() => {
     const bands = [
@@ -242,7 +256,7 @@ function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Metric
           label="Pipeline value"
           value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
@@ -250,6 +264,7 @@ function AnalyticsPage() {
         />
         <Metric label="Won deals" value={String(totals.won)} hint="Closed opportunities" />
         <Metric label="Open deals" value={String(totals.open)} hint="Still moving" />
+        <Metric label="Win rate" value={`${totals.winRate}%`} hint="Won vs. Won+Lost" />
         <Metric label="Avg. health" value={`${totals.avgHealth}%`} hint="Across live customers" />
       </div>
 
@@ -274,7 +289,12 @@ function AnalyticsPage() {
                 <div key={item.stage} className="space-y-1">
                   <div className="flex items-center justify-between text-sm">
                     <span className="capitalize">{item.stage}</span>
-                    <span className="font-medium">{item.count}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground">
+                        ${item.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                      </span>
+                      <span className="w-6 text-right font-medium">{item.count}</span>
+                    </div>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
@@ -317,6 +337,44 @@ function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle className="text-base">Win / Loss funnel</CardTitle>
+          <CardDescription>
+            How resolved deals break down between wins, losses, and still-open opportunities.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-6">
+          {deals.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+              No deal records yet.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-3">
+              {winLossFunnel.map((item) => (
+                <div key={item.label} className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium">{item.label}</span>
+                    <span className="text-muted-foreground">{item.count}</span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full rounded-full ${item.color}`}
+                      style={{ width: `${(item.count / maxWinLoss) * 100}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {deals.length > 0
+                      ? `${Math.round((item.count / deals.length) * 100)}% of all deals`
+                      : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <Card>

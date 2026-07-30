@@ -15,6 +15,7 @@ import {
   Sparkles,
   Trophy,
   CheckSquare,
+  GraduationCap,
 } from "lucide-react";
 
 import {
@@ -47,6 +48,7 @@ const workspace: Item[] = [
   { title: "Tasks", url: "/tasks", icon: CheckSquare },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Insight Hub", url: "/insight-hub", icon: GraduationCap },
 ];
 
 const portal: Item[] = [
@@ -68,6 +70,7 @@ const admin: Item[] = [
   { title: "Product Catalog", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
   { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
   { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
+  { title: "Learning", url: "/admin/learning", icon: GraduationCap, roles: ["super_admin"] },
   { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
 ];
 
