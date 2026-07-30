@@ -81,6 +81,8 @@ type DealRow = {
   stage: string;
   status: string;
   partner_id: string | null;
+  country: string | null;
+  region: string | null;
   version: number;
   account_name: string;
 };
@@ -131,6 +133,8 @@ function baseDealRow(overrides: Partial<DealRow> = {}): DealRow {
     stage: "sourced",
     status: "submitted",
     partner_id: "partner-1",
+    country: "India",
+    region: "India West",
     version: 3,
     account_name: "Acme Co",
     ...overrides,
@@ -179,8 +183,10 @@ test("moveDealStageForward denies when partner-scoped assignment does not match 
   }
 });
 
-test("moveDealStageForward denies a LIVEY-side assignment with a non-global geography ceiling", async () => {
-  const harness = await installFakePool(baseDealRow())();
+test("moveDealStageForward denies a LIVEY-side assignment outside its geography ceiling", async () => {
+  const harness = await installFakePool(
+    baseDealRow({ country: "Singapore", region: "Asia Pacific" }),
+  )();
   try {
     const { moveDealStageForward } = await import("@/server/deal-commands.server");
     const actor = buildActor({
@@ -197,6 +203,26 @@ test("moveDealStageForward denies a LIVEY-side assignment with a non-global geog
     if (!result.ok) {
       expect(result.failure.code).toBe("POLICY_DENIED");
     }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("moveDealStageForward allows a LIVEY-side assignment inside its geography ceiling", async () => {
+  const harness = await installFakePool(baseDealRow({ country: "India", region: "India West" }))();
+  try {
+    const { moveDealStageForward } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "rm",
+      teamDomain: "sales",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+    });
+    const result = await moveDealStageForward({
+      actor,
+      dealId: "deal-1",
+      expectedVersion: 3,
+    });
+    expect(result.ok).toBe(true);
   } finally {
     harness.restore();
   }
@@ -499,6 +525,38 @@ test("createDeal forces a partner-scoped actor's own partner onto the new deal",
     expect(result.ok).toBe(true);
     const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
     expect(dealInsert?.params[26]).toBe("partner-own");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal denies a LIVEY-side actor outside their geography ceiling", async () => {
+  const harness = await installFakeCreatePool()();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "rm",
+      teamDomain: "sales",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+    });
+    const result = await createDeal({
+      actor,
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        ownerName: "Jane Doe",
+        country: "Singapore",
+        region: "Asia Pacific",
+        product: "WC350",
+        amount: "1000",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("POLICY_DENIED");
+    }
+    expect(harness.insertCalls).toHaveLength(0);
   } finally {
     harness.restore();
   }

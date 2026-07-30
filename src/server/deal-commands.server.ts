@@ -11,8 +11,12 @@ import {
 } from "@/domain/contracts/commands";
 import {
   GOVERNANCE_GEOGRAPHY_NODE_IDS,
+  buildGeographyGraph,
+  buildGovernanceSeedRows,
+  containsGeography,
   evaluateActiveContextPolicy,
   type PolicyDecision,
+  countryNodeId,
 } from "@/domain/contracts/governance";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { SALES_REGIONS, resolveCountryForText } from "@/domain/contracts/world-geography";
@@ -30,6 +34,12 @@ import {
 } from "@/server/governed-actor.server";
 
 const DEAL_EVENT_SCHEMA_VERSION = 1;
+const GOVERNANCE_GEOGRAPHY_GRAPH = (() => {
+  const seedRows = buildGovernanceSeedRows({
+    superAdminUserId: "__geography_authorizer__",
+  });
+  return buildGeographyGraph(seedRows.geographyNodes, seedRows.geographyAliases);
+})();
 
 // The canonical blueprint defines eight deal stages with no "approved" stage —
 // "approved" belongs to the PO/outcome review status, not the pipeline. The
@@ -64,13 +74,15 @@ type DealSnapshot = {
   stage: DealStage;
   status: string;
   partner_id: string | null;
+  country: string | null;
+  region: string | null;
   version: number;
   account_name: string;
 };
 
 function authorizeDealActor(
   actor: DealCommandActor,
-  deal: Pick<DealSnapshot, "partner_id">,
+  deal: Pick<DealSnapshot, "partner_id" | "country" | "region">,
 ): PolicyDecision {
   const basePolicy = evaluateActiveContextPolicy({
     roles: [actor.assignment.roleKey],
@@ -98,30 +110,44 @@ function authorizeDealActor(
     return { allowed: true, reason: null };
   }
 
-  // LIVEY-side roles (rm/pam/kam/isr/livey_support): the governed geography
-  // tree now has full country/region data and aliases (world-geography.ts),
-  // but this command does not yet load that graph to resolve a deal's
-  // free-text country/region against a non-Global assignment ceiling — no
-  // such assignment exists in production today (only super_admin), so this
-  // is a deliberate fail-closed placeholder pending that follow-up, not
-  // evidence the data can't be resolved.
   if (actor.assignment.geographyCeilingNodeId === GOVERNANCE_GEOGRAPHY_NODE_IDS.global) {
+    return { allowed: true, reason: null };
+  }
+
+  const resolvedCountry = resolveCountryForText(deal.country ?? deal.region);
+  if (!resolvedCountry) {
+    return {
+      allowed: false,
+      reason: "Deal geography could not be resolved for this assignment",
+      denial: makePolicyDenial(
+        null,
+        "Deal geography could not be resolved for this assignment",
+      ),
+    };
+  }
+
+  const dealCountryNodeId = countryNodeId(resolvedCountry.code);
+  if (
+    containsGeography(
+      GOVERNANCE_GEOGRAPHY_GRAPH,
+      actor.assignment.geographyCeilingNodeId,
+      dealCountryNodeId,
+    )
+  ) {
     return { allowed: true, reason: null };
   }
 
   return {
     allowed: false,
-    reason: "Deal geography scope could not be verified for this assignment",
-    denial: makePolicyDenial(
-      null,
-      "Deal geography scope could not be verified for this assignment",
-    ),
+    reason: "Deal is outside the assignment's geography scope",
+    denial: makePolicyDenial(null, "Deal is outside the assignment's geography scope"),
   };
 }
 
 async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSnapshot | null> {
   const { rows } = await tx.query(
     `SELECT id, stage, status, partner_id, version, account_name
+            , country, region
      FROM portal_deals WHERE id = $1 FOR UPDATE`,
     [dealId],
   );
@@ -131,6 +157,8 @@ async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSn
         stage: string;
         status: string;
         partner_id: string | null;
+        country: string | null;
+        region: string | null;
         version: number;
         account_name: string;
       }
@@ -141,6 +169,8 @@ async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSn
     stage: row.stage as DealStage,
     status: row.status,
     partner_id: row.partner_id,
+    country: row.country ?? null,
+    region: row.region ?? null,
     version: Number(row.version),
     account_name: row.account_name,
   };
@@ -511,16 +541,19 @@ export async function createDeal(input: {
 
   return withTransaction(async (tx) => {
     const resolvedPartnerId = resolveCreatePartnerId(input.actor, data.partnerId ?? null);
-    const policy = authorizeDealActor(input.actor, { partner_id: resolvedPartnerId });
-    if (!policy.allowed) {
-      return { ok: false, failure: policy.denial, correlationId };
-    }
-
     const country = data.country?.trim() || "India";
     const region = data.region?.trim() || resolveRegionForCountry(country);
     const currencyCode = (data.currencyCode?.trim() || "USD").toUpperCase();
     const amountValue = data.amountValue ?? parseDealAmount(amount);
     const amountUsd = currencyCode === "USD" ? amountValue : (data.amountUsd ?? null);
+    const policy = authorizeDealActor(input.actor, {
+      partner_id: resolvedPartnerId,
+      country,
+      region,
+    });
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
     const autoApproved = !requiresSuperAdminApproval(amountUsd ?? amountValue);
     const status = autoApproved ? "approved" : "submitted";
     const stage: DealStage = "sourced";
