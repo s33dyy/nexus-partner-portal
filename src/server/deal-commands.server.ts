@@ -10,13 +10,16 @@ import {
 import {
   GOVERNANCE_GEOGRAPHY_NODE_IDS,
   evaluateActiveContextPolicy,
-  type ActiveContextRecord,
-  type AssignmentRecord,
   type PolicyDecision,
 } from "@/domain/contracts/governance";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { DEAL_STAGE_ORDER, type DealStage } from "@/lib/portal-records";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
+import {
+  resolveGovernedActor,
+  type GovernedActor,
+  type ResolveGovernedActorInput,
+} from "@/server/governed-actor.server";
 
 const DEAL_EVENT_SCHEMA_VERSION = 1;
 
@@ -44,35 +47,9 @@ function isBackwardMove(from: DealStage, to: DealStage): boolean {
   return fromIndex >= 0 && toIndex >= 0 && toIndex < fromIndex;
 }
 
-export type DealCommandActor = {
-  userId: string;
-  assignment: AssignmentRecord;
-  activeContext: ActiveContextRecord;
-};
-
-export type ResolveDealCommandActorInput = {
-  userId: string | null;
-  assignment: AssignmentRecord | null;
-  activeContext: ActiveContextRecord | null;
-};
-
-export function resolveDealCommandActor(
-  input: ResolveDealCommandActorInput,
-):
-  | { ok: true; actor: DealCommandActor }
-  | { ok: false; failure: ReturnType<typeof makePolicyDenial> } {
-  if (!input.userId || !input.assignment || !input.activeContext) {
-    return { ok: false, failure: makePolicyDenial(null, "Active context is required") };
-  }
-  return {
-    ok: true,
-    actor: {
-      userId: input.userId,
-      assignment: input.assignment,
-      activeContext: input.activeContext,
-    },
-  };
-}
+export type DealCommandActor = GovernedActor;
+export type ResolveDealCommandActorInput = ResolveGovernedActorInput;
+export const resolveDealCommandActor = resolveGovernedActor;
 
 type DealSnapshot = {
   id: string;

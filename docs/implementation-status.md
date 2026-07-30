@@ -3,7 +3,7 @@
 ## Phase
 
 - Phase 2: Deals, Pricing, Pipeline, Tasks, and Rewards
-- Checkpoint: deal lifecycle domain commands (2C slice: stage transitions, Won/Lost) landed; customer merge/participant governance and pricing foundations landed previously; broader phase 2 still in progress
+- Checkpoint: deal lifecycle domain commands (2C slice: stage transitions, Won/Lost) landed; customer merge/participant governance and pricing foundations landed previously; identity.change_user_role added as a named command (closes a live "Edit user" bug); broader phase 2 still in progress
 - Previous checkpoint: Phase 0 (0A-0E) complete
 - Phase 1 status: data model (tenant/geography/assignment/active-context) is in place, but a dedicated audit found Phase 1 enforcement is **not** at its exit gate — see "Phase 1 Audit Findings" below. Phase 2 work is proceeding on top of this partial foundation per explicit user direction rather than blocking on full Phase 1 closure.
 
@@ -97,7 +97,21 @@ While investigating a live report that "Users & Roles" showed only 1 user for a 
 - Add a real Active Context chooser/switcher and make navigation capability-generated (Phase 1 gaps).
 - Add route-level denial and fallback states for the remaining partner-facing screens.
 - Expand RBAC/tenant-isolation test coverage toward the full role × scope × assignment-state matrix required by the blueprint.
-- **Known broken feature, not fixed this session (needs a decision, not just a bypass)**: `admin.users.tsx`'s "Edit user" role-change flow (`saveRoles()`) always fails with "Failed to update user" for every role including super_admin. `user_roles` is deliberately in `table-policy.server.ts`'s `BOOTSTRAP_READ_ONLY_TABLES`, which rejects every non-select/count operation unconditionally — this predates this session and is consistent with the blueprint's "named domain commands are the only way to perform lifecycle changes" rule (`assignments`/`active_contexts`/`sessions` are the same). The UI was built assuming direct writes would work. Proper fix is a named "change user role" command (ties into the still-missing assignment-lifecycle commands in gap 4 above); a narrower stopgap would be allowing `user_roles` writes through the generic path for super_admin only. Left as-is pending a decision since it's an architectural call, not a bug fix.
+- ~~Known broken feature: `admin.users.tsx`'s "Edit user" role-change flow~~ — **fixed** (see below). `assignments`/`active_contexts`/`sessions` remain read-only via the generic path with no named commands yet; that part of gap 4 is still open.
+
+### Fixed: "Edit user" role-change flow via a real named command (2026-07-30)
+
+Built `identity.change_user_role` as the first named domain command outside the deal aggregate, following the same pattern as `deal-commands.server.ts`: `src/server/user-role-commands.server.ts` loads the target user's current `user_roles` rows, checks policy via `evaluateActiveContextPolicy` plus `governance.ts`'s existing `canGrantRole` (super_admin can grant anything; partner_admin can only grant partner_user; no other role can grant), and atomically replaces the role set (`user_roles` only has one governed role per user today) plus writes a `domain_activity_events` row and a `command_outbox` envelope in one transaction. Existence-safe: a user with zero roles denies with `POLICY_DENIED` rather than a distinguishable "not found."
+
+`user_roles.role` is the Postgres `app_role` enum (`super_admin`/`partner_admin`/`partner_user` only) — a different, smaller set than the governance `RoleKey` taxonomy (`rm`/`pam`/`kam`/... which belongs to the mostly-unwired Assignment system). The command validates against `app_role`'s three values specifically, not the full `RoleKey` union.
+
+Extracted the actor-resolution helper (`resolveDealCommandActor`/`DealCommandActor`) out of `deal-commands.server.ts` into a shared `src/server/governed-actor.server.ts` (`resolveGovernedActor`/`GovernedActor`), since this is the second command module needing the identical pattern. `deal-commands.server.ts`'s existing exports are preserved as thin re-exports, so no other file needed to change.
+
+Wired `admin.users.tsx`'s `saveRoles()` to call the command instead of the blocked direct `user_roles` delete+insert; the `profiles.partner_status` update alongside it is untouched (it already worked once the earlier self-service-table fix landed).
+
+Known scoped limitation: `user_roles` has no version column, so this command does not have true optimistic concurrency — `newVersion` is a placeholder `1`. Not a regression (the old code had none either), but worth closing if this table ever gets concurrent-edit pressure.
+
+Added 7 regression tests (`user-role-commands.server.test.ts`): unknown-role rejection, escalation denial, partner_admin granting partner_user, inactive-assignment denial, no-op when role is unchanged, existence-safe denial for a roleless user, and the full BEGIN/SELECT/DELETE/INSERT×2/COMMIT transaction shape.
 
 ## Migrations Created
 
@@ -193,3 +207,12 @@ While fixing this, also found and fixed two related gaps in the same area:
 Also added `version` to `portal_deals`'s `TABLE_COLUMNS` (harmless gap — nothing writes it via the generic path yet, since the new deal-command module writes it via raw SQL, but left stale it would have silently dropped `version` from any future generic-path deal update) and added `deal_participants` to `TABLE_COLUMNS` for forward-compatibility with the still-unwired deal-participant-tagging feature noted in Remaining Items.
 
 Added a regression test (`livey-service.server.test.ts`) asserting every table name referenced by a client `.from(...)` call across `src/routes`, `src/lib`, `src/hooks`, and `src/components` is registered in `TABLE_COLUMNS` — confirmed it fails with the original `Unsupported table: customer_merge_events` error when the entries are removed. Added scoping regression tests in `table-policy.server.test.ts` for the three newly-scoped tables (partner-scoped for ordinary roles, unscoped for super_admin).
+
+- `bun test src/server/user-role-commands.server.test.ts`
+- Result: `7 pass`, `0 fail`, `17 expect() calls`
+- `bun test` (full suite)
+- Result: `169 pass`, `0 fail`, `1646 expect() calls`
+- `bunx tsc --noEmit -p tsconfig.json` (scoped) / `bunx eslint` on all touched files
+- Result: no errors, no warnings (after auto-formatting)
+- `bun run build`
+- Result: client, SSR, and Nitro builds completed successfully after the identity.change_user_role command

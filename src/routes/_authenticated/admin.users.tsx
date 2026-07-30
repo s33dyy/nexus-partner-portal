@@ -1,6 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Loader2, RefreshCw, Search, ShieldCheck, Upload, UserRoundCog } from "lucide-react";
+import {
+  Download,
+  Loader2,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Upload,
+  UserRoundCog,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -19,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
+import { changeUserRole } from "@/integrations/local/user-role-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
@@ -180,14 +189,14 @@ function AdminUsersPage() {
     if (!selectedUser) return;
     setSaving(true);
     try {
-      const deleteRes = await supabase.from("user_roles").delete().eq("user_id", selectedUser.id);
-      if (deleteRes.error) throw deleteRes.error;
-      const insertRes = await supabase.from("user_roles").insert({
-        user_id: selectedUser.id,
-        role: draftRole,
-        is_seed: selectedUser.is_seed,
+      const roleResult = await changeUserRole({
+        targetUserId: selectedUser.id,
+        newRole: draftRole,
       });
-      if (insertRes.error) throw insertRes.error;
+      if (!roleResult.ok) {
+        toast.error(roleResult.failure.message);
+        return;
+      }
       const nextStatus = draftStatus;
       const profileRes = await supabase
         .from("profiles")
@@ -226,9 +235,9 @@ function AdminUsersPage() {
 
       if (selectedUser.partner_id) {
         const partnerRes = await supabase
-        .from("partners")
-        .update({ status: "approved" })
-        .eq("id", selectedUser.partner_id);
+          .from("partners")
+          .update({ status: "approved" })
+          .eq("id", selectedUser.partner_id);
         if (partnerRes.error) throw partnerRes.error;
       }
 
@@ -390,7 +399,11 @@ function AdminUsersPage() {
             onClick={() => importInputRef.current?.click()}
             disabled={importing}
           >
-            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {importing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
             Import CSV/XLSX
           </Button>
         </div>
@@ -638,9 +651,12 @@ function AdminUsersPage() {
                   disabled={
                     saving ||
                     (selectedUser.partner_id
-                      ? !["partial_approval", "pending_agreement", "signed_pending_review", "approved"].includes(
-                          selectedUser.partner_status,
-                        )
+                      ? ![
+                          "partial_approval",
+                          "pending_agreement",
+                          "signed_pending_review",
+                          "approved",
+                        ].includes(selectedUser.partner_status)
                       : false) ||
                     selectedUser.partner_status === "approved" ||
                     selectedUser.roles.includes("super_admin")
