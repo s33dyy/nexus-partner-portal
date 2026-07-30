@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import {
-  getDealInrAmount,
+  getDealUsdAmount,
   normalizeDealCurrencyCode,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -18,13 +18,13 @@ test("requiresSuperAdminApproval only requires review for deals strictly above $
   expect(requiresSuperAdminApproval("$5,000.01")).toBe(true);
 });
 
-test("normalizeDealCurrencyCode uppercases values and defaults blanks to INR", () => {
+test("normalizeDealCurrencyCode uppercases values and defaults blanks to USD", () => {
   expect(normalizeDealCurrencyCode(" usd ")).toBe("USD");
-  expect(normalizeDealCurrencyCode("")).toBe("INR");
-  expect(normalizeDealCurrencyCode(null)).toBe("INR");
+  expect(normalizeDealCurrencyCode("")).toBe("USD");
+  expect(normalizeDealCurrencyCode(null)).toBe("USD");
 });
 
-test("getDealInrAmount prefers stored INR equivalents and falls back to parsing the raw amount", () => {
-  expect(getDealInrAmount({ amount: "$10", amount_inr: 834.5 })).toBe(834.5);
-  expect(getDealInrAmount({ amount: "₹9,20,000", amount_inr: null })).toBe(920000);
+test("getDealUsdAmount prefers stored USD equivalents and falls back to parsing the raw amount", () => {
+  expect(getDealUsdAmount({ amount: "$10", amount_usd: 834.5 })).toBe(834.5);
+  expect(getDealUsdAmount({ amount: "₹9,20,000", amount_usd: null })).toBe(920000);
 });

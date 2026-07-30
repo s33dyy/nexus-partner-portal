@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
+import { RegionFilterSelect } from "@/components/region-filter-select";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { buildShellContextSummary } from "@/components/app-shell.utils";
@@ -145,6 +146,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {contextLabel}
           </Badge>
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <RegionFilterSelect />
             <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
               {statusLabel[status]}
             </Badge>

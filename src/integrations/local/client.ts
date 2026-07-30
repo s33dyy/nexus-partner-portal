@@ -137,11 +137,11 @@ const createTeamMembersBulk = createServerFn({ method: "POST" })
     return createPartnerTeamMembersBulk(data);
   });
 
-const quoteFxToInr = createServerFn({ method: "POST" })
+const quoteFxToUsd = createServerFn({ method: "POST" })
   .validator((input: { sourceCurrency: string; amount: number }) => input)
   .handler(async ({ data }) => {
-    const { quoteCurrencyToInr } = await import("@/server/fx-rates.server");
-    return quoteCurrencyToInr(data);
+    const { quoteCurrencyToUsd } = await import("@/server/fx-rates.server");
+    return quoteCurrencyToUsd(data);
   });
 
 const requestReset = createServerFn({ method: "POST" })
@@ -484,7 +484,7 @@ type AuthApi = {
       status: "invited" | "active" | "paused";
     }>;
   }) => Promise<RpcResult<{ createdCount: number }>>;
-  quoteCurrencyToInr: (input: {
+  quoteCurrencyToUsd: (input: {
     sourceCurrency: string;
     amount: number;
   }) => Promise<
@@ -492,7 +492,7 @@ type AuthApi = {
       sourceCurrency: string;
       amount: number;
       rate: number;
-      computedInrAmount: number;
+      computedUsdAmount: number;
       provider: string;
       timestamp: string;
     }>
@@ -614,9 +614,9 @@ const auth: AuthApi = {
       };
     }
   },
-  async quoteCurrencyToInr(input) {
+  async quoteCurrencyToUsd(input) {
     try {
-      const data = await quoteFxToInr({ data: input });
+      const data = await quoteFxToUsd({ data: input });
       return { data, error: null };
     } catch (error) {
       return {

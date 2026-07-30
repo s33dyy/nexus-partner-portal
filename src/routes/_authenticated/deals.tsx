@@ -48,6 +48,7 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { awardDealWinPoints } from "@/lib/rewards";
+import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
@@ -76,7 +77,7 @@ import { canViewDeal } from "@/lib/deal-visibility";
 import {
   DEAL_CURRENCY_OPTIONS,
   DEAL_STAGE_ORDER,
-  getDealInrAmount,
+  getDealUsdAmount,
   nextDealStage,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -106,7 +107,7 @@ type DealForm = {
   amount: string;
   currency_code: string;
   amount_value: number | null;
-  amount_inr: number | null;
+  amount_usd: number | null;
   fx_rate: number | null;
   fx_provider: string | null;
   fx_rate_fetched_at: string | null;
@@ -132,7 +133,7 @@ type DealEditForm = {
   amount: string;
   currency_code: string;
   amount_value: number | null;
-  amount_inr: number | null;
+  amount_usd: number | null;
   fx_rate: number | null;
   fx_provider: string | null;
   fx_rate_fetched_at: string | null;
@@ -158,9 +159,9 @@ const EMPTY_FORM: DealForm = {
   stage: "sourced",
   quantity: 1,
   amount: "",
-  currency_code: "INR",
+  currency_code: "USD",
   amount_value: null,
-  amount_inr: null,
+  amount_usd: null,
   fx_rate: null,
   fx_provider: null,
   fx_rate_fetched_at: null,
@@ -199,11 +200,11 @@ function normalizeNullableNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function formatInrAmount(value: number | null) {
+function formatUsdAmount(value: number | null) {
   if (!Number.isFinite(value ?? Number.NaN)) return "Unavailable";
-  return new Intl.NumberFormat("en-IN", {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "INR",
+    currency: "USD",
     maximumFractionDigits: 2,
   }).format(value ?? 0);
 }
@@ -218,9 +219,9 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     product: deal.product,
     quantity: deal.quantity,
     amount: deal.amount,
-    currency_code: deal.currency_code || "INR",
+    currency_code: deal.currency_code || "USD",
     amount_value: normalizeNullableNumber(deal.amount_value),
-    amount_inr: normalizeNullableNumber(deal.amount_inr),
+    amount_usd: normalizeNullableNumber(deal.amount_usd),
     fx_rate: normalizeNullableNumber(deal.fx_rate),
     fx_provider: deal.fx_provider ?? null,
     fx_rate_fetched_at: deal.fx_rate_fetched_at ?? null,
@@ -252,7 +253,7 @@ const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "quantity", header: "Quantity" },
   { key: "amount", header: "Amount" },
   { key: "currency_code", header: "Currency" },
-  { key: "amount_inr", header: "INR Equivalent" },
+  { key: "amount_usd", header: "USD Equivalent" },
   { key: "customer_budget", header: "Customer Budget" },
   { key: "possible_close_date", header: "Possible Close Date" },
   { key: "close_date", header: "Close Date" },
@@ -320,6 +321,7 @@ function DealsPage() {
   );
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const { profile, hasRole } = useAuth();
+  const { selectedRegion } = useRegionFilter();
   useRequireAccess("full");
   const query = search.q ?? "";
   const stageFilter = search.stage ?? "all";
@@ -354,9 +356,9 @@ function DealsPage() {
 
       const rows = ((dealResult.data as DealRecord[] | null) ?? []).map((deal) => ({
         ...deal,
-        currency_code: deal.currency_code || "INR",
+        currency_code: deal.currency_code || "USD",
         amount_value: normalizeNullableNumber(deal.amount_value),
-        amount_inr: normalizeNullableNumber(deal.amount_inr),
+        amount_usd: normalizeNullableNumber(deal.amount_usd),
         fx_rate: normalizeNullableNumber(deal.fx_rate),
         possible_close_date: toDateInputValue(deal.possible_close_date),
         close_date: toDateInputValue(deal.close_date),
@@ -631,22 +633,27 @@ function DealsPage() {
     setSelectedDealEditing(false);
   }, [collaboratorsByDealId, selectedDeal]);
 
+  const regionScopedDeals = useMemo(
+    () => deals.filter((deal) => matchesSelectedRegion(deal.country, selectedRegion)),
+    [deals, selectedRegion],
+  );
+
   const filteredDeals = useMemo(() => {
-    return filterDealsByView(deals, {
+    return filterDealsByView(regionScopedDeals, {
       query,
       stage: stageFilter,
       status: statusFilter,
     });
-  }, [deals, query, stageFilter, statusFilter]);
+  }, [regionScopedDeals, query, stageFilter, statusFilter]);
 
   useEffect(() => {
-    if (draft.currency_code === "INR") {
+    if (draft.currency_code === "USD") {
       setConvertingCurrency(false);
       setCurrencyPreviewError(null);
       setDraft((current) => ({
         ...current,
         amount_value: current.amount.trim() ? parseDealAmount(current.amount) : null,
-        amount_inr: current.amount.trim() ? parseDealAmount(current.amount) : null,
+        amount_usd: current.amount.trim() ? parseDealAmount(current.amount) : null,
         fx_rate: 1,
         fx_provider: "internal",
         fx_rate_fetched_at: new Date().toISOString(),
@@ -661,7 +668,7 @@ function DealsPage() {
       setDraft((current) => ({
         ...current,
         amount_value: amountValue > 0 ? amountValue : null,
-        amount_inr: null,
+        amount_usd: null,
         fx_rate: null,
         fx_provider: null,
         fx_rate_fetched_at: null,
@@ -674,18 +681,18 @@ function DealsPage() {
     setCurrencyPreviewError(null);
     const timer = window.setTimeout(() => {
       void (async () => {
-        const { data, error } = await supabase.auth.quoteCurrencyToInr({
+        const { data, error } = await supabase.auth.quoteCurrencyToUsd({
           sourceCurrency: draft.currency_code,
           amount: amountValue,
         });
         if (!active) return;
         setConvertingCurrency(false);
         if (error || !data) {
-          setCurrencyPreviewError(error?.message ?? "Unable to load INR conversion");
+          setCurrencyPreviewError(error?.message ?? "Unable to load USD conversion");
           setDraft((current) => ({
             ...current,
             amount_value: amountValue,
-            amount_inr: null,
+            amount_usd: null,
             fx_rate: null,
             fx_provider: null,
             fx_rate_fetched_at: null,
@@ -695,7 +702,7 @@ function DealsPage() {
         setDraft((current) => ({
           ...current,
           amount_value: data.amount,
-          amount_inr: data.computedInrAmount,
+          amount_usd: data.computedUsdAmount,
           fx_rate: data.rate,
           fx_provider: data.provider,
           fx_rate_fetched_at: data.timestamp,
@@ -710,10 +717,10 @@ function DealsPage() {
   }, [draft.amount, draft.currency_code]);
 
   const selectedDealDraftAmount = selectedDealDraft?.amount ?? "";
-  const selectedDealDraftCurrencyCode = selectedDealDraft?.currency_code ?? "INR";
+  const selectedDealDraftCurrencyCode = selectedDealDraft?.currency_code ?? "USD";
 
   useEffect(() => {
-    if (selectedDealDraftCurrencyCode === "INR") {
+    if (selectedDealDraftCurrencyCode === "USD") {
       setSelectedDealConvertingCurrency(false);
       setSelectedCurrencyPreviewError(null);
       setSelectedDealDraft((current) =>
@@ -721,7 +728,7 @@ function DealsPage() {
           ? {
               ...current,
               amount_value: current.amount.trim() ? parseDealAmount(current.amount) : null,
-              amount_inr: current.amount.trim() ? parseDealAmount(current.amount) : null,
+              amount_usd: current.amount.trim() ? parseDealAmount(current.amount) : null,
               fx_rate: 1,
               fx_provider: "internal",
               fx_rate_fetched_at: new Date().toISOString(),
@@ -740,7 +747,7 @@ function DealsPage() {
           ? {
               ...current,
               amount_value: amountValue > 0 ? amountValue : null,
-              amount_inr: null,
+              amount_usd: null,
               fx_rate: null,
               fx_provider: null,
               fx_rate_fetched_at: null,
@@ -755,20 +762,20 @@ function DealsPage() {
     setSelectedCurrencyPreviewError(null);
     const timer = window.setTimeout(() => {
       void (async () => {
-        const { data, error } = await supabase.auth.quoteCurrencyToInr({
+        const { data, error } = await supabase.auth.quoteCurrencyToUsd({
           sourceCurrency: selectedDealDraftCurrencyCode,
           amount: amountValue,
         });
         if (!active) return;
         setSelectedDealConvertingCurrency(false);
         if (error || !data) {
-          setSelectedCurrencyPreviewError(error?.message ?? "Unable to load INR conversion");
+          setSelectedCurrencyPreviewError(error?.message ?? "Unable to load USD conversion");
           setSelectedDealDraft((current) =>
             current
               ? {
                   ...current,
                   amount_value: amountValue,
-                  amount_inr: null,
+                  amount_usd: null,
                   fx_rate: null,
                   fx_provider: null,
                   fx_rate_fetched_at: null,
@@ -782,7 +789,7 @@ function DealsPage() {
             ? {
                 ...current,
                 amount_value: data.amount,
-                amount_inr: data.computedInrAmount,
+                amount_usd: data.computedUsdAmount,
                 fx_rate: data.rate,
                 fx_provider: data.provider,
                 fx_rate_fetched_at: data.timestamp,
@@ -799,19 +806,24 @@ function DealsPage() {
   }, [selectedDealDraftAmount, selectedDealDraftCurrencyCode]);
 
   const kpis = useMemo(() => {
-    const pipeline = deals.reduce((sum, deal) => {
-      return sum + getDealInrAmount(deal);
+    const pipeline = regionScopedDeals.reduce((sum, deal) => {
+      return sum + getDealUsdAmount(deal);
     }, 0);
-    const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
-    const won = deals.filter((deal) => deal.stage === "won").length;
-    const avgProbability = deals.length
-      ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
+    const open = regionScopedDeals.filter(
+      (deal) => !["won", "lost"].includes(deal.stage),
+    ).length;
+    const won = regionScopedDeals.filter((deal) => deal.stage === "won").length;
+    const avgProbability = regionScopedDeals.length
+      ? Math.round(
+          regionScopedDeals.reduce((sum, deal) => sum + deal.probability, 0) /
+            regionScopedDeals.length,
+        )
       : 0;
     return [
       {
         label: "Pipeline",
-        value: formatInrAmount(pipeline),
-        hint: "Current INR-equivalent opportunity value",
+        value: formatUsdAmount(pipeline),
+        hint: "Current USD-equivalent opportunity value",
         status: "open" as const,
         stage: "all" as const,
       },
@@ -837,7 +849,7 @@ function DealsPage() {
         stage: "all" as const,
       },
     ];
-  }, [deals]);
+  }, [regionScopedDeals]);
 
   const editOptions = useMemo(() => {
     return {
@@ -1010,7 +1022,7 @@ function DealsPage() {
         string,
         {
           amount: number;
-          computedInrAmount: number;
+          computedUsdAmount: number;
           provider: string;
           rate: number;
           sourceCurrency: string;
@@ -1021,7 +1033,7 @@ function DealsPage() {
       const importRowsWithFx: Array<
         ValidatedDealImportRow & {
           amount_value: number;
-          amount_inr: number;
+          amount_usd: number;
           fx_rate: number;
           fx_provider: string;
           fx_rate_fetched_at: string;
@@ -1032,11 +1044,11 @@ function DealsPage() {
         const amountValue = parseDealAmount(row.amount);
         const rowNumber = index + 2;
 
-        if (row.currency_code === "INR") {
+        if (row.currency_code === "USD") {
           importRowsWithFx.push({
             ...row,
             amount_value: amountValue,
-            amount_inr: amountValue,
+            amount_usd: amountValue,
             fx_rate: 1,
             fx_provider: "import_default",
             fx_rate_fetched_at: today,
@@ -1047,7 +1059,7 @@ function DealsPage() {
         const cacheKey = `${row.currency_code}:${amountValue}`;
         let fxData = fxCache.get(cacheKey);
         if (!fxData) {
-          const { data, error } = await supabase.auth.quoteCurrencyToInr({
+          const { data, error } = await supabase.auth.quoteCurrencyToUsd({
             sourceCurrency: row.currency_code,
             amount: amountValue,
           });
@@ -1056,7 +1068,7 @@ function DealsPage() {
               rowNumber,
               messages: [
                 error?.message ??
-                  `Unable to load INR conversion for ${row.currency_code} on row ${rowNumber}`,
+                  `Unable to load USD conversion for ${row.currency_code} on row ${rowNumber}`,
               ],
             });
             continue;
@@ -1068,7 +1080,7 @@ function DealsPage() {
         importRowsWithFx.push({
           ...row,
           amount_value: amountValue,
-          amount_inr: fxData.computedInrAmount,
+          amount_usd: fxData.computedUsdAmount,
           fx_rate: fxData.rate,
           fx_provider: fxData.provider,
           fx_rate_fetched_at: fxData.timestamp,
@@ -1208,7 +1220,7 @@ function DealsPage() {
         amount: resolvedRow.row.amount,
         currency_code: resolvedRow.row.currency_code,
         amount_value: resolvedRow.row.amount_value,
-        amount_inr: resolvedRow.row.amount_inr,
+        amount_usd: resolvedRow.row.amount_usd,
         fx_rate: resolvedRow.row.fx_rate,
         fx_provider: resolvedRow.row.fx_provider,
         fx_rate_fetched_at: resolvedRow.row.fx_rate_fetched_at,
@@ -1278,16 +1290,16 @@ function DealsPage() {
       toast.error("Fill in the account, client, and amount");
       return;
     }
-    if (draft.currency_code !== "INR" && (!draft.amount_inr || !draft.fx_rate)) {
-      toast.error("Wait for the INR conversion to load before creating this deal");
+    if (draft.currency_code !== "USD" && (!draft.amount_usd || !draft.fx_rate)) {
+      toast.error("Wait for the USD conversion to load before creating this deal");
       return;
     }
     setCreating(true);
     try {
       const now = new Date().toISOString();
       const resolvedAmountValue = draft.amount_value ?? amountValue;
-      const resolvedAmountInr =
-        draft.currency_code === "INR" ? resolvedAmountValue : (draft.amount_inr ?? null);
+      const resolvedAmountUsd =
+        draft.currency_code === "USD" ? resolvedAmountValue : (draft.amount_usd ?? null);
       const payload = {
         id: globalThis.crypto.randomUUID(),
         ...draft,
@@ -1304,9 +1316,9 @@ function DealsPage() {
         country: draft.country || "India",
         quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
         amount_value: resolvedAmountValue,
-        amount_inr: resolvedAmountInr,
-        fx_rate: draft.currency_code === "INR" ? 1 : draft.fx_rate,
-        fx_provider: draft.currency_code === "INR" ? "internal" : draft.fx_provider,
+        amount_usd: resolvedAmountUsd,
+        fx_rate: draft.currency_code === "USD" ? 1 : draft.fx_rate,
+        fx_provider: draft.currency_code === "USD" ? "internal" : draft.fx_provider,
         fx_rate_fetched_at: draft.fx_rate_fetched_at ?? now,
         customer_budget: draft.customer_budget.trim() || null,
         possible_close_date: draft.possible_close_date || null,
@@ -1384,20 +1396,20 @@ function DealsPage() {
       return;
     }
     if (
-      selectedDealDraft.currency_code !== "INR" &&
-      (!selectedDealDraft.amount_inr || !selectedDealDraft.fx_rate)
+      selectedDealDraft.currency_code !== "USD" &&
+      (!selectedDealDraft.amount_usd || !selectedDealDraft.fx_rate)
     ) {
-      toast.error("Wait for the INR conversion to load before saving this deal");
+      toast.error("Wait for the USD conversion to load before saving this deal");
       return;
     }
 
     setSaving(true);
     try {
       const resolvedAmountValue = selectedDealDraft.amount_value ?? parseDealAmount(amount);
-      const resolvedAmountInr =
-        selectedDealDraft.currency_code === "INR"
+      const resolvedAmountUsd =
+        selectedDealDraft.currency_code === "USD"
           ? resolvedAmountValue
-          : (selectedDealDraft.amount_inr ?? null);
+          : (selectedDealDraft.amount_usd ?? null);
       const { error } = await supabase
         .from("portal_deals")
         .update({
@@ -1411,10 +1423,10 @@ function DealsPage() {
           amount,
           currency_code: selectedDealDraft.currency_code,
           amount_value: resolvedAmountValue,
-          amount_inr: resolvedAmountInr,
-          fx_rate: selectedDealDraft.currency_code === "INR" ? 1 : selectedDealDraft.fx_rate,
+          amount_usd: resolvedAmountUsd,
+          fx_rate: selectedDealDraft.currency_code === "USD" ? 1 : selectedDealDraft.fx_rate,
           fx_provider:
-            selectedDealDraft.currency_code === "INR" ? "internal" : selectedDealDraft.fx_provider,
+            selectedDealDraft.currency_code === "USD" ? "internal" : selectedDealDraft.fx_provider,
           fx_rate_fetched_at: selectedDealDraft.fx_rate_fetched_at ?? new Date().toISOString(),
           customer_budget: selectedDealDraft.customer_budget.trim() || null,
           possible_close_date: selectedDealDraft.possible_close_date || null,
@@ -1647,7 +1659,7 @@ function DealsPage() {
                 quantity: deal.quantity,
                 amount: deal.amount,
                 currency_code: deal.currency_code,
-                amount_inr: deal.amount_inr,
+                amount_usd: deal.amount_usd,
                 customer_budget: deal.customer_budget,
                 possible_close_date: deal.possible_close_date,
                 close_date: deal.close_date,
@@ -1909,7 +1921,7 @@ function DealsPage() {
                 <div className="space-y-2">
                   <Label htmlFor="country">Country</Label>
                   <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealCountry}
+                    fieldName={LOOKUP_FIELDS.countryCode}
                     label="Country"
                     value={draft.country}
                     onValueChange={(value) =>
@@ -1919,8 +1931,9 @@ function DealsPage() {
                         region: current.country === value ? current.region : "",
                       }))
                     }
-                    placeholder="Select or create country"
+                    placeholder="Select a country"
                     options={editOptions.countries}
+                    allowCreate={false}
                   />
                 </div>
               </div>
@@ -1988,7 +2001,7 @@ function DealsPage() {
                     id="amount"
                     value={draft.amount}
                     onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
-                    placeholder={draft.country === "India" ? "₹9,20,000" : "$9,200"}
+                    placeholder="$9,200"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1998,24 +2011,24 @@ function DealsPage() {
                     label="Currency"
                     value={draft.currency_code}
                     onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, currency_code: value || "INR" }))
+                      setDraft((current) => ({ ...current, currency_code: value || "USD" }))
                     }
                     options={[...DEAL_CURRENCY_OPTIONS]}
                     allowCreate={false}
                   />
                 </div>
               </div>
-              {draft.currency_code !== "INR" ? (
+              {draft.currency_code !== "USD" ? (
                 <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                  <div className="font-medium">INR equivalent</div>
+                  <div className="font-medium">USD equivalent</div>
                   <div className="mt-1 text-muted-foreground">
                     {convertingCurrency
                       ? "Fetching the latest FX rate..."
                       : currencyPreviewError
                         ? currencyPreviewError
-                        : draft.amount_inr
-                          ? `${formatInrAmount(draft.amount_inr)} via ${draft.fx_provider ?? "provider"}`
-                          : "Enter a valid amount to preview the INR equivalent."}
+                        : draft.amount_usd
+                          ? `${formatUsdAmount(draft.amount_usd)} via ${draft.fx_provider ?? "provider"}`
+                          : "Enter a valid amount to preview the USD equivalent."}
                   </div>
                 </div>
               ) : null}
@@ -2174,7 +2187,7 @@ function DealsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge>{selectedDeal.stage}</Badge>
                       <Badge variant="secondary">{selectedDeal.amount}</Badge>
-                      <Badge variant="outline">{selectedDeal.currency_code || "INR"}</Badge>
+                      <Badge variant="outline">{selectedDeal.currency_code || "USD"}</Badge>
                       {selectedDeal.customer_budget ? (
                         <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
                       ) : null}
@@ -2212,22 +2225,39 @@ function DealsPage() {
                           />
                         </Field>
                         <Field label="Country">
-                          <Input
+                          <LookupCombobox
+                            fieldName={LOOKUP_FIELDS.countryCode}
+                            label="Country"
                             value={selectedDealDraft.country}
-                            onChange={(e) =>
+                            onValueChange={(value) =>
                               setSelectedDealDraft((current) =>
-                                current ? { ...current, country: e.target.value } : current,
+                                current
+                                  ? {
+                                      ...current,
+                                      country: value,
+                                      region: current.country === value ? current.region : "",
+                                    }
+                                  : current,
                               )
                             }
+                            placeholder="Select a country"
+                            allowCreate={false}
                           />
                         </Field>
                         <Field label="Region">
-                          <Input
+                          <LookupCombobox
+                            fieldName={dealRegionLookupField(selectedDealDraft.country)}
+                            label="Region"
                             value={selectedDealDraft.region}
-                            onChange={(e) =>
+                            onValueChange={(value) =>
                               setSelectedDealDraft((current) =>
-                                current ? { ...current, region: e.target.value } : current,
+                                current ? { ...current, region: value } : current,
                               )
+                            }
+                            placeholder={
+                              selectedDealDraft.country === "India"
+                                ? "Select an Indian region"
+                                : "Select or create region"
                             }
                           />
                         </Field>
@@ -2278,7 +2308,7 @@ function DealsPage() {
                             value={selectedDealDraft.currency_code}
                             onValueChange={(value) =>
                               setSelectedDealDraft((current) =>
-                                current ? { ...current, currency_code: value || "INR" } : current,
+                                current ? { ...current, currency_code: value || "USD" } : current,
                               )
                             }
                             options={[...DEAL_CURRENCY_OPTIONS]}
@@ -2335,17 +2365,17 @@ function DealsPage() {
                     ) : null}
                     {selectedDealEditing &&
                     selectedDealDraft &&
-                    selectedDealDraft.currency_code !== "INR" ? (
+                    selectedDealDraft.currency_code !== "USD" ? (
                       <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                        <div className="font-medium">INR equivalent</div>
+                        <div className="font-medium">USD equivalent</div>
                         <div className="mt-1 text-muted-foreground">
                           {selectedDealConvertingCurrency
                             ? "Fetching the latest FX rate..."
                             : selectedCurrencyPreviewError
                               ? selectedCurrencyPreviewError
-                              : selectedDealDraft.amount_inr
-                                ? `${formatInrAmount(selectedDealDraft.amount_inr)} via ${selectedDealDraft.fx_provider ?? "provider"}`
-                                : "Enter a valid amount to preview the INR equivalent."}
+                              : selectedDealDraft.amount_usd
+                                ? `${formatUsdAmount(selectedDealDraft.amount_usd)} via ${selectedDealDraft.fx_provider ?? "provider"}`
+                                : "Enter a valid amount to preview the USD equivalent."}
                         </div>
                       </div>
                     ) : (
@@ -2355,10 +2385,10 @@ function DealsPage() {
                         <Meta label="Contact" value={selectedDeal.contact_name} />
                         <Meta label="Owner" value={selectedDeal.owner_name} />
                         <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
-                        <Meta label="Currency" value={selectedDeal.currency_code || "INR"} />
+                        <Meta label="Currency" value={selectedDeal.currency_code || "USD"} />
                         <Meta
-                          label="INR equivalent"
-                          value={formatInrAmount(normalizeNullableNumber(selectedDeal.amount_inr))}
+                          label="USD equivalent"
+                          value={formatUsdAmount(normalizeNullableNumber(selectedDeal.amount_usd))}
                         />
                         <Meta
                           label="Possible close date"

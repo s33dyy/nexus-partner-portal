@@ -22,7 +22,7 @@ import { supabase } from "@/integrations/local/client";
 import { markDealWon, moveDealStageForward } from "@/integrations/local/deal-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
-  getDealInrAmount,
+  getDealUsdAmount,
   DEAL_STAGE_ORDER,
   nextDealStage,
   type DealRecord,
@@ -36,6 +36,7 @@ import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visib
 import { normalizeDealCollaborators, type DealCollaboratorDraft } from "@/lib/deal-collaboration";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
+import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -53,7 +54,7 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "quantity", header: "Quantity" },
   { key: "amount", header: "Amount" },
   { key: "currency_code", header: "Currency" },
-  { key: "amount_inr", header: "INR Equivalent" },
+  { key: "amount_usd", header: "USD Equivalent" },
   { key: "customer_budget", header: "Customer Budget" },
   { key: "probability", header: "Probability" },
   { key: "possible_close_date", header: "Possible Close Date" },
@@ -65,6 +66,7 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 function PipelinePage() {
   const { profile, hasRole } = useAuth();
   const access = useRequireAccess("full");
+  const { selectedRegion } = useRegionFilter();
 
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
@@ -189,9 +191,14 @@ function PipelinePage() {
     ]);
   };
 
+  const regionScopedDeals = useMemo(
+    () => deals.filter((deal) => matchesSelectedRegion(deal.country, selectedRegion)),
+    [deals, selectedRegion],
+  );
+
   const visibleDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return deals.filter((deal) => {
+    return regionScopedDeals.filter((deal) => {
       const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
       const matchesQuery =
         !term ||
@@ -201,7 +208,7 @@ function PipelinePage() {
           .includes(term);
       return matchesStage && matchesQuery;
     });
-  }, [deals, query, stageFilter]);
+  }, [regionScopedDeals, query, stageFilter]);
 
   const grouped = useMemo(
     () =>
@@ -213,14 +220,17 @@ function PipelinePage() {
   );
 
   const totals = useMemo(() => {
-    const pipeline = deals.reduce((sum, deal) => {
-      return sum + getDealInrAmount(deal);
+    const pipeline = regionScopedDeals.reduce((sum, deal) => {
+      return sum + getDealUsdAmount(deal);
     }, 0);
-    const weighted = deals.length
-      ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
+    const weighted = regionScopedDeals.length
+      ? Math.round(
+          regionScopedDeals.reduce((sum, deal) => sum + deal.probability, 0) /
+            regionScopedDeals.length,
+        )
       : 0;
-    return { pipeline, weighted, count: deals.length };
-  }, [deals]);
+    return { pipeline, weighted, count: regionScopedDeals.length };
+  }, [regionScopedDeals]);
 
   const moveDeal = async (deal: DealRecord) => {
     const stage = nextDealStage(deal.stage);
@@ -383,7 +393,7 @@ function PipelinePage() {
                 quantity: deal.quantity,
                 amount: deal.amount,
                 currency_code: deal.currency_code,
-                amount_inr: deal.amount_inr,
+                amount_usd: deal.amount_usd,
                 customer_budget: deal.customer_budget,
                 probability: deal.probability,
                 possible_close_date: deal.possible_close_date,
@@ -400,12 +410,12 @@ function PipelinePage() {
       <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Pipeline value"
-          value={new Intl.NumberFormat("en-IN", {
+          value={new Intl.NumberFormat("en-US", {
             style: "currency",
-            currency: "INR",
+            currency: "USD",
             maximumFractionDigits: 2,
           }).format(totals.pipeline)}
-          hint="Visible INR-equivalent queue value"
+          hint="Visible USD-equivalent queue value"
         />
         <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
         <MetricCard

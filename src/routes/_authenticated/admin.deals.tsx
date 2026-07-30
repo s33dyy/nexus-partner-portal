@@ -37,6 +37,7 @@ import { awardDealWinPoints } from "@/lib/rewards";
 import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
+import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
   component: AdminDealsPage,
@@ -44,6 +45,7 @@ export const Route = createFileRoute("/_authenticated/admin/deals")({
 
 function AdminDealsPage() {
   const { profile, hasRole } = useAuth();
+  const { selectedRegion } = useRegionFilter();
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
     Record<string, DealCollaboratorDraft[]>
@@ -130,9 +132,14 @@ function AdminDealsPage() {
     void load();
   }, [load]);
 
+  const regionScopedDeals = useMemo(
+    () => deals.filter((deal) => matchesSelectedRegion(deal.country, selectedRegion)),
+    [deals, selectedRegion],
+  );
+
   const filteredDeals = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return deals.filter((deal) => {
+    return regionScopedDeals.filter((deal) => {
       const matchesStatus =
         statusFilter === "all" || deal.status === statusFilter || deal.stage === statusFilter;
       const matchesQuery =
@@ -143,7 +150,7 @@ function AdminDealsPage() {
           .includes(term);
       return matchesStatus && matchesQuery;
     });
-  }, [deals, query, statusFilter]);
+  }, [regionScopedDeals, query, statusFilter]);
 
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
@@ -169,12 +176,12 @@ function AdminDealsPage() {
   }, [collaboratorsByDealId, selectedDeal]);
 
   const metrics = useMemo(() => {
-    const queue = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
-    const reviewed = deals.filter(
+    const queue = regionScopedDeals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
+    const reviewed = regionScopedDeals.filter(
       (deal) => ["approved", "won", "lost"].includes(deal.status) || deal.status === "approved",
     ).length;
     return { queue, reviewed };
-  }, [deals]);
+  }, [regionScopedDeals]);
 
   const statusOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.status)), [deals]);
   const stageOptions = useMemo(() => uniqueStrings(deals.map((deal) => deal.stage)), [deals]);
@@ -591,7 +598,7 @@ function AdminDealsPage() {
                         <div className="space-y-2">
                           <Label>Country</Label>
                           <LookupCombobox
-                            fieldName={LOOKUP_FIELDS.dealCountry}
+                            fieldName={LOOKUP_FIELDS.countryCode}
                             label="Country"
                             value={reviewDraft.country}
                             onValueChange={(value) =>
@@ -599,8 +606,9 @@ function AdminDealsPage() {
                                 current ? { ...current, country: value, region: "" } : current,
                               )
                             }
-                            placeholder="Select or create country"
+                            placeholder="Select a country"
                             options={editOptions.countries}
+                            allowCreate={false}
                           />
                         </div>
                         <div className="space-y-2">

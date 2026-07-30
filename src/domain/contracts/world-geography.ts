@@ -361,3 +361,73 @@ export function findWorldCountry(code: string): WorldCountry | undefined {
 export const WORLD_CURRENCY_CODES: readonly string[] = Array.from(
   new Set(WORLD_COUNTRIES.map((country) => country.currencyCode)),
 ).sort();
+
+// Common free-text spellings/abbreviations that don't literally match a
+// WORLD_COUNTRIES `name`. Existing deal/customer/partner records store
+// country as free text (see portal_deals.country, portal_customers.country,
+// partners.country) rather than a governed country code, so resolving them
+// to a Sales Region for filtering needs a small amount of alias tolerance.
+const COUNTRY_NAME_ALIASES: Readonly<Record<string, string>> = {
+  usa: "US",
+  "u.s.a": "US",
+  "u.s.a.": "US",
+  "u.s.": "US",
+  america: "US",
+  "united states of america": "US",
+  uk: "GB",
+  "u.k.": "GB",
+  "great britain": "GB",
+  britain: "GB",
+  uae: "AE",
+  "u.a.e": "AE",
+  "u.a.e.": "AE",
+  "south korea": "KR",
+  "korea, south": "KR",
+  "republic of korea": "KR",
+  "north korea": "KP",
+  "korea, north": "KP",
+  russia: "RU",
+  "czech republic": "CZ",
+  czechia: "CZ",
+  holland: "NL",
+  "the netherlands": "NL",
+  burma: "MM",
+  "ivory coast": "CI",
+  "cape verde": "CV",
+  "swaziland": "SZ",
+  vatican: "VA",
+  "vatican city": "VA",
+};
+
+function normalizeCountryText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Resolves free-text country data (as stored on deals/customers/partners
+ * records) to a governed WorldCountry, for region-filtering purposes.
+ * Tries, in order: exact ISO code, exact country name, then a small alias
+ * table of common spellings. Returns null when nothing matches rather than
+ * guessing via partial/substring matching, since a wrong region match would
+ * silently hide or misplace a record in the region filter.
+ */
+export function resolveCountryForText(text: string | null | undefined): WorldCountry | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const byCode = trimmed.length === 2 ? findWorldCountry(trimmed) : undefined;
+  if (byCode) return byCode;
+
+  const normalized = normalizeCountryText(trimmed);
+  const byName = WORLD_COUNTRIES.find((country) => country.name.toLowerCase() === normalized);
+  if (byName) return byName;
+
+  const aliasCode = COUNTRY_NAME_ALIASES[normalized];
+  if (aliasCode) {
+    const aliased = findWorldCountry(aliasCode);
+    if (aliased) return aliased;
+  }
+
+  return null;
+}

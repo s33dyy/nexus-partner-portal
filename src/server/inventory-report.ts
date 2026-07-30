@@ -14,6 +14,7 @@ import {
   TICKET_STATUSES,
 } from "@/domain/contracts/taxonomy";
 import { isGovernedLookupField, listGovernedLookupFields } from "@/domain/contracts/reference-data";
+import { WORLD_CURRENCY_CODES } from "@/domain/contracts/world-geography";
 
 export type InventoryRow = Record<string, unknown>;
 export type InventoryTables = Record<string, InventoryRow[]>;
@@ -260,9 +261,9 @@ const TABLE_SPECS: readonly TableSpec[] = [
   {
     table: "portal_deals",
     uniqueKeySets: [["account_name", "contact_name", "product", "close_date"]],
-    enumFields: { stage: DEAL_STAGES, status: DEAL_STAGES, currency_code: ["USD", "INR"] },
+    enumFields: { stage: DEAL_STAGES, status: DEAL_STAGES, currency_code: WORLD_CURRENCY_CODES },
     geographyFields: ["country", "region"],
-    moneyFields: ["amount", "customer_budget", "amount_value", "amount_inr"],
+    moneyFields: ["amount", "customer_budget", "amount_value", "amount_usd"],
     relationshipFields: [
       { field: "user_id", refTable: "profiles" },
       { field: "partner_id", refTable: "partners" },

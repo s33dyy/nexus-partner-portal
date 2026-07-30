@@ -36,6 +36,7 @@ import {
   PARTNER_ONBOARDING_LOOKUP_FIELDS,
   regionLookupField,
 } from "@/lib/partner-onboarding-lookups";
+import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 
 export const Route = createFileRoute("/_authenticated/partner/onboarding")({
   component: OnboardingPage,
@@ -597,16 +598,18 @@ function OnboardingPage() {
                   </Field>
                   <Field label="Country*">
                     <LookupCombobox
-                      fieldName={PARTNER_ONBOARDING_LOOKUP_FIELDS.country}
+                      fieldName={LOOKUP_FIELDS.countryCode}
                       label="Country"
                       value={form.country}
                       onValueChange={(value) => {
                         setField("country", value);
                         setField("state", "");
                       }}
-                      placeholder="Select or create country"
+                      placeholder="Select a country"
                       disabled={readOnly}
                       allowClear={false}
+                      allowCreate={false}
+                      emptyLabel="No matching country. Try a different search."
                     />
                   </Field>
                   <Field label="Region / State*">

@@ -260,7 +260,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "amount",
     "currency_code",
     "amount_value",
-    "amount_inr",
+    "amount_usd",
     "fx_rate",
     "fx_provider",
     "fx_rate_fetched_at",

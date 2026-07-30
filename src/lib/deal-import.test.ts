@@ -77,7 +77,7 @@ test("validateDealImportRows rejects the whole workbook when any row is invalid"
         "Contact name is required",
         "Quantity must be at least 1",
         "Amount is required",
-        "Currency must be one of INR, USD, EUR, GBP, AED, or SGD",
+        "Currency must be a supported ISO 4217 currency code",
         "Probability must be one of 0, 25, 50, or 100",
         "Source is required",
       ],
@@ -230,7 +230,7 @@ test("validateDealImportRows allows partner-role templates to omit auto-filled c
   expect(partnerUserResult.errors).toEqual([]);
 });
 
-test("validateDealImportRows defaults a blank currency to INR", () => {
+test("validateDealImportRows defaults a blank currency to USD", () => {
   const result = validateDealImportRows([
     {
       account_name: "Acme Systems",
@@ -252,7 +252,7 @@ test("validateDealImportRows defaults a blank currency to INR", () => {
   ]);
 
   expect(result.errors).toEqual([]);
-  expect(result.rows[0]?.currency_code).toBe("INR");
+  expect(result.rows[0]?.currency_code).toBe("USD");
 });
 
 test("validateDealImportRows requires amount strings to contain a numeric value", () => {

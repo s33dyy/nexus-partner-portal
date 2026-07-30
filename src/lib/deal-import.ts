@@ -301,7 +301,7 @@ export function validateDealImportRows(
       product: asTrimmedString(row.product),
       quantity: Number.isNaN(quantity) ? 1 : quantity,
       amount: asTrimmedString(row.amount),
-      currency_code: isDealCurrencyCode(currencyCode) ? currencyCode : "INR",
+      currency_code: isDealCurrencyCode(currencyCode) ? currencyCode : "USD",
       stage: isDealStage(stage) ? stage : DEAL_STAGE_ORDER[0],
       customer_budget: asTrimmedString(row.customer_budget),
       possible_close_date: asTrimmedString(row.possible_close_date),
@@ -321,7 +321,7 @@ export function validateDealImportRows(
       messages.push("Amount must include a numeric value");
     }
     if (!isDealCurrencyCode(currencyCode)) {
-      messages.push("Currency must be one of INR, USD, EUR, GBP, AED, or SGD");
+      messages.push("Currency must be a supported ISO 4217 currency code");
     }
     if (requireStage && !isDealStage(stage)) {
       messages.push(

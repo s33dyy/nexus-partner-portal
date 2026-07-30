@@ -6,6 +6,7 @@ import { AccessDeniedPage } from "@/components/route-placeholder";
 import { UnderReviewPage } from "@/components/under-review-page";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { getAuthenticatedGateState, getAuthenticatedRedirect } from "@/lib/auth-routing";
+import { RegionFilterProvider } from "@/lib/region-filter";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -16,11 +17,13 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   return (
     <AuthProvider>
-      <Gate>
-        <AppShell>
-          <Outlet />
-        </AppShell>
-      </Gate>
+      <RegionFilterProvider>
+        <Gate>
+          <AppShell>
+            <Outlet />
+          </AppShell>
+        </Gate>
+      </RegionFilterProvider>
     </AuthProvider>
   );
 }

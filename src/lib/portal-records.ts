@@ -1,3 +1,5 @@
+import { WORLD_CURRENCY_CODES } from "@/domain/contracts/world-geography";
+
 export const DEAL_STAGE_ORDER = [
   "sourced",
   "demo",
@@ -12,9 +14,13 @@ export const DEAL_STAGE_ORDER = [
 
 export type DealStage = (typeof DEAL_STAGE_ORDER)[number];
 
-export const DEAL_CURRENCY_OPTIONS = ["INR", "USD", "EUR", "GBP", "AED", "SGD"] as const;
+// Every ISO 4217 currency in use by a governed WORLD_COUNTRIES entry. The FX
+// quote provider (src/server/fx-rates.server.ts) accepts any 3-letter code,
+// so this list isn't a technical limit — it's the full set of currencies a
+// deal's country could plausibly transact in.
+export const DEAL_CURRENCY_OPTIONS: readonly string[] = WORLD_CURRENCY_CODES;
 
-export type DealCurrencyCode = (typeof DEAL_CURRENCY_OPTIONS)[number];
+export type DealCurrencyCode = string;
 
 export type DealRecord = {
   id: string;
@@ -32,7 +38,7 @@ export type DealRecord = {
   amount: string;
   currency_code: string;
   amount_value: number | null;
-  amount_inr: number | null;
+  amount_usd: number | null;
   fx_rate: number | null;
   fx_provider: string | null;
   fx_rate_fetched_at: string | null;
@@ -261,15 +267,15 @@ export function parseDealAmount(amount: string | number): number {
 
 export function normalizeDealCurrencyCode(value: string | null | undefined): string {
   const normalized = value?.trim().toUpperCase();
-  return normalized || "INR";
+  return normalized || "USD";
 }
 
 export function isDealCurrencyCode(value: string): value is DealCurrencyCode {
   return (DEAL_CURRENCY_OPTIONS as readonly string[]).includes(value);
 }
 
-export function getDealInrAmount(input: Pick<DealRecord, "amount" | "amount_inr">): number {
-  const explicitAmount = Number(input.amount_inr);
+export function getDealUsdAmount(input: Pick<DealRecord, "amount" | "amount_usd">): number {
+  const explicitAmount = Number(input.amount_usd);
   if (Number.isFinite(explicitAmount) && explicitAmount > 0) {
     return explicitAmount;
   }

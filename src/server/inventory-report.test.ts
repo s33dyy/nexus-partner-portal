@@ -112,7 +112,7 @@ test("inventory analyzer spots fixture issues and formats a summary", () => {
         amount: "₹1200",
         currency_code: "INR",
         amount_value: null,
-        amount_inr: null,
+        amount_usd: null,
         fx_rate: null,
         fx_provider: null,
         fx_rate_fetched_at: null,

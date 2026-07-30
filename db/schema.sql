@@ -318,9 +318,9 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   status TEXT NOT NULL,
   quantity INTEGER NOT NULL DEFAULT 1,
   amount TEXT NOT NULL,
-  currency_code TEXT NOT NULL DEFAULT 'INR',
+  currency_code TEXT NOT NULL DEFAULT 'USD',
   amount_value NUMERIC(14,2),
-  amount_inr NUMERIC(14,2),
+  amount_usd NUMERIC(14,2),
   fx_rate NUMERIC(14,6),
   fx_provider TEXT,
   fx_rate_fetched_at TIMESTAMPTZ,
@@ -1145,9 +1145,24 @@ ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS poc_profile_id UUID REFERENCES
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'India';
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS customer_budget TEXT;
-ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'INR';
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE portal_deals ALTER COLUMN currency_code SET DEFAULT 'USD';
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS amount_value NUMERIC(14,2);
-ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS amount_inr NUMERIC(14,2);
+-- Global reporting currency changed from INR to USD; rename the column on
+-- already-migrated databases instead of dropping historical data.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'portal_deals' AND column_name = 'amount_inr'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'portal_deals' AND column_name = 'amount_usd'
+  ) THEN
+    ALTER TABLE portal_deals RENAME COLUMN amount_inr TO amount_usd;
+  END IF;
+END $$;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS amount_usd NUMERIC(14,2);
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(14,6);
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_provider TEXT;
 ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS fx_rate_fetched_at TIMESTAMPTZ;

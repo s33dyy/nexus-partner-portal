@@ -51,10 +51,12 @@ import {
 } from "@/lib/spreadsheet-import";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
+import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 
 type CustomerForm = {
   company_name: string;
   account_owner: string;
+  country: string;
   region: string;
   segment: string;
   health_score: number;
@@ -68,6 +70,7 @@ type CustomerForm = {
 const EMPTY_FORM: CustomerForm = {
   company_name: "",
   account_owner: "",
+  country: "India",
   region: "India West",
   segment: "Mid-market",
   health_score: 70,
@@ -113,6 +116,7 @@ export const Route = createFileRoute("/_authenticated/customers")({
 function CustomersPage() {
   const { profile, hasRole } = useAuth();
   const access = useRequireAccess("full");
+  const { selectedRegion } = useRegionFilter();
 
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -212,9 +216,14 @@ function CustomersPage() {
     void load();
   }, [load]);
 
+  const regionScopedCustomers = useMemo(
+    () => customers.filter((customer) => matchesSelectedRegion(customer.country, selectedRegion)),
+    [customers, selectedRegion],
+  );
+
   const filteredCustomers = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return customers.filter((customer) => {
+    return regionScopedCustomers.filter((customer) => {
       const matchesStatus = statusFilter === "all" || customer.status === statusFilter;
       const matchesQuery =
         !term ||
@@ -230,7 +239,7 @@ function CustomersPage() {
           .includes(term);
       return matchesStatus && matchesQuery;
     });
-  }, [customers, query, statusFilter]);
+  }, [regionScopedCustomers, query, statusFilter]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === selectedId) ?? null,
@@ -297,14 +306,17 @@ function CustomersPage() {
   }, [customers]);
 
   const stats = useMemo(() => {
-    const total = customers.length;
+    const total = regionScopedCustomers.length;
     const avg =
       total === 0
         ? 0
-        : Math.round(customers.reduce((sum, customer) => sum + customer.health_score, 0) / total);
-    const active = customers.filter((customer) => customer.status === "active").length;
+        : Math.round(
+            regionScopedCustomers.reduce((sum, customer) => sum + customer.health_score, 0) /
+              total,
+          );
+    const active = regionScopedCustomers.filter((customer) => customer.status === "active").length;
     return { total, avg, active };
-  }, [customers]);
+  }, [regionScopedCustomers]);
 
   const createCustomer = async () => {
     if (!draft.company_name.trim() || !draft.account_owner.trim() || !draft.renewal_date) {
@@ -344,6 +356,7 @@ function CustomersPage() {
         .update({
           company_name: draft.company_name,
           account_owner: draft.account_owner,
+          country: draft.country,
           region: draft.region,
           segment: draft.segment,
           health_score: draft.health_score,
@@ -381,6 +394,7 @@ function CustomersPage() {
     setDraft({
       company_name: selectedCustomer.company_name,
       account_owner: selectedCustomer.account_owner,
+      country: selectedCustomer.country ?? "India",
       region: selectedCustomer.region,
       segment: selectedCustomer.segment,
       health_score: selectedCustomer.health_score,
@@ -839,6 +853,16 @@ function CustomersPage() {
                     options={editOptions.owners}
                   />
                 </Field>
+                <Field label="Country">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.countryCode}
+                    label="Country"
+                    value={draft.country}
+                    onValueChange={(value) => setDraft((current) => ({ ...current, country: value }))}
+                    placeholder="Select a country"
+                    allowCreate={false}
+                  />
+                </Field>
                 <Field label="Region">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.customerRegion}
@@ -970,6 +994,16 @@ function CustomersPage() {
                     }
                     placeholder="Select or create owner"
                     options={editOptions.owners}
+                  />
+                </Field>
+                <Field label="Country">
+                  <LookupCombobox
+                    fieldName={LOOKUP_FIELDS.countryCode}
+                    label="Country"
+                    value={draft.country}
+                    onValueChange={(value) => setDraft((current) => ({ ...current, country: value }))}
+                    placeholder="Select a country"
+                    allowCreate={false}
                   />
                 </Field>
                 <Field label="Region">
@@ -1303,6 +1337,7 @@ function CustomersPage() {
                     setDraft({
                       company_name: selectedCustomer.company_name,
                       account_owner: selectedCustomer.account_owner,
+                      country: selectedCustomer.country ?? "India",
                       region: selectedCustomer.region,
                       segment: selectedCustomer.segment,
                       health_score: selectedCustomer.health_score,

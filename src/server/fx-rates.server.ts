@@ -9,7 +9,7 @@ export type FxQuoteResponse = {
   sourceCurrency: string;
   amount: number;
   rate: number;
-  computedInrAmount: number;
+  computedUsdAmount: number;
   provider: string;
   timestamp: string;
 };
@@ -46,12 +46,12 @@ function parseProviderResponse(
   const rateValue = (() => {
     const rates = payload.rates;
     if (!rates || typeof rates !== "object") return Number.NaN;
-    const value = (rates as Record<string, unknown>).INR;
+    const value = (rates as Record<string, unknown>).USD;
     return typeof value === "number" ? value : Number(value);
   })();
 
   if (!Number.isFinite(rateValue) || rateValue <= 0) {
-    throw new Error(`FX provider did not return an INR rate for ${sourceCurrency}`);
+    throw new Error(`FX provider did not return a USD rate for ${sourceCurrency}`);
   }
 
   const timestamp =
@@ -64,13 +64,13 @@ function parseProviderResponse(
     sourceCurrency,
     amount,
     rate: rateValue,
-    computedInrAmount: roundCurrency(amount * rateValue),
+    computedUsdAmount: roundCurrency(amount * rateValue),
     provider,
     timestamp,
   };
 }
 
-export async function quoteCurrencyToInr(input: FxQuoteRequest): Promise<FxQuoteResponse> {
+export async function quoteCurrencyToUsd(input: FxQuoteRequest): Promise<FxQuoteResponse> {
   const sourceCurrency = normalizeCurrency(input.sourceCurrency);
   if (!/^[A-Z]{3}$/.test(sourceCurrency)) {
     throw new Error("Currency must be a valid 3-letter code");
@@ -78,12 +78,12 @@ export async function quoteCurrencyToInr(input: FxQuoteRequest): Promise<FxQuote
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
     throw new Error("Amount must be greater than zero");
   }
-  if (sourceCurrency === "INR") {
+  if (sourceCurrency === "USD") {
     return {
       sourceCurrency,
       amount: input.amount,
       rate: 1,
-      computedInrAmount: roundCurrency(input.amount),
+      computedUsdAmount: roundCurrency(input.amount),
       provider: "internal",
       timestamp: new Date().toISOString(),
     };

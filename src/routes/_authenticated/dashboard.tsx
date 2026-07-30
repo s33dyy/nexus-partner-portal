@@ -32,6 +32,7 @@ import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visib
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
 import { getDashboardMetricDestination } from "@/lib/global-search";
+import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { getAgreementCtaLabel } from "@/routes/_authenticated/partner.agreement";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -47,6 +48,7 @@ type PartnerSpotlight = {
   annual_turnover: string | null;
   business_focus: string[] | null;
   created_at: string;
+  country?: string | null;
 };
 
 type NotificationFeedRow = {
@@ -64,10 +66,10 @@ type DashboardMetric = {
   tone: "default" | "primary" | "success" | "warning" | "info";
 };
 
-function resolveInrAmount(input: { amount: string; amount_inr?: number | null }) {
-  const inrAmount = Number(input.amount_inr);
-  if (Number.isFinite(inrAmount) && inrAmount > 0) {
-    return inrAmount;
+function resolveUsdAmount(input: { amount: string; amount_usd?: number | null }) {
+  const usdAmount = Number(input.amount_usd);
+  if (Number.isFinite(usdAmount) && usdAmount > 0) {
+    return usdAmount;
   }
   return parseDealAmount(input.amount);
 }
@@ -78,6 +80,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function DashboardPage() {
   const { profile, roles, hasRole } = useAuth();
+  const { selectedRegion } = useRegionFilter();
   const access = usePartnerAccess();
   const status = profile?.partner_status ?? "pending_partner_registration";
   const isPending = status === "pending_partner_registration";
@@ -104,13 +107,17 @@ function DashboardPage() {
       let dealQuery = hasDealAccess
         ? supabase
             .from("portal_deals")
-            .select("id, amount, amount_inr, stage, status")
+            .select("id, amount, amount_usd, stage, status, country")
             .order("updated_at", { ascending: false })
         : null;
-      let customerQuery = hasDealAccess ? supabase.from("portal_customers").select("id") : null;
+      let customerQuery = hasDealAccess
+        ? supabase.from("portal_customers").select("id, country")
+        : null;
       let partnerQuery = supabase
         .from("partners")
-        .select("id, company_name, tier, status, annual_turnover, business_focus, created_at")
+        .select(
+          "id, company_name, tier, status, annual_turnover, business_focus, created_at, country",
+        )
         .order("created_at", { ascending: false });
       let notificationQuery = supabase
         .from("notifications")
@@ -204,11 +211,12 @@ function DashboardPage() {
           (dealResult.data as Array<{
             id: string;
             amount: string;
-            amount_inr?: number | null;
+            amount_usd?: number | null;
             stage: string;
             status: string;
             user_id: string | null;
             is_hidden_to_team: boolean;
+            country?: string | null;
           }> | null) ?? []
         ).map((deal) => ({
           ...deal,
@@ -226,8 +234,18 @@ function DashboardPage() {
           isPartnerAdmin: hasRole("partner_admin"),
         },
       );
-      const customerRows = (customerResult.data as Array<{ id: string }> | null) ?? [];
+      const customerRows =
+        (customerResult.data as Array<{ id: string; country?: string | null }> | null) ?? [];
       const partnerRows = (partnerResult.data as PartnerSpotlight[] | null) ?? [];
+      const regionFilteredDealRows = dealRows.filter((deal) =>
+        matchesSelectedRegion(deal.country, selectedRegion),
+      );
+      const regionFilteredCustomerRows = customerRows.filter((customer) =>
+        matchesSelectedRegion(customer.country, selectedRegion),
+      );
+      const regionFilteredPartnerRows = partnerRows.filter((partner) =>
+        matchesSelectedRegion(partner.country, selectedRegion),
+      );
       const newsRows = (newsResult.data as NewsPostRecord[] | null) ?? [];
       const notifRows = (notifResult.data as NotificationFeedRow[] | null) ?? [];
       const rewardRows =
@@ -259,15 +277,17 @@ function DashboardPage() {
         })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      const pipeline = dealRows.reduce((sum, deal) => {
-        return sum + resolveInrAmount(deal);
+      const pipeline = regionFilteredDealRows.reduce((sum, deal) => {
+        return sum + resolveUsdAmount(deal);
       }, 0);
-      const openDeals = dealRows.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
-      const wonDeals = dealRows.filter((deal) => deal.stage === "won").length;
-      const approvedPartners = partnerRows.filter(
+      const openDeals = regionFilteredDealRows.filter(
+        (deal) => !["won", "lost"].includes(deal.stage),
+      ).length;
+      const wonDeals = regionFilteredDealRows.filter((deal) => deal.stage === "won").length;
+      const approvedPartners = regionFilteredPartnerRows.filter(
         (partner) => partner.status === "approved",
       ).length;
-      const totalFocusAreas = partnerRows.reduce(
+      const totalFocusAreas = regionFilteredPartnerRows.reduce(
         (sum, partner) => sum + (partner.business_focus?.length ?? 0),
         0,
       );
@@ -277,7 +297,7 @@ function DashboardPage() {
         {
           id: "pipeline",
           label: "Pipeline value",
-          value: `₹${pipeline.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
+          value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
           hint: "Across all live opportunity rows",
           tone: "primary",
         },
@@ -298,7 +318,7 @@ function DashboardPage() {
         {
           id: "customers",
           label: "Customers",
-          value: String(customerRows.length),
+          value: String(regionFilteredCustomerRows.length),
           hint: `${totalFocusAreas} focus areas mapped`,
           tone: "info",
         },
@@ -337,7 +357,7 @@ function DashboardPage() {
 
       setMetrics(access.canAccessDeals ? fullMetrics : partialMetrics);
       setNewsPosts(combinedNews);
-      setSpotlights(partnerRows.slice(0, 3));
+      setSpotlights(regionFilteredPartnerRows.slice(0, 3));
       setSource(
         dealRows.length ||
           customerRows.length ||
@@ -356,7 +376,7 @@ function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [access.canAccessDeals, hasRole, profile?.id, profile?.partner_id, status]);
+  }, [access.canAccessDeals, hasRole, profile?.id, profile?.partner_id, status, selectedRegion]);
 
   useEffect(() => {
     void loadDashboard();
