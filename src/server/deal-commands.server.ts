@@ -612,7 +612,6 @@ export async function createDeal(input: {
       currencyCode,
       amountUsd,
       source,
-      autoApproved,
     };
 
     await tx.query(

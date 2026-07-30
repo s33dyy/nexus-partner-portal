@@ -1474,3 +1474,168 @@ CREATE TABLE IF NOT EXISTS task_transitions (
 );
 
 CREATE INDEX IF NOT EXISTS task_transitions_task_id_idx ON task_transitions (task_id);
+
+-- RBAC permission matrix: role x feature CRUD flags, plus per-role region
+-- (geography) access used by admin.roles.tsx, table-policy.server.ts, and
+-- the Assistant. A role with no role_geography_access rows is unrestricted
+-- (global) by convention — this keeps the table's seeding independent of
+-- geography_nodes being populated (only db:bootstrap's demo seed populates
+-- that tree; the ordinary db:migrate deploy path does not), so nothing
+-- regresses for roles nobody has explicitly narrowed yet.
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_key TEXT NOT NULL,
+  feature_key TEXT NOT NULL,
+  can_create BOOLEAN NOT NULL DEFAULT FALSE,
+  can_read BOOLEAN NOT NULL DEFAULT FALSE,
+  can_update BOOLEAN NOT NULL DEFAULT FALSE,
+  can_delete BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (role_key, feature_key)
+);
+
+DROP TRIGGER IF EXISTS role_permissions_updated_at ON role_permissions;
+CREATE TRIGGER role_permissions_updated_at
+BEFORE UPDATE ON role_permissions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS role_geography_access (
+  role_key TEXT NOT NULL,
+  geography_node_id TEXT NOT NULL REFERENCES geography_nodes(node_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (role_key, geography_node_id)
+);
+
+-- Default permission matrix. Super Admin gets full CRUD everywhere; the
+-- partner roles mirror today's live partner-scoped behaviour; the six
+-- currently-dormant internal roles (rm/pam/kam/isr/livey_support/
+-- restricted_distributor) get read-leaning defaults approximating the
+-- blueprint's permission matrix (docs/LIVEY-PAM-CRM-BLUEPRINT.md Section
+-- 5.5). All of this is editable afterward from /admin/roles.
+INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_update, can_delete) VALUES
+  ('super_admin', 'deals', true, true, true, true),
+  ('super_admin', 'partners', true, true, true, true),
+  ('super_admin', 'customers', true, true, true, true),
+  ('super_admin', 'catalog', true, true, true, true),
+  ('super_admin', 'tickets', true, true, true, true),
+  ('super_admin', 'tasks', true, true, true, true),
+  ('super_admin', 'learning', true, true, true, true),
+  ('super_admin', 'rewards', true, true, true, true),
+  ('super_admin', 'integrations', true, true, true, true),
+  ('super_admin', 'users', true, true, true, true),
+  ('super_admin', 'audit', true, true, true, true),
+  ('super_admin', 'news', true, true, true, true),
+  ('super_admin', 'assistant', true, true, true, true),
+
+  ('rm', 'deals', true, true, true, false),
+  ('rm', 'partners', false, true, true, false),
+  ('rm', 'customers', true, true, true, false),
+  ('rm', 'catalog', false, true, false, false),
+  ('rm', 'tickets', true, true, true, false),
+  ('rm', 'tasks', true, true, true, false),
+  ('rm', 'learning', true, true, true, false),
+  ('rm', 'rewards', false, true, false, false),
+  ('rm', 'integrations', false, false, false, false),
+  ('rm', 'users', false, false, false, false),
+  ('rm', 'audit', false, true, false, false),
+  ('rm', 'news', false, true, false, false),
+  ('rm', 'assistant', true, true, false, false),
+
+  ('pam', 'deals', true, true, true, false),
+  ('pam', 'partners', false, true, true, false),
+  ('pam', 'customers', true, true, true, false),
+  ('pam', 'catalog', false, true, false, false),
+  ('pam', 'tickets', true, true, true, false),
+  ('pam', 'tasks', true, true, true, false),
+  ('pam', 'learning', false, true, false, false),
+  ('pam', 'rewards', false, true, false, false),
+  ('pam', 'integrations', false, false, false, false),
+  ('pam', 'users', false, false, false, false),
+  ('pam', 'audit', false, true, false, false),
+  ('pam', 'news', false, true, false, false),
+  ('pam', 'assistant', true, true, false, false),
+
+  ('kam', 'deals', true, true, true, false),
+  ('kam', 'partners', false, true, false, false),
+  ('kam', 'customers', true, true, true, false),
+  ('kam', 'catalog', false, true, false, false),
+  ('kam', 'tickets', true, true, true, false),
+  ('kam', 'tasks', true, true, true, false),
+  ('kam', 'learning', false, true, false, false),
+  ('kam', 'rewards', false, false, false, false),
+  ('kam', 'integrations', false, false, false, false),
+  ('kam', 'users', false, false, false, false),
+  ('kam', 'audit', false, true, false, false),
+  ('kam', 'news', false, false, false, false),
+  ('kam', 'assistant', true, true, false, false),
+
+  ('isr', 'deals', true, true, true, false),
+  ('isr', 'partners', false, true, false, false),
+  ('isr', 'customers', true, true, true, false),
+  ('isr', 'catalog', false, true, false, false),
+  ('isr', 'tickets', false, true, false, false),
+  ('isr', 'tasks', true, true, true, false),
+  ('isr', 'learning', false, true, false, false),
+  ('isr', 'rewards', false, false, false, false),
+  ('isr', 'integrations', false, false, false, false),
+  ('isr', 'users', false, false, false, false),
+  ('isr', 'audit', false, true, false, false),
+  ('isr', 'news', false, false, false, false),
+  ('isr', 'assistant', true, true, false, false),
+
+  ('livey_support', 'deals', false, true, false, false),
+  ('livey_support', 'partners', false, true, false, false),
+  ('livey_support', 'customers', false, true, true, false),
+  ('livey_support', 'catalog', false, true, false, false),
+  ('livey_support', 'tickets', true, true, true, false),
+  ('livey_support', 'tasks', true, true, true, false),
+  ('livey_support', 'learning', false, true, true, false),
+  ('livey_support', 'rewards', false, false, false, false),
+  ('livey_support', 'integrations', false, false, false, false),
+  ('livey_support', 'users', false, false, false, false),
+  ('livey_support', 'audit', false, true, false, false),
+  ('livey_support', 'news', false, true, false, false),
+  ('livey_support', 'assistant', false, true, false, false),
+
+  ('restricted_distributor', 'deals', false, true, true, false),
+  ('restricted_distributor', 'partners', false, false, false, false),
+  ('restricted_distributor', 'customers', false, true, false, false),
+  ('restricted_distributor', 'catalog', false, false, false, false),
+  ('restricted_distributor', 'tickets', false, false, false, false),
+  ('restricted_distributor', 'tasks', false, true, true, false),
+  ('restricted_distributor', 'learning', false, true, false, false),
+  ('restricted_distributor', 'rewards', false, false, false, false),
+  ('restricted_distributor', 'integrations', false, false, false, false),
+  ('restricted_distributor', 'users', false, false, false, false),
+  ('restricted_distributor', 'audit', false, true, false, false),
+  ('restricted_distributor', 'news', false, false, false, false),
+  ('restricted_distributor', 'assistant', false, true, false, false),
+
+  ('partner_admin', 'deals', true, true, true, false),
+  ('partner_admin', 'partners', false, true, true, false),
+  ('partner_admin', 'customers', true, true, true, false),
+  ('partner_admin', 'catalog', false, true, false, false),
+  ('partner_admin', 'tickets', true, true, true, false),
+  ('partner_admin', 'tasks', true, true, true, false),
+  ('partner_admin', 'learning', false, true, false, false),
+  ('partner_admin', 'rewards', true, true, false, false),
+  ('partner_admin', 'integrations', false, false, false, false),
+  ('partner_admin', 'users', true, true, false, false),
+  ('partner_admin', 'audit', false, true, false, false),
+  ('partner_admin', 'news', false, true, false, false),
+  ('partner_admin', 'assistant', true, true, false, false),
+
+  ('partner_user', 'deals', true, true, true, false),
+  ('partner_user', 'partners', false, true, false, false),
+  ('partner_user', 'customers', true, true, true, false),
+  ('partner_user', 'catalog', false, true, false, false),
+  ('partner_user', 'tickets', true, true, true, false),
+  ('partner_user', 'tasks', true, true, true, false),
+  ('partner_user', 'learning', false, true, false, false),
+  ('partner_user', 'rewards', true, true, false, false),
+  ('partner_user', 'integrations', false, false, false, false),
+  ('partner_user', 'users', false, false, false, false),
+  ('partner_user', 'audit', false, true, false, false),
+  ('partner_user', 'news', false, true, false, false),
+  ('partner_user', 'assistant', true, true, false, false)
+ON CONFLICT (role_key, feature_key) DO NOTHING;

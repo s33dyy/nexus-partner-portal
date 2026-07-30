@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { AssistantDealDraft, AssistantDealSummary } from "@/domain/contracts/assistant";
 import { confirmAssistantDeal, sendAssistantMessage } from "@/integrations/local/assistant";
+import { useAuth } from "@/hooks/use-auth";
 
 type PanelMessage = {
   role: "user" | "assistant";
@@ -30,6 +31,8 @@ const WELCOME_MESSAGE: PanelMessage = {
 };
 
 export function AssistantPanel() {
+  const { can } = useAuth();
+  const canCreateDeals = can("deals", "create");
   const [open, setOpen] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PanelMessage[]>([WELCOME_MESSAGE]);
@@ -118,7 +121,11 @@ export function AssistantPanel() {
           <SheetTitle className="flex items-center gap-2">
             <Bot className="h-4 w-4" /> Assistant
           </SheetTitle>
-          <SheetDescription>Create a deal or ask about your existing deals.</SheetDescription>
+          <SheetDescription>
+            {canCreateDeals
+              ? "Create a deal or ask about your existing deals."
+              : "Ask about your existing deals — your role can't create deals here."}
+          </SheetDescription>
         </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1 px-4 py-3">
@@ -163,7 +170,7 @@ export function AssistantPanel() {
           </div>
         </ScrollArea>
 
-        {pendingDraft && (
+        {pendingDraft && canCreateDeals && (
           <div className="border-t bg-muted/30 px-4 py-3">
             <Button
               type="button"

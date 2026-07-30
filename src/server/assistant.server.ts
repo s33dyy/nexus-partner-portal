@@ -15,6 +15,7 @@ import { createDeal, resolveDealCommandActor } from "@/server/deal-commands.serv
 import { getAuthContext, queryTable } from "@/server/livey-service.server";
 import { runChatCompletion, type ChatCompletionResult } from "@/server/openrouter.server";
 import { pool } from "@/server/postgres.server";
+import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
 
 // The assistant is scoped to exactly two capabilities: drafting a new Deal
 // for explicit confirmation, and describing/listing the caller's own
@@ -281,6 +282,45 @@ export async function sendAssistantMessage(input: {
   }
 
   const intent = parseIntent(completion.content);
+  const capabilities = await loadRoleCapabilities(authContext.assignment?.roleKey ?? null);
+
+  if (intent.type === "list_deals" && !hasCapability(capabilities, "deals", "read")) {
+    const reply = "Your role doesn't have permission to view deals through the Assistant.";
+    await logAssistantMessage({
+      conversationId,
+      userId,
+      assignmentId,
+      role: "assistant",
+      content: reply,
+      proposedAction: "list_deals",
+      actionPayload: null,
+      retrievedDealIds: [],
+      confirmed: null,
+      outcome: "refused_no_capability",
+      model: completion.model,
+      correlationId,
+    });
+    return { ...empty, reply };
+  }
+
+  if (intent.type === "create_deal_draft" && !hasCapability(capabilities, "deals", "create")) {
+    const reply = "Your role doesn't have permission to create deals through the Assistant.";
+    await logAssistantMessage({
+      conversationId,
+      userId,
+      assignmentId,
+      role: "assistant",
+      content: reply,
+      proposedAction: "create_deal_draft",
+      actionPayload: intent.draft,
+      retrievedDealIds: [],
+      confirmed: null,
+      outcome: "refused_no_capability",
+      model: completion.model,
+      correlationId,
+    });
+    return { ...empty, reply };
+  }
 
   if (intent.type === "list_deals") {
     const deals = await fetchScopedDeals({ stage: intent.stage, status: intent.status });
@@ -372,6 +412,41 @@ export async function confirmAssistantDeal(input: {
     assignment: authContext.assignment,
     activeContext: authContext.activeContext,
   });
+
+  const capabilities = await loadRoleCapabilities(authContext.assignment?.roleKey ?? null);
+  if (!hasCapability(capabilities, "deals", "create")) {
+    const reply = "Your role doesn't have permission to create deals through the Assistant.";
+    await logAssistantMessage({
+      conversationId: input.conversationId,
+      userId,
+      assignmentId,
+      role: "assistant",
+      content: reply,
+      proposedAction: "create_deal_draft",
+      actionPayload: input.draft,
+      retrievedDealIds: [],
+      confirmed: true,
+      outcome: "refused_no_capability",
+      model: null,
+      correlationId,
+    });
+    return {
+      reply,
+      result: {
+        ok: false,
+        failure: {
+          code: "POLICY_DENIED",
+          message: "Access denied",
+          subjectId: null,
+          reason: "Role lacks deals.create capability",
+          retryable: false,
+          mayRevealRecordExistence: false,
+        },
+        correlationId,
+      },
+      correlationId,
+    };
+  }
 
   if (!actorResult.ok) {
     const reply = "Your session no longer has an active assignment — sign in again to continue.";

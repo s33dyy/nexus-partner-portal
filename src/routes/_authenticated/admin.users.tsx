@@ -27,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
-import { changeUserRole } from "@/integrations/local/user-role-commands";
+import { assignGovernedRole } from "@/integrations/local/role-assignment-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
@@ -47,6 +47,8 @@ import {
 import type { AppRole } from "@/server/livey-service.server";
 import { useAuth } from "@/hooks/use-auth";
 import { PARTNER_STATUSES, type PartnerStatus } from "@/lib/partner-status";
+import { ROLE_KEY_LABELS, isLegacyAppRoleKey } from "@/domain/contracts/features";
+import { ROLE_KEYS, type RoleKey } from "@/domain/contracts/taxonomy";
 
 type Profile = {
   id: string;
@@ -69,7 +71,7 @@ type UserRow = Profile & {
   roles: string[];
 };
 
-const ROLE_OPTIONS = ["partner_admin", "partner_user"] as const;
+const ROLE_OPTIONS = [...ROLE_KEYS] as const;
 const PARTNER_STATUS_OPTIONS = [...PARTNER_STATUSES] as const;
 
 const USER_EXPORT_COLUMNS: CsvColumn[] = [
@@ -109,7 +111,7 @@ function AdminUsersPage() {
     phone: "",
     company_name: "",
     password: "",
-    role: "partner_admin" as AppRole,
+    role: "partner_admin" as RoleKey,
   });
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -189,9 +191,9 @@ function AdminUsersPage() {
     if (!selectedUser) return;
     setSaving(true);
     try {
-      const roleResult = await changeUserRole({
+      const roleResult = await assignGovernedRole({
         targetUserId: selectedUser.id,
-        newRole: draftRole,
+        roleKey: draftRole,
       });
       if (!roleResult.ok) {
         toast.error(roleResult.failure.message);
@@ -241,6 +243,19 @@ function AdminUsersPage() {
         if (partnerRes.error) throw partnerRes.error;
       }
 
+      // Self-registered partners never get a governed assignment issued at
+      // signup — without this, approval would leave them permanently stuck
+      // on the "Assignment pending" screen. Issue one from their current
+      // role so approval always results in working access.
+      const currentRole = selectedUser.roles[0];
+      if (currentRole) {
+        const roleResult = await assignGovernedRole({
+          targetUserId: selectedUser.id,
+          roleKey: currentRole,
+        });
+        if (!roleResult.ok) throw new Error(roleResult.failure.message);
+      }
+
       toast.success("User approved");
       setEditOpen(false);
       await load();
@@ -258,17 +273,28 @@ function AdminUsersPage() {
     }
     setCreating(true);
     try {
-      const { error } = await supabase.auth.createWorkspaceUser({
+      const legacyRole = isLegacyAppRoleKey(newUser.role);
+      const { error, data } = await supabase.auth.createWorkspaceUser({
         full_name: newUser.full_name.trim(),
         email: newUser.email.trim(),
         phone: newUser.phone.trim(),
         company_name: newUser.company_name.trim() || null,
         password: newUser.password,
-        role: newUser.role,
-        partner_status:
-          newUser.role === "partner_user" ? "approved" : "pending_partner_registration",
+        role: (legacyRole ? newUser.role : "partner_admin") as AppRole,
+        partner_status: legacyRole
+          ? newUser.role === "partner_user"
+            ? "approved"
+            : "pending_partner_registration"
+          : "approved",
       });
-      if (error) throw error;
+      if (error || !data) throw error ?? new Error("Failed to create user");
+
+      const roleResult = await assignGovernedRole({
+        targetUserId: data.id,
+        roleKey: newUser.role,
+      });
+      if (!roleResult.ok) throw new Error(roleResult.failure.message);
+
       toast.success("User created");
       setNewUser({
         full_name: "",
@@ -565,11 +591,14 @@ function AdminUsersPage() {
                     label="Role"
                     value={newUser.role}
                     onValueChange={(value) =>
-                      setNewUser((current) => ({ ...current, role: value as AppRole }))
+                      setNewUser((current) => ({ ...current, role: value as RoleKey }))
                     }
                     options={[...ROLE_OPTIONS]}
                     allowCreate={false}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {ROLE_KEY_LABELS[newUser.role] ?? newUser.role}
+                  </p>
                 </Field>
               </div>
               <Button onClick={() => void createUser()} disabled={creating}>
@@ -633,6 +662,9 @@ function AdminUsersPage() {
                     onValueChange={setDraftRole}
                     options={[...ROLE_OPTIONS]}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {ROLE_KEY_LABELS[draftRole as RoleKey] ?? draftRole}
+                  </p>
                 </Field>
                 <Field label="Partner status">
                   <LookupCombobox

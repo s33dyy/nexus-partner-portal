@@ -326,7 +326,8 @@ function DealsPage() {
     null,
   );
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const { profile, hasRole } = useAuth();
+  const { profile, hasRole, can } = useAuth();
+  const canCreateDeals = can("deals", "create");
   const { selectedRegion } = useRegionFilter();
   useRequireAccess("full");
   const query = search.q ?? "";
@@ -2142,14 +2143,20 @@ function DealsPage() {
                   setDraft((current) => ({ ...current, reward_rate_percent: percent }))
                 }
               />
-              <Button onClick={() => void createDeal()} disabled={creating}>
-                {creating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Create deal
-              </Button>
+              {canCreateDeals ? (
+                <Button onClick={() => void createDeal()} disabled={creating}>
+                  {creating ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  Create deal
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Your role doesn't have permission to create deals.
+                </p>
+              )}
             </CardContent>
           </Card>
 

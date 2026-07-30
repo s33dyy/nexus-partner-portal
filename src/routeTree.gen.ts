@@ -35,6 +35,7 @@ import { Route as AuthenticatedAdminLearningRouteImport } from './routes/_authen
 import { Route as AuthenticatedAdminNewsRouteImport } from './routes/_authenticated/admin.news'
 import { Route as AuthenticatedAdminPartnersRouteImport } from './routes/_authenticated/admin.partners'
 import { Route as AuthenticatedAdminRewardsRouteImport } from './routes/_authenticated/admin.rewards'
+import { Route as AuthenticatedAdminRolesRouteImport } from './routes/_authenticated/admin.roles'
 import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authenticated/admin.users'
 import { Route as AuthenticatedPartnerAgreementRouteImport } from './routes/_authenticated/partner.agreement'
 import { Route as AuthenticatedPartnerOnboardingRouteImport } from './routes/_authenticated/partner.onboarding'
@@ -176,6 +177,11 @@ const AuthenticatedAdminRewardsRoute =
     path: '/admin/rewards',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminRolesRoute = AuthenticatedAdminRolesRouteImport.update({
+  id: '/admin/roles',
+  path: '/admin/roles',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedAdminUsersRoute = AuthenticatedAdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
+  '/admin/roles': typeof AuthenticatedAdminRolesRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
@@ -257,6 +264,7 @@ export interface FileRoutesByTo {
   '/admin/news': typeof AuthenticatedAdminNewsRoute
   '/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/admin/rewards': typeof AuthenticatedAdminRewardsRoute
+  '/admin/roles': typeof AuthenticatedAdminRolesRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
@@ -290,6 +298,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/news': typeof AuthenticatedAdminNewsRoute
   '/_authenticated/admin/partners': typeof AuthenticatedAdminPartnersRoute
   '/_authenticated/admin/rewards': typeof AuthenticatedAdminRewardsRoute
+  '/_authenticated/admin/roles': typeof AuthenticatedAdminRolesRoute
   '/_authenticated/admin/users': typeof AuthenticatedAdminUsersRoute
   '/_authenticated/partner/agreement': typeof AuthenticatedPartnerAgreementRoute
   '/_authenticated/partner/onboarding': typeof AuthenticatedPartnerOnboardingRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/admin/news'
     | '/admin/partners'
     | '/admin/rewards'
+    | '/admin/roles'
     | '/admin/users'
     | '/partner/agreement'
     | '/partner/onboarding'
@@ -354,6 +364,7 @@ export interface FileRouteTypes {
     | '/admin/news'
     | '/admin/partners'
     | '/admin/rewards'
+    | '/admin/roles'
     | '/admin/users'
     | '/partner/agreement'
     | '/partner/onboarding'
@@ -386,6 +397,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/news'
     | '/_authenticated/admin/partners'
     | '/_authenticated/admin/rewards'
+    | '/_authenticated/admin/roles'
     | '/_authenticated/admin/users'
     | '/_authenticated/partner/agreement'
     | '/_authenticated/partner/onboarding'
@@ -583,6 +595,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminRewardsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/roles': {
+      id: '/_authenticated/admin/roles'
+      path: '/admin/roles'
+      fullPath: '/admin/roles'
+      preLoaderRoute: typeof AuthenticatedAdminRolesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/users': {
       id: '/_authenticated/admin/users'
       path: '/admin/users'
@@ -652,6 +671,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminNewsRoute: typeof AuthenticatedAdminNewsRoute
   AuthenticatedAdminPartnersRoute: typeof AuthenticatedAdminPartnersRoute
   AuthenticatedAdminRewardsRoute: typeof AuthenticatedAdminRewardsRoute
+  AuthenticatedAdminRolesRoute: typeof AuthenticatedAdminRolesRoute
   AuthenticatedAdminUsersRoute: typeof AuthenticatedAdminUsersRoute
 }
 
@@ -678,6 +698,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminNewsRoute: AuthenticatedAdminNewsRoute,
   AuthenticatedAdminPartnersRoute: AuthenticatedAdminPartnersRoute,
   AuthenticatedAdminRewardsRoute: AuthenticatedAdminRewardsRoute,
+  AuthenticatedAdminRolesRoute: AuthenticatedAdminRolesRoute,
   AuthenticatedAdminUsersRoute: AuthenticatedAdminUsersRoute,
 }
 

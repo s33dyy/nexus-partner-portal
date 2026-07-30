@@ -17,6 +17,7 @@ import {
   CheckSquare,
   GraduationCap,
   Activity,
+  ShieldQuestion,
 } from "lucide-react";
 
 import {
@@ -68,6 +69,12 @@ const admin: Item[] = [
   { title: "Partner Approvals", url: "/admin/partners", icon: ShieldCheck, roles: ["super_admin"] },
   { title: "Deal Approvals", url: "/admin/deals", icon: Handshake, roles: ["super_admin"] },
   { title: "Users & Roles", url: "/admin/users", icon: Users, roles: ["super_admin"] },
+  {
+    title: "Role Permissions",
+    url: "/admin/roles",
+    icon: ShieldQuestion,
+    roles: ["super_admin"],
+  },
   { title: "Product Catalog", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
   { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
   { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },

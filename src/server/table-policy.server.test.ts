@@ -24,6 +24,7 @@ test("generic table policy allows bootstrap-safe lookup reads and scopes partner
       partnerId: "partner-a",
       companyName: "Acme Labs",
       hasGovernedContext: true,
+      governedRoleKey: "partner_admin",
     },
   );
   expect(partnerQuery.filters).toEqual([
@@ -71,6 +72,20 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
         rowCount: 1,
       } as never;
     }
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "deals",
+            can_create: true,
+            can_read: true,
+            can_update: true,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
 
     return { rows: [], rowCount: 0 } as never;
   }) as typeof pool.query;
@@ -84,6 +99,7 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
         partnerId: "partner-a",
         companyName: "Acme Labs",
         hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
       },
     );
 
@@ -96,8 +112,9 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
         account_name: "Acme Foods",
       },
     ]);
-    expect(observed[0]?.sql).toContain('FROM "portal_deals" WHERE "partner_id" = $1');
-    expect(observed[0]?.params).toEqual(["partner-a"]);
+    const dealsQueryLog = observed.find((entry) => entry.sql.includes('FROM "portal_deals"'));
+    expect(dealsQueryLog?.sql).toContain('FROM "portal_deals" WHERE "partner_id" = $1');
+    expect(dealsQueryLog?.params).toEqual(["partner-a"]);
 
     const denied = await queryTableWithAuthContext(
       { table: "portal_deals", operation: "select" },
@@ -234,6 +251,7 @@ test("customer_participants, deal_participants, and customer_merge_events are pa
         partnerId: "partner-a",
         companyName: "Acme Labs",
         hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
       },
     );
     expect(scoped.filters).toEqual([{ column: "partner_id", value: "partner-a", operator: "eq" }]);

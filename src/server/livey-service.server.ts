@@ -50,7 +50,7 @@ type WorkspaceUserInput = {
 type QueryFilter = {
   column: string;
   value: unknown;
-  operator: "eq";
+  operator: "eq" | "in";
 };
 
 type QueryOrder = {
@@ -542,6 +542,16 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "created_at",
     "updated_at",
   ],
+  role_permissions: [
+    "role_key",
+    "feature_key",
+    "can_create",
+    "can_read",
+    "can_update",
+    "can_delete",
+    "updated_at",
+  ],
+  role_geography_access: ["role_key", "geography_node_id", "created_at"],
 };
 
 const SESSION_COOKIE = "livey_session";
@@ -814,14 +824,19 @@ function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOf
   const whereParams: unknown[] = [];
 
   filters.forEach((filter, index) => {
-    if (filter.operator !== "eq") {
-      throw new Error(`Unsupported filter operator: ${filter.operator}`);
-    }
     if (!columns.includes(filter.column)) {
       throw new Error(`Unsupported filter column: ${filter.column}`);
     }
-    whereClauses.push(`${quoteIdent(filter.column)} = $${parameterOffset + index + 1}`);
-    whereParams.push(filter.value);
+    const paramIndex = parameterOffset + index + 1;
+    if (filter.operator === "eq") {
+      whereClauses.push(`${quoteIdent(filter.column)} = $${paramIndex}`);
+      whereParams.push(filter.value);
+    } else if (filter.operator === "in") {
+      whereClauses.push(`${quoteIdent(filter.column)} = ANY($${paramIndex})`);
+      whereParams.push(filter.value);
+    } else {
+      throw new Error(`Unsupported filter operator: ${filter.operator}`);
+    }
   });
 
   return {
@@ -1029,6 +1044,8 @@ export async function queryTable(query: TableQuery) {
     partnerId: authContext.profile?.partner_id ?? null,
     companyName: authContext.profile?.company_name ?? null,
     hasGovernedContext: Boolean(authContext.activeContext),
+    governedRoleKey: authContext.assignment?.roleKey ?? null,
+    geographyCeilingNodeId: authContext.assignment?.geographyCeilingNodeId ?? null,
   });
 }
 

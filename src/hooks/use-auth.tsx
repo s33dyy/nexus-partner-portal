@@ -2,7 +2,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase, type Session, type User } from "@/integrations/local/client";
 import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/governance";
+import type { CrudOperation, FeatureKey } from "@/domain/contracts/features";
+import type { RoleKey } from "@/domain/contracts/taxonomy";
+import { getMyCapabilities } from "@/integrations/local/role-permission-commands";
 import type { PartnerStatus } from "@/lib/partner-status";
+
+type FeatureCapabilities = Record<FeatureKey, Record<CrudOperation, boolean>>;
 
 export type AppRole = "super_admin" | "partner_admin" | "partner_user";
 
@@ -23,10 +28,12 @@ type AuthContextValue = {
   session: Session | null;
   profile: Profile | null;
   roles: AppRole[];
+  roleKey: RoleKey | null;
   assignment: AssignmentRecord | null;
   activeContext: ActiveContextRecord | null;
   loading: boolean;
   hasRole: (role: AppRole) => boolean;
+  can: (featureKey: FeatureKey, operation: CrudOperation) => boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -39,30 +46,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [assignment, setAssignment] = useState<AssignmentRecord | null>(null);
   const [activeContext, setActiveContext] = useState<ActiveContextRecord | null>(null);
+  const [capabilities, setCapabilities] = useState<FeatureCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadProfile = async (userId: string) => {
-    const [{ data: prof }, { data: roleRows }, { data: assignmentRows }, { data: contextRows }] =
-      await Promise.all([
-        supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
-        supabase.from("user_roles").select("role").eq("user_id", userId),
-        supabase
-          .from("assignments")
-          .select("*")
-          .eq("user_id", userId)
-          .order("valid_from", { ascending: false }),
-        supabase
-          .from("active_contexts")
-          .select("*")
-          .eq("user_id", userId)
-          .order("issued_at", { ascending: false })
-          .maybeSingle(),
-      ]);
+    const [
+      { data: prof },
+      { data: roleRows },
+      { data: assignmentRows },
+      { data: contextRows },
+      myCapabilities,
+    ] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      supabase.from("user_roles").select("role").eq("user_id", userId),
+      supabase
+        .from("assignments")
+        .select("*")
+        .eq("user_id", userId)
+        .order("valid_from", { ascending: false }),
+      supabase
+        .from("active_contexts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("issued_at", { ascending: false })
+        .maybeSingle(),
+      getMyCapabilities().catch(() => null),
+    ]);
     setProfile((prof as Profile | null) ?? null);
     const typedAssignments = ((assignmentRows ?? []) as AssignmentRecord[]) ?? [];
     setRoles(((roleRows ?? []) as { role: AppRole }[]).map((r) => r.role));
     const assignmentRow = typedAssignments[0] ?? null;
     setAssignment(assignmentRow);
+    setCapabilities(myCapabilities);
     const contextRow = (contextRows as Record<string, unknown> | null) ?? null;
     if (contextRow && assignmentRow) {
       setActiveContext({
@@ -106,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles([]);
         setAssignment(null);
         setActiveContext(null);
+        setCapabilities(null);
       }
     });
 
@@ -126,10 +142,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     profile,
     roles,
+    roleKey: assignment?.roleKey ?? null,
     assignment,
     activeContext,
     loading,
     hasRole: (r) => roles.includes(r),
+    can: (featureKey, operation) => capabilities?.[featureKey]?.[operation] ?? false,
     refresh: async () => {
       if (session?.user) await loadProfile(session.user.id);
     },

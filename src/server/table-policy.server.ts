@@ -1,9 +1,16 @@
+import type { FeatureKey } from "@/domain/contracts/features";
+import type { RoleKey } from "@/domain/contracts/taxonomy";
 import { pool } from "@/server/postgres.server";
+import {
+  assertFeatureCapability,
+  countriesWithinCeiling,
+  loadRoleCapabilities,
+} from "@/server/rbac-policy.server";
 
 export type QueryFilter = {
   column: string;
   value: unknown;
-  operator: "eq";
+  operator: "eq" | "in";
 };
 
 export type TableQueryLike = {
@@ -24,6 +31,8 @@ export type TablePolicyAuthContext = {
   partnerId: string | null;
   companyName: string | null;
   hasGovernedContext: boolean;
+  governedRoleKey?: RoleKey | null;
+  geographyCeilingNodeId?: string | null;
 };
 
 export type GenericTableScopeConstraint = {
@@ -59,7 +68,44 @@ const GOVERNANCE_TABLES = new Set([
   "geography_nodes",
   "geography_node_aliases",
   "assignment_events",
+  "role_permissions",
+  "role_geography_access",
 ]);
+
+// Tables reachable through the generic queryTable()/supabase.from() path
+// that are gated by the role permission matrix (admin.roles.tsx). Identity/
+// session tables (profiles, user_roles, assignments, active_contexts,
+// sessions) are deliberately excluded — every request must always be able
+// to read its own identity/session to bootstrap the app, and only
+// super_admin ever lists other users' rows there today (already enforced
+// by the existing scope logic below, independent of this matrix).
+const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
+  portal_deals: "deals",
+  portal_deal_collaborators: "deals",
+  deal_documents: "deals",
+  partners: "partners",
+  partner_documents: "partners",
+  partner_review_notes: "partners",
+  portal_customers: "customers",
+  portal_customer_activities: "customers",
+  customer_participants: "customers",
+  customer_merge_events: "customers",
+  deal_participants: "customers",
+  portal_catalog_items: "catalog",
+  support_tickets: "tickets",
+  support_ticket_comments: "tickets",
+  tasks: "tasks",
+  reward_catalog_items: "rewards",
+  reward_point_events: "rewards",
+  reward_redemptions: "rewards",
+  portal_audit_events: "audit",
+  portal_news_posts: "news",
+};
+
+// Tables with a resolvable geography column, restricted to a role's region
+// access on reads (writes go through their own governed command layer,
+// e.g. deal-commands.server.ts's authorizeDealActor for portal_deals).
+const GEOGRAPHY_SCOPED_TABLES = new Set(["portal_deals", "partners"]);
 
 const BOOTSTRAP_SELF_SERVICE_TABLES = new Set(["profiles", "partners"]);
 const BOOTSTRAP_READ_ONLY_TABLES = new Set([
@@ -438,7 +484,7 @@ function scopeValuesForRow(
   return row;
 }
 
-export async function applyTablePolicy(
+async function applyTablePolicyInner(
   query: TableQueryLike,
   auth: TablePolicyAuthContext,
 ): Promise<TableQueryLike> {
@@ -700,4 +746,60 @@ export async function applyTablePolicy(
   }
 
   return { ...query, filters };
+}
+
+function operationToCrud(
+  operation: TableQueryLike["operation"],
+): "create" | "read" | "update" | "delete" {
+  if (operation === "select" || operation === "count") return "read";
+  if (operation === "insert") return "create";
+  if (operation === "update") return "update";
+  return "delete";
+}
+
+async function assertGovernedFeatureCapability(
+  query: TableQueryLike,
+  auth: TablePolicyAuthContext,
+) {
+  if (isSuperAdmin(auth)) return;
+  const featureKey = TABLE_FEATURE_MAP[query.table];
+  if (!featureKey) return;
+
+  const capabilities = await loadRoleCapabilities(auth.governedRoleKey ?? null);
+  assertFeatureCapability(capabilities, featureKey, operationToCrud(query.operation));
+}
+
+function appendGeographyFilter(
+  query: TableQueryLike,
+  auth: TablePolicyAuthContext,
+): TableQueryLike {
+  if (isSuperAdmin(auth)) return query;
+  if (query.operation !== "select" && query.operation !== "count") return query;
+  if (!GEOGRAPHY_SCOPED_TABLES.has(query.table)) return query;
+
+  const countries = countriesWithinCeiling(auth.geographyCeilingNodeId ?? null);
+  if (countries === null) return query;
+
+  return {
+    ...query,
+    filters: [
+      ...(query.filters ?? []),
+      { column: "country", value: countries, operator: "in" as const },
+    ],
+  };
+}
+
+/** Applies the existing ownership/scope policy, then layers the role
+ * permission matrix (CRUD gate) and, for the handful of geography-bearing
+ * tables, a region-access filter on top. Both new checks are no-ops for
+ * super_admin and for tables outside their respective maps, so every
+ * existing code path's behaviour is unchanged unless a role has actually
+ * been narrowed from admin.roles.tsx. */
+export async function applyTablePolicy(
+  query: TableQueryLike,
+  auth: TablePolicyAuthContext,
+): Promise<TableQueryLike> {
+  await assertGovernedFeatureCapability(query, auth);
+  const result = await applyTablePolicyInner(query, auth);
+  return appendGeographyFilter(result, auth);
 }
