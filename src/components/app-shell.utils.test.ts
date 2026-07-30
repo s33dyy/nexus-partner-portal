@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { buildShellContextSummary } from "@/components/app-shell.utils";
+import type { AssignmentRecord } from "@/domain/contracts/governance";
 
 test("buildShellContextSummary flags missing assignments explicitly", () => {
   const summary = buildShellContextSummary({
@@ -25,7 +26,7 @@ test("buildShellContextSummary surfaces the active governed context", () => {
       status: "active",
       validFrom: "2026-07-29T00:00:00.000Z",
       validTo: null,
-      geographyNodeId: null,
+      baseGeographyNodeId: null,
       managerAssignmentId: null,
       predecessorAssignmentId: null,
       successorAssignmentId: null,
@@ -33,7 +34,7 @@ test("buildShellContextSummary surfaces the active governed context", () => {
       isSeed: false,
       createdAt: "2026-07-29T00:00:00.000Z",
       updatedAt: "2026-07-29T00:00:00.000Z",
-    },
+    } as unknown as AssignmentRecord,
     activeContext: {
       contextId: "context-1",
       userId: "user-1",

@@ -106,7 +106,9 @@ function AdminRewardsPage() {
   const [catalog, setCatalog] = useState<RewardCatalogRecord[]>([]);
   const [redemptions, setRedemptions] = useState<RewardRedemptionRecord[]>([]);
   const [events, setEvents] = useState<RewardPointEventRecord[]>([]);
-  const [users, setUsers] = useState<Array<{ id: string; full_name: string; email: string; partner_id: string | null }>>([]);
+  const [users, setUsers] = useState<
+    Array<{ id: string; full_name: string; email: string; partner_id: string | null }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -140,7 +142,10 @@ function AdminRewardsPage() {
         supabase.from("reward_catalog_items").select("*").order("created_at", { ascending: false }),
         supabase.from("reward_redemptions").select("*").order("created_at", { ascending: false }),
         supabase.from("reward_point_events").select("*").order("created_at", { ascending: false }),
-        supabase.from("profiles").select("id, full_name, email, partner_id").order("full_name", { ascending: true }),
+        supabase
+          .from("profiles")
+          .select("id, full_name, email, partner_id")
+          .order("full_name", { ascending: true }),
       ]);
       if (catalogRes.error || redemptionRes.error || pointRes.error || userRes.error) {
         throw catalogRes.error ?? redemptionRes.error ?? pointRes.error ?? userRes.error;
@@ -152,11 +157,18 @@ function AdminRewardsPage() {
       setRedemptions(redemptionRows);
       setEvents(pointRows);
       setUsers(
-        ((userRes.data as Array<{ id: string; full_name: string; email: string; partner_id: string | null }> | null) ?? []).filter(
-          (user) => Boolean(user.email),
-        ),
+        (
+          (userRes.data as Array<{
+            id: string;
+            full_name: string;
+            email: string;
+            partner_id: string | null;
+          }> | null) ?? []
+        ).filter((user) => Boolean(user.email)),
       );
-      setSource(catalogRows.length || redemptionRows.length || pointRows.length ? "database" : "empty");
+      setSource(
+        catalogRows.length || redemptionRows.length || pointRows.length ? "database" : "empty",
+      );
       setSelectedId((current) => current ?? catalogRows[0]?.id ?? null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load rewards");
@@ -489,7 +501,12 @@ function AdminRewardsPage() {
   const saveAdjustment = async () => {
     const user = users.find((entry) => entry.id === adjustmentDraft.userId) ?? null;
     const pointsDelta = Number.parseInt(adjustmentDraft.pointsDelta, 10);
-    if (!user || !Number.isFinite(pointsDelta) || pointsDelta === 0 || !adjustmentDraft.reason.trim()) {
+    if (
+      !user ||
+      !Number.isFinite(pointsDelta) ||
+      pointsDelta === 0 ||
+      !adjustmentDraft.reason.trim()
+    ) {
       toast.error("Choose a user, enter a non-zero point adjustment, and add a reason");
       return;
     }
@@ -584,15 +601,6 @@ function AdminRewardsPage() {
                 <CardDescription>Create, edit, and remove marketplace items.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search rewards and requests"
-                    className="pl-8"
-                  />
-                </div>
                 <CsvExportButton
                   label="Download template CSV"
                   filenameStem="livey-reward-catalog-template"
@@ -883,7 +891,10 @@ function AdminRewardsPage() {
                       id="adjustment-user"
                       value={adjustmentDraft.userId}
                       onChange={(event) =>
-                        setAdjustmentDraft((current) => ({ ...current, userId: event.target.value }))
+                        setAdjustmentDraft((current) => ({
+                          ...current,
+                          userId: event.target.value,
+                        }))
                       }
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                     >
@@ -916,7 +927,10 @@ function AdminRewardsPage() {
                       id="adjustment-reason"
                       value={adjustmentDraft.reason}
                       onChange={(event) =>
-                        setAdjustmentDraft((current) => ({ ...current, reason: event.target.value }))
+                        setAdjustmentDraft((current) => ({
+                          ...current,
+                          reason: event.target.value,
+                        }))
                       }
                       placeholder="Reason for the manual credit or debit"
                     />

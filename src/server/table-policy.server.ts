@@ -23,6 +23,7 @@ export type TableQueryLike = {
   };
   values?: Record<string, unknown> | Array<Record<string, unknown>>;
   single?: "single" | "maybeSingle" | null;
+  limit?: number;
 };
 
 export type TablePolicyAuthContext = {
@@ -61,6 +62,13 @@ const PUBLIC_READ_TABLES = new Set([
   "portal_catalog_items",
   "reward_catalog_items",
   "portal_news_posts",
+  // Insight Hub content is a governed catalogue like the tables above:
+  // every authenticated user can browse published tracks/subjects/lessons/
+  // assessments, and only super_admin authors them (admin.learning.tsx).
+  "learning_tracks",
+  "learning_subjects",
+  "learning_lessons",
+  "learning_assessments",
 ]);
 
 const GOVERNANCE_TABLES = new Set([
@@ -82,6 +90,7 @@ const GOVERNANCE_TABLES = new Set([
 const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
   portal_deals: "deals",
   portal_deal_collaborators: "deals",
+  deal_line_items: "deals",
   deal_documents: "deals",
   partners: "partners",
   partner_documents: "partners",
@@ -99,7 +108,10 @@ const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
   reward_point_events: "rewards",
   reward_redemptions: "rewards",
   portal_audit_events: "audit",
+  domain_activity_events: "audit",
   portal_news_posts: "news",
+  learning_enrollments: "learning",
+  learning_assessment_attempts: "learning",
 };
 
 // Tables with a resolvable geography column, restricted to a role's region
@@ -349,9 +361,13 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
     case "portal_team_members":
       return { kind: "column", column: "company_name", value: auth.companyName };
     case "portal_deal_collaborators":
+    case "deal_line_items":
       return { kind: "linked-deal" };
     case "support_ticket_comments":
       return { kind: "linked-ticket" };
+    case "learning_enrollments":
+    case "learning_assessment_attempts":
+      return { kind: "column", column: "user_id", value: auth.userId };
     case "customer_participants":
     case "deal_participants":
     case "customer_merge_events":
@@ -715,6 +731,24 @@ async function applyTablePolicyInner(
       return { ...query, filters };
     }
 
+    throw new Error("Access denied");
+  }
+
+  // domain_activity_events spans every subject type (deal, task, ticket,
+  // user, ...) with no single owning column, unlike portal_audit_events'
+  // sibling block above. A precise per-record scope (only events on records
+  // the caller can already open — product.md §5.6/§9.17) is a larger piece
+  // of work; until it lands, apply the same super-admin-only reads as
+  // portal_audit_events rather than ship an under-scoped rule. Writes only
+  // ever happen server-side inside domain command modules (deal-commands.
+  // server.ts etc.), never through this generic client path.
+  if (query.table === "domain_activity_events") {
+    if (query.operation === "select" || query.operation === "count") {
+      if (!superAdmin) {
+        throw new Error("Access denied");
+      }
+      return { ...query, filters };
+    }
     throw new Error("Access denied");
   }
 

@@ -612,15 +612,6 @@ function AdminPartners() {
 
       <Card>
         <CardHeader className="flex flex-col gap-3 border-b sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative w-full max-w-sm">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search company or GST"
-              className="pl-8"
-            />
-          </div>
           <LookupCombobox
             fieldName={LOOKUP_FIELDS.partnerStatus}
             label="Status"

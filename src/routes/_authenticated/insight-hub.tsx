@@ -12,6 +12,7 @@ import {
   Star,
   Trophy,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { supabase } from "@/integrations/local/client";
+import { enrollInTrack } from "@/integrations/local/learning-commands";
 
 export const Route = createFileRoute("/_authenticated/insight-hub")({
   component: InsightHubPage,
@@ -41,6 +43,7 @@ type EnrollmentRow = {
   status: string;
   progress_percent: number;
   completed_at: string | null;
+  certificate_token: string | null;
 };
 
 type SubjectRow = {
@@ -59,6 +62,7 @@ function InsightHubPage() {
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [enrollingTrackId, setEnrollingTrackId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +80,7 @@ function InsightHubPage() {
         profile?.id
           ? supabase
               .from("learning_enrollments")
-              .select("id, track_id, status, progress_percent, completed_at")
+              .select("id, track_id, status, progress_percent, completed_at, certificate_token")
               .eq("user_id", profile.id)
           : Promise.resolve({ data: [], error: null }),
       ]);
@@ -99,9 +103,32 @@ function InsightHubPage() {
     void load();
   }, [load]);
 
-  const enrollmentByTrack = Object.fromEntries(
-    enrollments.map((e) => [e.track_id, e]),
-  );
+  const handleStart = async (trackId: string) => {
+    setEnrollingTrackId(trackId);
+    try {
+      const result = await enrollInTrack({ trackId });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success("Enrolled — continue whenever you're ready");
+      await load();
+    } finally {
+      setEnrollingTrackId(null);
+    }
+  };
+
+  const handleViewCertificate = (enrollment: EnrollmentRow | undefined) => {
+    if (!enrollment?.certificate_token) {
+      toast.error("No certificate on file for this track yet");
+      return;
+    }
+    toast.success(`Certificate ${enrollment.certificate_token}`, {
+      description: "Verification reference — printable certificate view is coming soon.",
+    });
+  };
+
+  const enrollmentByTrack = Object.fromEntries(enrollments.map((e) => [e.track_id, e]));
 
   const totalCompleted = enrollments.filter((e) => e.status === "completed").length;
   const totalEnrolled = enrollments.length;
@@ -240,7 +267,9 @@ function InsightHubPage() {
                         {isCompleted && (
                           <Badge className="bg-emerald-600 text-white">Certified</Badge>
                         )}
-                        {isEnrolled && !isCompleted && <Badge variant="secondary">In progress</Badge>}
+                        {isEnrolled && !isCompleted && (
+                          <Badge variant="secondary">In progress</Badge>
+                        )}
                         {track.tier_requirement && (
                           <Badge variant="outline">{track.tier_requirement}</Badge>
                         )}
@@ -298,18 +327,30 @@ function InsightHubPage() {
                           {track.tier_requirement} tier required
                         </Button>
                       ) : isCompleted ? (
-                        <Button variant="outline" className="w-full">
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => handleViewCertificate(enrollment)}
+                        >
                           <Star className="mr-2 h-4 w-4 text-amber-500" />
                           View certificate
                         </Button>
                       ) : isEnrolled ? (
-                        <Button className="w-full">
+                        <Button className="w-full" disabled>
                           <Play className="mr-2 h-4 w-4" />
                           Continue learning
                         </Button>
                       ) : (
-                        <Button className="w-full">
-                          <BookOpen className="mr-2 h-4 w-4" />
+                        <Button
+                          className="w-full"
+                          onClick={() => void handleStart(track.id)}
+                          disabled={enrollingTrackId === track.id}
+                        >
+                          {enrollingTrackId === track.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <BookOpen className="mr-2 h-4 w-4" />
+                          )}
                           Start track
                         </Button>
                       )}

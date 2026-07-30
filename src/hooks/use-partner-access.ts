@@ -8,12 +8,7 @@ import { getPartnerAccessFlags } from "@/lib/partner-status";
 export type AccessLevel = "none" | "partial" | "full";
 
 export function usePartnerAccess() {
-  const { profile, hasRole, loading } = useAuth();
-  const roles = [
-    hasRole("super_admin") ? "super_admin" : null,
-    hasRole("partner_admin") ? "partner_admin" : null,
-    hasRole("partner_user") ? "partner_user" : null,
-  ].filter((role): role is "super_admin" | "partner_admin" | "partner_user" => Boolean(role));
+  const { profile, roles, loading } = useAuth();
 
   return getPartnerAccessFlags({
     loading,

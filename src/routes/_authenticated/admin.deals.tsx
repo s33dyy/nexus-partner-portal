@@ -418,15 +418,6 @@ function AdminDealsPage() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search deals"
-                    className="pl-8"
-                  />
-                </div>
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.dealStatus}
                   label="Status"
@@ -781,7 +772,11 @@ function AdminDealsPage() {
                     </Button>
                   </div>
                   <Separator />
-                  <DealOutcomeReview dealId={selectedDeal.id} dealStage={selectedDeal.stage} commercialApproved={selectedDeal.commercial_approved} />
+                  <DealOutcomeReview
+                    dealId={selectedDeal.id}
+                    dealStage={selectedDeal.stage}
+                    commercialApproved={selectedDeal.commercial_approved}
+                  />
                 </>
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">

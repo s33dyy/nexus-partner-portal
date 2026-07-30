@@ -223,6 +223,73 @@ test("super admin listing deal collaborators without a deal_id filter is not sco
   expect(collaboratorsQuery.filters).toEqual([]);
 });
 
+test("super admin listing deal line items without a deal_id filter is not scoped to their own deals", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const lineItemsQuery = await applyTablePolicy(
+    { table: "deal_line_items", operation: "select", filters: [] },
+    SUPER_ADMIN_AUTH,
+  );
+  expect(lineItemsQuery.filters).toEqual([]);
+});
+
+test("Insight Hub content tables are public-read for any authenticated user and write-locked to super admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const partnerAuth = {
+    userId: "user-a",
+    roles: ["partner_admin"],
+    partnerId: "partner-a",
+    companyName: "Acme Labs",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_admin" as const,
+  };
+
+  for (const table of [
+    "learning_tracks",
+    "learning_subjects",
+    "learning_lessons",
+    "learning_assessments",
+  ]) {
+    const read = await applyTablePolicy({ table, operation: "select", filters: [] }, partnerAuth);
+    expect(read.filters).toEqual([]);
+
+    await expect(
+      applyTablePolicy({ table, operation: "insert", values: {} }, partnerAuth),
+    ).rejects.toThrow("Access denied");
+
+    const adminWrite = await applyTablePolicy(
+      { table, operation: "insert", values: {} },
+      SUPER_ADMIN_AUTH,
+    );
+    expect(adminWrite.table).toBe(table);
+  }
+});
+
+test("learning_enrollments and learning_assessment_attempts are scoped to the caller's own user_id", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  for (const table of ["learning_enrollments", "learning_assessment_attempts"]) {
+    const scoped = await applyTablePolicy(
+      { table, operation: "select", filters: [] },
+      {
+        userId: "user-a",
+        roles: ["partner_user"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_user",
+      },
+    );
+    expect(scoped.filters).toEqual([{ column: "user_id", value: "user-a", operator: "eq" }]);
+
+    const unscopedForSuperAdmin = await applyTablePolicy(
+      { table, operation: "select", filters: [] },
+      SUPER_ADMIN_AUTH,
+    );
+    expect(unscopedForSuperAdmin.filters).toEqual([]);
+  }
+});
+
 test("non-super-admin reads remain scoped to their own profile row", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
 
@@ -262,4 +329,35 @@ test("customer_participants, deal_participants, and customer_merge_events are pa
     );
     expect(unscopedForSuperAdmin.filters).toEqual([]);
   }
+});
+
+test("domain_activity_events reads are super-admin only, matching portal_audit_events", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const superAdminRead = await applyTablePolicy(
+    { table: "domain_activity_events", operation: "select", filters: [] },
+    SUPER_ADMIN_AUTH,
+  );
+  expect(superAdminRead.filters).toEqual([]);
+
+  await expect(
+    applyTablePolicy(
+      { table: "domain_activity_events", operation: "select", filters: [] },
+      {
+        userId: "user-a",
+        roles: ["partner_admin"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
+      },
+    ),
+  ).rejects.toThrow("Access denied");
+
+  await expect(
+    applyTablePolicy(
+      { table: "domain_activity_events", operation: "insert", values: {} },
+      SUPER_ADMIN_AUTH,
+    ),
+  ).rejects.toThrow("Access denied");
 });

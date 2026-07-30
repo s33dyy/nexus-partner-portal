@@ -50,6 +50,7 @@ test("command mutation and outbox persistence are wrapped in one transaction", a
         assignmentId: "assignment-1",
         idempotencyKey: "idem-1",
         payload: { stage: "won" },
+        publishAfter: null,
       }),
     ];
 
@@ -68,4 +69,3 @@ test("command mutation and outbox persistence are wrapped in one transaction", a
     pool.connect = originalConnect as typeof pool.connect;
   }
 });
-

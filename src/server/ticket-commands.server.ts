@@ -249,11 +249,21 @@ export async function createTicket(input: {
     }
 
     const ticketId = randomUUID();
+    const now = new Date();
+    // SLA computation:
+    // High priority: 4 hours response, 1 day resolve
+    // Normal/Low: 24 hours response, 3 days resolve
+    const priority = input.data.priority?.trim() || "medium";
+    const responseHrs = priority === "high" ? 4 : 24;
+    const resolveDays = priority === "high" ? 1 : 3;
+    const responseDue = new Date(now.getTime() + responseHrs * 60 * 60 * 1000);
+    const resolveDue = new Date(now.getTime() + resolveDays * 24 * 60 * 60 * 1000);
+
     await tx.query(
       `INSERT INTO support_tickets (
          id, partner_id, created_by, created_by_name, subject, description,
-         status, priority, is_seed, product_sku, serial_number
-       ) VALUES ($1,$2,$3,$4,$5,$6,'open',$7,FALSE,$8,$9)`,
+         status, priority, is_seed, product_sku, serial_number, response_due_at, resolve_due_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,'open',$7,FALSE,$8,$9,$10,$11)`,
       [
         ticketId,
         partnerId,
@@ -261,9 +271,11 @@ export async function createTicket(input: {
         input.data.creatorName?.trim() || "Portal user",
         subject,
         description,
-        input.data.priority?.trim() || "medium",
+        priority,
         input.data.productSku?.trim() || null,
         input.data.serialNumber?.trim() || null,
+        responseDue.toISOString(),
+        resolveDue.toISOString(),
       ],
     );
 

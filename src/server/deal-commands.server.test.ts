@@ -524,7 +524,7 @@ test("createDeal forces a partner-scoped actor's own partner onto the new deal",
     });
     expect(result.ok).toBe(true);
     const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
-    expect(dealInsert?.params[26]).toBe("partner-own");
+    expect(dealInsert?.params[27]).toBe("partner-own");
   } finally {
     harness.restore();
   }
@@ -562,7 +562,7 @@ test("createDeal denies a LIVEY-side actor outside their geography ceiling", asy
   }
 });
 
-test("createDeal succeeds and auto-approves a deal at or below the USD 5,000 threshold", async () => {
+test("createDeal always creates a new deal in draft status (auto-approval happens at registration submission)", async () => {
   const harness = await installFakeCreatePool()();
   try {
     const { createDeal } = await import("@/server/deal-commands.server");
@@ -584,7 +584,7 @@ test("createDeal succeeds and auto-approves a deal at or below the USD 5,000 thr
       expect(result.commandName).toBe("deal.create");
     }
     const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
-    expect(dealInsert?.params[8]).toBe("approved");
+    expect(dealInsert?.params[8]).toBe("draft");
   } finally {
     harness.restore();
   }

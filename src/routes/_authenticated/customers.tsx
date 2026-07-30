@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, Plus, RefreshCw, Search, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -122,6 +122,7 @@ function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
+  const navigate = useNavigate();
   const [activities, setActivities] = useState<CustomerActivityRecord[]>([]);
   const [participants, setParticipants] = useState<CustomerParticipantRecord[]>([]);
   const [query, setQuery] = useState("");
@@ -311,8 +312,7 @@ function CustomersPage() {
       total === 0
         ? 0
         : Math.round(
-            regionScopedCustomers.reduce((sum, customer) => sum + customer.health_score, 0) /
-              total,
+            regionScopedCustomers.reduce((sum, customer) => sum + customer.health_score, 0) / total,
           );
     const active = regionScopedCustomers.filter((customer) => customer.status === "active").length;
     return { total, avg, active };
@@ -754,15 +754,6 @@ function CustomersPage() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search customers"
-                    className="pl-8"
-                  />
-                </div>
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.customerStatus}
                   label="Status"
@@ -858,7 +849,9 @@ function CustomersPage() {
                     fieldName={LOOKUP_FIELDS.countryCode}
                     label="Country"
                     value={draft.country}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, country: value }))}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, country: value }))
+                    }
                     placeholder="Select a country"
                     allowCreate={false}
                   />
@@ -1001,7 +994,9 @@ function CustomersPage() {
                     fieldName={LOOKUP_FIELDS.countryCode}
                     label="Country"
                     value={draft.country}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, country: value }))}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, country: value }))
+                    }
                     placeholder="Select a country"
                     allowCreate={false}
                   />

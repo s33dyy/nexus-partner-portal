@@ -11,6 +11,7 @@ import {
   upsertLookupValue as saveLookupValue,
 } from "@/integrations/local/lookups";
 import { useAuth } from "@/hooks/use-auth";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { getCatalogKindLabel, type CatalogKind } from "@/lib/catalog";
 import { cn } from "@/lib/utils";
 import { type DropdownOption, type DropdownSourceKey } from "@/lib/dropdown-sources";
@@ -92,6 +93,7 @@ export function LookupCombobox({
   catalogKind = "product",
 }: LookupComboboxProps) {
   const { profile, hasRole } = useAuth();
+  const access = usePartnerAccess();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -99,8 +101,8 @@ export function LookupCombobox({
   const [loadedOptions, setLoadedOptions] = useState<DropdownOption[]>([]);
 
   const resolvedSource = source ?? "lookup";
-  const scopedPartnerId = hasRole("super_admin") ? null : (profile?.partner_id ?? null);
-  const scopedUserId = hasRole("super_admin") ? null : (profile?.id ?? null);
+  const scopedPartnerId = access.isLiveyInternal ? null : (profile?.partner_id ?? null);
+  const scopedUserId = access.isLiveyInternal ? null : (profile?.id ?? null);
 
   useEffect(() => {
     let active = true;

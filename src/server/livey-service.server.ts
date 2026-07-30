@@ -16,7 +16,9 @@ import {
   uploadToCloudinary,
 } from "@/server/cloudinary.server";
 
-export type AppRole = "super_admin" | "partner_admin" | "partner_user";
+import type { RoleKey } from "@/domain/contracts/taxonomy";
+
+export type AppRole = RoleKey;
 export type { PartnerStatus };
 
 export type LocalUser = {
@@ -65,6 +67,7 @@ export type TableQuery = {
   order?: QueryOrder;
   values?: Record<string, unknown> | Array<Record<string, unknown>>;
   single?: "single" | "maybeSingle" | null;
+  limit?: number;
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
@@ -346,6 +349,79 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "created_at",
     "updated_at",
   ],
+  deal_line_items: [
+    "id",
+    "deal_id",
+    "product_id",
+    "quantity",
+    "msrp_usd",
+    "ptp_usd",
+    "discount_pct",
+    "dtp_usd",
+    "proposed_selling_price_usd",
+    "reward_eligible",
+    "snapshot_at",
+    "created_at",
+    "updated_at",
+  ],
+  learning_tracks: [
+    "id",
+    "title",
+    "description",
+    "status",
+    "created_at",
+    "updated_at",
+    "is_published",
+    "tier_requirement",
+  ],
+  learning_subjects: [
+    "id",
+    "track_id",
+    "title",
+    "description",
+    "status",
+    "sort_order",
+    "created_at",
+    "updated_at",
+    "order_index",
+  ],
+  learning_lessons: [
+    "id",
+    "course_id",
+    "title",
+    "content_url",
+    "content_type",
+    "duration_minutes",
+    "status",
+    "sort_order",
+    "created_at",
+    "updated_at",
+    "subject_id",
+    "order_index",
+    "is_required",
+  ],
+  learning_enrollments: [
+    "id",
+    "user_id",
+    "track_id",
+    "status",
+    "score_percent",
+    "completed_at",
+    "created_at",
+    "updated_at",
+    "certificate_token",
+    "is_certified",
+    "progress_percent",
+  ],
+  learning_assessments: ["id", "subject_id", "title", "passing_score", "created_at", "updated_at"],
+  learning_assessment_attempts: [
+    "id",
+    "assessment_id",
+    "user_id",
+    "score",
+    "is_passed",
+    "created_at",
+  ],
   deal_participants: [
     "id",
     "deal_id",
@@ -498,6 +574,20 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   ],
   password_reset_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_at"],
   notifications: ["id", "user_id", "partner_id", "title", "message", "type", "read", "created_at"],
+  domain_activity_events: [
+    "id",
+    "tenant_id",
+    "organization_tenant_id",
+    "subject_type",
+    "subject_id",
+    "actor_user_id",
+    "assignment_id",
+    "correlation_id",
+    "event_name",
+    "schema_version",
+    "payload",
+    "created_at",
+  ],
   support_tickets: [
     "id",
     "partner_id",
@@ -919,11 +1009,17 @@ export async function queryTableWithAuthContext(
     order && columns.includes(order.column)
       ? ` ORDER BY ${quoteIdent(order.column)} ${order.ascending === false ? "DESC" : "ASC"}`
       : "";
+  // Validated as an actual number (not client-supplied text) before being
+  // inlined, so this can never carry SQL syntax.
+  const limitSql =
+    Number.isInteger(policyQuery.limit) && (policyQuery.limit as number) > 0
+      ? ` LIMIT ${Math.min(policyQuery.limit as number, 1000)}`
+      : "";
 
   if (policyQuery.operation === "select") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
     const result = await pool.query(
-      `SELECT * FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}`,
+      `SELECT * FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}${limitSql}`,
       whereParams,
     );
     const data = result.rows.map((row) => serializeDbValue(row));

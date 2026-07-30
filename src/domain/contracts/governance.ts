@@ -421,7 +421,7 @@ export function validateAssignmentDraft(input: {
 
   return {
     allowed: true as const,
-    reason: null as string | null,
+    reason: null,
   };
 }
 
@@ -524,7 +524,7 @@ export function evaluateActiveContextPolicy(input: {
 
   return {
     allowed: true as const,
-    reason: null as string | null,
+    reason: null,
   };
 }
 

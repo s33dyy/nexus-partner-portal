@@ -460,15 +460,6 @@ function AdminUsersPage() {
                 <CardDescription>Search and switch between live access records.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search users"
-                    className="pl-8"
-                  />
-                </div>
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.userRole}
                   label="Role"

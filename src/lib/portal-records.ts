@@ -211,6 +211,7 @@ export type TeamMemberRecord = {
 
 export type SupportTicketRecord = {
   id: string;
+  human_id: string;
   partner_id: string | null;
   created_by: string | null;
   created_by_name: string;
@@ -221,6 +222,8 @@ export type SupportTicketRecord = {
   status: string;
   priority: string;
   assignee_name: string | null;
+  response_due_at: string | null;
+  resolve_due_at: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;

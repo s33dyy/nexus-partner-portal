@@ -315,6 +315,11 @@ class QueryBuilder {
     return this;
   }
 
+  limit(count: number) {
+    this.state.limit = count;
+    return this;
+  }
+
   single() {
     this.state.single = "single";
     return this;

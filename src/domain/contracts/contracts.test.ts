@@ -99,8 +99,17 @@ test("command envelopes require version and context", () => {
   expect(envelope.correlationId).toBe("3b2fef1e-20b8-4f0d-9c3e-0f8cf44b5678");
 });
 
+// Object.values(CANONICAL_STATE_MACHINES) widens to a union of differently-
+// parameterised StateMachine<State> instances, so TS can no longer prove a
+// given machine's own `from`/`to` literal union is what its methods expect.
+// Erase to the shared string-keyed shape once per machine instead of `any`
+// per call — the implementation only does Set/record lookups by value, so
+// this is a type-only widening with no behavioural change.
+type AnyStateMachine = ReturnType<typeof createStateMachine<string>>;
+
 test("canonical state machines reject unlisted pairs", () => {
-  for (const machine of Object.values(CANONICAL_STATE_MACHINES)) {
+  for (const rawMachine of Object.values(CANONICAL_STATE_MACHINES)) {
+    const machine = rawMachine as AnyStateMachine;
     for (const from of machine.states) {
       const allowed = new Set(machine.listAllowedTransitions(from));
       for (const to of machine.states) {

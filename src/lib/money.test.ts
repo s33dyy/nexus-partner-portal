@@ -17,7 +17,7 @@ import {
 } from "@/lib/money";
 
 test("money helpers preserve fixed-point precision and display formatting", () => {
-  const parsed = parseMoney("1234.567", "usd");
+  const parsed = parseMoney("1234.567", "USD");
 
   expect(parsed).toEqual({
     amount: "1234.567",

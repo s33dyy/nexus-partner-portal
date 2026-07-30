@@ -243,7 +243,7 @@ function PipelinePage() {
       // Won is reward-eligible and gets its own audit trail distinct from
       // ordinary stage moves.
       const result =
-        deal.stage === "approved"
+        deal.stage === "negotiation"
           ? await markDealWon({ dealId: deal.id, expectedVersion: deal.version })
           : await moveDealStageForward({ dealId: deal.id, expectedVersion: deal.version });
       if (!result.ok) {
@@ -435,15 +435,6 @@ function PipelinePage() {
               </CardDescription>
             </div>
             <div className="flex w-full flex-col gap-2 md:flex-row lg:w-auto lg:justify-end">
-              <div className="relative w-full max-w-sm">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search account or owner"
-                  className="pl-8"
-                />
-              </div>
               <LookupCombobox
                 fieldName={LOOKUP_FIELDS.dealStage}
                 label="Stage"
@@ -499,7 +490,7 @@ function PipelinePage() {
                             </div>
                             <Badge className="rounded-full px-3 py-1">{deal.amount}</Badge>
                           </div>
-                          <div className="mt-3 grid gap-2 overflow-hidden text-xs text-muted-foreground transition-[max-height,opacity,transform] duration-200 ease-out max-h-0 opacity-0 pointer-events-none translate-y-2 lg:group-hover:max-h-[28rem] lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-focus-within:max-h-[28rem] lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0">
+                          <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
                             <div className="grid gap-2">
                               <div className="rounded-lg bg-muted/40 px-2.5 py-2">
                                 {deal.owner_name}

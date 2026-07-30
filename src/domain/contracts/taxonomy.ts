@@ -161,6 +161,7 @@ export const SHIPMENT_STATUSES = [
   "delivered",
   "returned",
   "lost",
+  "canceled",
 ] as const;
 
 export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];

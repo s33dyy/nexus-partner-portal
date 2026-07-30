@@ -385,6 +385,7 @@ export const SHIPMENT_STATE_MACHINE = createStateMachine<ShipmentStatus>({
     delivered: [],
     returned: [],
     lost: [],
+    canceled: [],
   },
   metadata: {
     "packed->shipped": {

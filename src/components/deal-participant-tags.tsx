@@ -1,32 +1,47 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { tagDealParticipant, untagDealParticipant } from "@/integrations/local/participant-commands";
+import { untagDealParticipant } from "@/integrations/local/participant-commands";
 import { toast } from "sonner";
-import { Tags, X } from "lucide-react";
+import { Loader2, Tags, X } from "lucide-react";
+import { supabase } from "@/integrations/local/client";
+
+type ParticipantRow = {
+  id: string;
+  participant_type: string;
+  source: string;
+  reason: string;
+  valid_to: string | null;
+};
+
+function participantLabel(participantType: string) {
+  return participantType.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
 
 export function DealParticipantTags({ dealId }: { dealId: string }) {
   const [loading, setLoading] = useState(false);
-  const [tags, setTags] = useState<{id: string, label: string}[]>([]); // MVP static list
+  const [tags, setTags] = useState<ParticipantRow[]>([]);
 
-  const handleAddTag = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await tagDealParticipant({
-        dealId,
-        participantUserId: "dummy-user-id", // Hardcoded for MVP layout
-        participantType: "technical_presales",
-        reason: "Added from deal detail panel"
-      });
-      if (!res.ok) throw new Error(res.failure.message);
-      toast.success("Participant tagged");
-      // refresh
-    } catch (err: any) {
-      toast.error(err.message);
+      const { data, error } = await supabase
+        .from("deal_participants")
+        .select("id, participant_type, source, reason, valid_to")
+        .eq("deal_id", dealId);
+      if (error) throw error;
+      const rows = ((data as ParticipantRow[] | null) ?? []).filter((row) => !row.valid_to);
+      setTags(rows);
+    } catch {
+      setTags([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [dealId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleRemoveTag = async (id: string) => {
     setLoading(true);
@@ -34,10 +49,9 @@ export function DealParticipantTags({ dealId }: { dealId: string }) {
       const res = await untagDealParticipant({ dealId, participantId: id });
       if (!res.ok) throw new Error(res.failure.message);
       toast.success("Participant removed");
-      // refresh
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove participant");
       setLoading(false);
     }
   };
@@ -45,20 +59,25 @@ export function DealParticipantTags({ dealId }: { dealId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-medium flex items-center gap-2"><Tags className="w-4 h-4" /> Participants</h3>
-        <Button variant="outline" size="sm" onClick={handleAddTag} disabled={loading}>
-          Tag Someone
-        </Button>
+        <h3 className="text-lg font-medium flex items-center gap-2">
+          <Tags className="w-4 h-4" /> Participants
+        </h3>
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
-      
+
       <div className="flex flex-wrap gap-2">
-        {tags.length === 0 ? (
+        {tags.length === 0 && !loading ? (
           <span className="text-sm text-muted-foreground italic">No participants tagged.</span>
         ) : (
-          tags.map(tag => (
+          tags.map((tag) => (
             <Badge key={tag.id} variant="secondary" className="flex items-center gap-1 pr-1 border">
-              {tag.label}
-              <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 hover:bg-transparent rounded-full" onClick={() => handleRemoveTag(tag.id)}>
+              {participantLabel(tag.participant_type)}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-4 w-4 ml-1 hover:bg-transparent rounded-full"
+                onClick={() => void handleRemoveTag(tag.id)}
+              >
                 <X className="w-3 h-3" />
               </Button>
             </Badge>

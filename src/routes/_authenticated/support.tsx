@@ -125,9 +125,7 @@ function SupportPage() {
       // Filter out internal comments if the user is a partner
       const allComments = (data as SupportTicketCommentRecord[] | null) ?? [];
       const isSupportUser = hasRole("super_admin") || hasRole("livey_support");
-      setComments(
-        isSupportUser ? allComments : allComments.filter((c) => !c.is_internal),
-      );
+      setComments(isSupportUser ? allComments : allComments.filter((c) => !c.is_internal));
     })();
   }, [selectedTicket, hasRole]);
 
@@ -165,7 +163,13 @@ function SupportPage() {
         return;
       }
 
-      setTicketDraft({ subject: "", description: "", priority: "medium", productSku: "", serialNumber: "" });
+      setTicketDraft({
+        subject: "",
+        description: "",
+        priority: "medium",
+        productSku: "",
+        serialNumber: "",
+      });
       toast.success("Support ticket created");
       await loadTickets();
       setSelectedId(result.subjectId);
@@ -253,12 +257,10 @@ function SupportPage() {
         .select("*")
         .eq("ticket_id", selectedTicket.id)
         .order("created_at", { ascending: true });
-      
+
       const allComments = (commentRes.data as SupportTicketCommentRecord[] | null) ?? [];
       const isSupportUser = hasRole("super_admin") || hasRole("livey_support");
-      setComments(
-        isSupportUser ? allComments : allComments.filter((c) => !c.is_internal),
-      );
+      setComments(isSupportUser ? allComments : allComments.filter((c) => !c.is_internal));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add reply");
     } finally {
@@ -355,7 +357,10 @@ function SupportPage() {
                     id="ticket-serial"
                     value={ticketDraft.serialNumber}
                     onChange={(event) =>
-                      setTicketDraft((current) => ({ ...current, serialNumber: event.target.value }))
+                      setTicketDraft((current) => ({
+                        ...current,
+                        serialNumber: event.target.value,
+                      }))
                     }
                     placeholder="e.g. SN-99812-XX"
                   />
@@ -417,10 +422,21 @@ function SupportPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{ticket.subject}</div>
+                          <div className="truncate text-sm font-medium">
+                            <span className="mr-2 text-muted-foreground">{ticket.human_id}</span>
+                            {ticket.subject}
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">
                             {ticket.created_by_name} · {formatDateTimeLabel(ticket.updated_at)}
                           </div>
+                          {ticket.status !== "closed" && ticket.resolve_due_at && (
+                            <div
+                              className={`mt-1 text-xs ${new Date(ticket.resolve_due_at) < new Date() ? "text-destructive font-semibold" : "text-muted-foreground"}`}
+                            >
+                              SLA Resolve: {formatDateTimeLabel(ticket.resolve_due_at)}
+                              {new Date(ticket.resolve_due_at) < new Date() && " (Breached)"}
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           <Badge variant="outline">{ticket.priority}</Badge>
@@ -439,7 +455,10 @@ function SupportPage() {
 
         <Card>
           <CardHeader className="border-b">
-            <CardTitle className="text-base">
+            <CardTitle className="text-base flex items-center gap-2">
+              {selectedTicket && (
+                <span className="text-muted-foreground">{selectedTicket.human_id}</span>
+              )}
               {selectedTicket?.subject ?? "Ticket detail"}
             </CardTitle>
             <CardDescription>
@@ -464,6 +483,24 @@ function SupportPage() {
                     {selectedTicket.assignee_name ? (
                       <Badge variant="secondary">Assigned to {selectedTicket.assignee_name}</Badge>
                     ) : null}
+                    {selectedTicket.status !== "closed" && selectedTicket.resolve_due_at && (
+                      <Badge
+                        variant={
+                          new Date(selectedTicket.resolve_due_at) < new Date()
+                            ? "destructive"
+                            : "outline"
+                        }
+                        className={
+                          new Date(selectedTicket.resolve_due_at) < new Date()
+                            ? ""
+                            : "border-amber-500 text-amber-600"
+                        }
+                      >
+                        {new Date(selectedTicket.resolve_due_at) < new Date()
+                          ? "SLA Breached"
+                          : `Due: ${formatDateTimeLabel(selectedTicket.resolve_due_at)}`}
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-3 text-sm">{selectedTicket.description}</div>
                   {(selectedTicket.product_sku || selectedTicket.serial_number) && (

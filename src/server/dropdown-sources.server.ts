@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { pool } from "@/server/postgres.server";
 import {
   buildCatalogInsertRow,

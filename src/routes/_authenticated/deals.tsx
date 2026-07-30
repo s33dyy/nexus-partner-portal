@@ -1487,7 +1487,7 @@ function DealsPage() {
     // when the user triggers it via the generic "advance" action, since Won is
     // reward-eligible and gets its own audit trail distinct from ordinary stage moves.
     const result =
-      selectedDeal.stage === "approved"
+      selectedDeal.stage === "negotiation"
         ? await markDealWon({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version })
         : await moveDealStageForward({
             dealId: selectedDeal.id,
@@ -1709,15 +1709,6 @@ function DealsPage() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(e) => updateListFilters({ q: e.target.value })}
-                    placeholder="Search deals"
-                    className="pl-8"
-                  />
-                </div>
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.dealStage}
                   label="Stage"
@@ -2198,7 +2189,12 @@ function DealsPage() {
                 {selectedDeal ? (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
-                      <DealRegistrationBadge dealId={selectedDeal.id} status={selectedDeal.status} commercialApproved={selectedDeal.commercial_approved} onUpdated={load} />
+                      <DealRegistrationBadge
+                        dealId={selectedDeal.id}
+                        status={selectedDeal.status}
+                        commercialApproved={selectedDeal.commercial_approved}
+                        onUpdated={load}
+                      />
                       <Badge>{selectedDeal.stage}</Badge>
                       <Badge variant="secondary">{selectedDeal.amount}</Badge>
                       <Badge variant="outline">{selectedDeal.currency_code || "USD"}</Badge>
@@ -2459,7 +2455,11 @@ function DealsPage() {
                     <Separator />
                     <DealParticipantTags dealId={selectedDeal.id} />
                     <Separator />
-                    <DealOutcomeReview dealId={selectedDeal.id} dealStage={selectedDeal.stage} commercialApproved={selectedDeal.commercial_approved} />
+                    <DealOutcomeReview
+                      dealId={selectedDeal.id}
+                      dealStage={selectedDeal.stage}
+                      commercialApproved={selectedDeal.commercial_approved}
+                    />
                     <Separator />
                     <DealActivityTimeline dealId={selectedDeal.id} />
                     <Separator />

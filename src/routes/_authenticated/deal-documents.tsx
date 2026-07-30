@@ -359,15 +359,6 @@ function DealDocumentsPage() {
               </CardDescription>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-              <div className="relative w-full max-w-xs">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search PO files"
-                  className="pl-8"
-                />
-              </div>
               <select
                 value={dealFilter}
                 onChange={(e) => setDealFilter(e.target.value)}

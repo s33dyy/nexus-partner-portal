@@ -113,10 +113,7 @@ export function authorizeDealActor(
     return {
       allowed: false,
       reason: "Deal geography could not be resolved for this assignment",
-      denial: makePolicyDenial(
-        null,
-        "Deal geography could not be resolved for this assignment",
-      ),
+      denial: makePolicyDenial(null, "Deal geography could not be resolved for this assignment"),
     };
   }
 
@@ -138,7 +135,10 @@ export function authorizeDealActor(
   };
 }
 
-export async function loadDealForUpdate(tx: PoolClient, dealId: string): Promise<DealSnapshot | null> {
+export async function loadDealForUpdate(
+  tx: PoolClient,
+  dealId: string,
+): Promise<DealSnapshot | null> {
   const { rows } = await tx.query(
     `SELECT id, stage, status, partner_id, version, account_name
             , country, region, commercial_approved
@@ -348,7 +348,7 @@ function nextAuthorisedActions(stage: DealStage): readonly string[] {
   if (TERMINAL_STAGES.has(stage)) return [];
   const actions = ["deal.move_stage_backward", "deal.mark_lost"];
   if (FORWARD_NEXT_STAGE[stage]) actions.unshift("deal.move_stage_forward");
-  if (stage === "approved") actions.push("deal.mark_won");
+  if (stage === "negotiation") actions.push("deal.mark_won");
   return actions;
 }
 
@@ -696,25 +696,32 @@ export async function submitDealForRegistration(input: {
     }
 
     if (deal.status !== "draft" && deal.status !== "submitted") {
-      return { ok: false, failure: validationFailure("Deal has already been submitted for registration"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Deal has already been submitted for registration"),
+        correlationId,
+      };
     }
 
     // Check pricing for $5,000 threshold
     let dtpToEvaluate = 0;
     const { rows: revRows } = await tx.query(
       `SELECT total_dtp_usd FROM pricing_revisions WHERE deal_id = $1 ORDER BY revision_number DESC LIMIT 1`,
-      [input.data.dealId]
+      [input.data.dealId],
     );
     if (revRows.length > 0) {
       dtpToEvaluate = Number(revRows[0].total_dtp_usd);
     } else {
       // Fallback if no revision exists yet
-      const { rows: amountRows } = await tx.query(`SELECT amount_usd, amount_value FROM portal_deals WHERE id = $1`, [input.data.dealId]);
+      const { rows: amountRows } = await tx.query(
+        `SELECT amount_usd, amount_value FROM portal_deals WHERE id = $1`,
+        [input.data.dealId],
+      );
       dtpToEvaluate = Number(amountRows[0].amount_usd ?? amountRows[0].amount_value ?? 0);
     }
 
     const autoApproved = !requiresSuperAdminApproval(dtpToEvaluate);
-    
+
     // For autoApproved deals, we set commercial_approved = true and move to negotiation
     // if it hasn't reached it. If not autoApproved, we just set status = submitted.
     const newStatus = autoApproved ? "approved" : "submitted";
@@ -723,7 +730,7 @@ export async function submitDealForRegistration(input: {
 
     await tx.query(
       `UPDATE portal_deals SET status = $1, commercial_approved = $2, stage = $3, updated_at = now() WHERE id = $4`,
-      [newStatus, newCommercialApproved, newStage, input.data.dealId]
+      [newStatus, newCommercialApproved, newStage, input.data.dealId],
     );
 
     await recordTransitionAndOutbox({
@@ -735,10 +742,19 @@ export async function submitDealForRegistration(input: {
       deal,
       toStage: newStage as DealStage,
       toStatus: newStatus,
-      reason: autoApproved ? "Auto-approved based on DTP threshold" : "Submitted for commercial review",
+      reason: autoApproved
+        ? "Auto-approved based on DTP threshold"
+        : "Submitted for commercial review",
       payload: { dtp_evaluated: dtpToEvaluate },
     });
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.submitRegistration",
+      subjectId: deal.id,
+      newVersion: deal.version + 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }

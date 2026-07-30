@@ -9,7 +9,7 @@ import type { PartnerStatus } from "@/lib/partner-status";
 
 type FeatureCapabilities = Record<FeatureKey, Record<CrudOperation, boolean>>;
 
-export type AppRole = "super_admin" | "partner_admin" | "partner_user";
+export type AppRole = RoleKey;
 
 export type Profile = {
   id: string;

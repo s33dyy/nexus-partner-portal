@@ -35,11 +35,19 @@ export async function submitPO(input: {
     }
 
     if (deal.stage !== "negotiation") {
-      return { ok: false, failure: validationFailure("Can only submit PO when deal is in negotiation"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Can only submit PO when deal is in negotiation"),
+        correlationId,
+      };
     }
 
     if (!deal.commercial_approved) {
-      return { ok: false, failure: validationFailure("Deal must be commercially approved first"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Deal must be commercially approved first"),
+        correlationId,
+      };
     }
 
     await tx.query(
@@ -64,10 +72,17 @@ export async function submitPO(input: {
         input.data.poAmount,
         input.data.currencyCode,
         input.actor.userId,
-      ]
+      ],
     );
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.submitPO",
+      subjectId: input.data.dealId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }
 
@@ -89,21 +104,31 @@ export async function approvePO(input: {
 
     // Only super_admin or designated reviewer can approve POs
     if (input.actor.assignment.roleKey !== "super_admin") {
-      return { ok: false, failure: validationFailure("Only super_admin can approve POs"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Only super_admin can approve POs"),
+        correlationId,
+      };
     }
 
     await tx.query(
       `UPDATE deal_outcome_reviews SET status = 'approved', reason = $1, actor_id = $2, updated_at = now()
        WHERE deal_id = $3`,
-      [input.data.reason, input.actor.userId, input.data.dealId]
+      [input.data.reason, input.actor.userId, input.data.dealId],
     );
 
-    await tx.query(
-      `UPDATE portal_deals SET stage = 'won', updated_at = now() WHERE id = $1`,
-      [input.data.dealId]
-    );
+    await tx.query(`UPDATE portal_deals SET stage = 'won', updated_at = now() WHERE id = $1`, [
+      input.data.dealId,
+    ]);
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.approvePO",
+      subjectId: input.data.dealId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }
 
@@ -119,16 +144,27 @@ export async function requestChanges(input: {
     }
 
     if (input.actor.assignment.roleKey !== "super_admin") {
-      return { ok: false, failure: validationFailure("Only super_admin can request changes to PO"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Only super_admin can request changes to PO"),
+        correlationId,
+      };
     }
 
     await tx.query(
       `UPDATE deal_outcome_reviews SET status = 'received', reason = $1, actor_id = $2, updated_at = now()
        WHERE deal_id = $3`,
-      [input.data.reason, input.actor.userId, input.data.dealId]
+      [input.data.reason, input.actor.userId, input.data.dealId],
     );
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.requestChanges",
+      subjectId: input.data.dealId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }
 
@@ -144,20 +180,30 @@ export async function rejectOutcome(input: {
     }
 
     if (input.actor.assignment.roleKey !== "super_admin") {
-      return { ok: false, failure: validationFailure("Only super_admin can reject POs"), correlationId };
+      return {
+        ok: false,
+        failure: validationFailure("Only super_admin can reject POs"),
+        correlationId,
+      };
     }
 
     await tx.query(
       `UPDATE deal_outcome_reviews SET status = 'rejected', reason = $1, actor_id = $2, updated_at = now()
        WHERE deal_id = $3`,
-      [input.data.reason, input.actor.userId, input.data.dealId]
+      [input.data.reason, input.actor.userId, input.data.dealId],
     );
 
-    await tx.query(
-      `UPDATE portal_deals SET stage = 'lost', updated_at = now() WHERE id = $1`,
-      [input.data.dealId]
-    );
+    await tx.query(`UPDATE portal_deals SET stage = 'lost', updated_at = now() WHERE id = $1`, [
+      input.data.dealId,
+    ]);
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.rejectOutcome",
+      subjectId: input.data.dealId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }

@@ -25,6 +25,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { NewsFeedCard } from "@/components/news-feed-card";
 import { formatDateLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
@@ -55,6 +56,15 @@ type NotificationFeedRow = {
   id: string;
   title: string;
   message: string;
+  created_at: string;
+};
+
+type ActivityEventRow = {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  event_name: string;
+  payload: Record<string, unknown>;
   created_at: string;
 };
 
@@ -93,6 +103,7 @@ function DashboardPage() {
 
   const [metrics, setMetrics] = useState<DashboardMetric[]>([]);
   const [newsPosts, setNewsPosts] = useState<NewsPostRecord[]>([]);
+  const [activityEvents, setActivityEvents] = useState<ActivityEventRow[]>([]);
   const [spotlights, setSpotlights] = useState<PartnerSpotlight[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,16 +169,29 @@ function DashboardPage() {
         partnerQuery = partnerQuery.eq("owner_user_id", profile.id);
       }
 
-      const [dealsRes, customersRes, partnersRes, newsRes, notifRes, rewardRes, collaboratorRes] =
-        await Promise.allSettled([
-          dealQuery ?? Promise.resolve({ data: [], error: null }),
-          customerQuery ?? Promise.resolve({ data: [], error: null }),
-          partnerQuery,
-          supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
-          notificationQuery,
-          rewardQuery,
-          supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
-        ]);
+      const [
+        dealsRes,
+        customersRes,
+        partnersRes,
+        newsRes,
+        notifRes,
+        rewardRes,
+        collaboratorRes,
+        activityRes,
+      ] = await Promise.allSettled([
+        dealQuery ?? Promise.resolve({ data: [], error: null }),
+        customerQuery ?? Promise.resolve({ data: [], error: null }),
+        partnerQuery,
+        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+        notificationQuery,
+        rewardQuery,
+        supabase.from("portal_deal_collaborators").select("deal_id, user_id"),
+        supabase
+          .from("domain_activity_events")
+          .select("id, subject_type, subject_id, event_name, payload, created_at")
+          .order("created_at", { ascending: false })
+          .limit(30),
+      ]);
 
       const dealResult =
         dealsRes.status === "fulfilled" ? dealsRes.value : { data: [], error: dealsRes.reason };
@@ -189,6 +213,10 @@ function DashboardPage() {
         collaboratorRes.status === "fulfilled"
           ? collaboratorRes.value
           : { data: [], error: collaboratorRes.reason };
+      const activityResult =
+        activityRes.status === "fulfilled"
+          ? activityRes.value
+          : { data: [], error: activityRes.reason };
 
       const partialFailures = [
         dealResult.error,
@@ -257,23 +285,21 @@ function DashboardPage() {
           reason: string;
           created_at: string;
         }> | null) ?? [];
+      const activityRows = (activityResult.data as ActivityEventRow[] | null) ?? [];
       const rewardPoints = sumRewardPoints(rewardRows);
       const rewardTier = rewardTierForPoints(rewardPoints);
       const rewardProgressState = rewardProgress(rewardPoints);
 
-      const combinedNews = [
-        ...newsRows,
+      // Merge system notifications into activity feed, keep editorial news separate
+      const mergedActivity: ActivityEventRow[] = [
+        ...activityRows,
         ...notifRows.map((n) => ({
           id: n.id,
-          title: n.title,
-          caption: n.message,
-          image_path: "",
-          image_alt: "",
-          posted_by_name: "System",
-          posted_by_role: "Notification",
+          subject_type: "notification",
+          subject_id: n.id,
+          event_name: n.title,
+          payload: { message: n.message } as Record<string, unknown>,
           created_at: n.created_at,
-          updated_at: n.created_at,
-          is_seed: false,
         })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -342,7 +368,7 @@ function DashboardPage() {
         {
           id: "news",
           label: "News Posts",
-          value: String(combinedNews.length),
+          value: String(newsRows.length),
           hint: "Latest LIVEY updates",
           tone: "info",
         },
@@ -356,13 +382,15 @@ function DashboardPage() {
       ];
 
       setMetrics(access.canAccessDeals ? fullMetrics : partialMetrics);
-      setNewsPosts(combinedNews);
+      setNewsPosts(newsRows);
+      setActivityEvents(mergedActivity);
       setSpotlights(regionFilteredPartnerRows.slice(0, 3));
       setSource(
         dealRows.length ||
           customerRows.length ||
           partnerRows.length ||
-          combinedNews.length ||
+          newsRows.length ||
+          mergedActivity.length ||
           rewardRows.length
           ? "database"
           : "empty",
@@ -383,6 +411,7 @@ function DashboardPage() {
   }, [loadDashboard]);
 
   const feedEmpty = newsPosts.length === 0;
+  const activityEmpty = activityEvents.length === 0;
 
   return (
     <div className="space-y-6">
@@ -491,9 +520,9 @@ function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <CardTitle className="text-base">News feed</CardTitle>
+                <CardTitle className="text-base">Feed</CardTitle>
                 <CardDescription>
-                  LIVEY updates, with images when they exist and text-only cards when they do not.
+                  LIVEY editorial updates and system activity events.
                 </CardDescription>
               </div>
               <Badge variant="secondary" className="gap-1">
@@ -501,24 +530,61 @@ function DashboardPage() {
                 Live
               </Badge>
             </CardHeader>
-            <CardContent>
-              {feedEmpty ? (
-                <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No news posts yet. LIVEY admins can publish photo updates from the admin news
-                  page.
-                </div>
-              ) : (
-                <ScrollArea className="h-[32rem] pr-4">
-                  <div className="space-y-4">
-                    {newsPosts.map((post, index) => (
-                      <div key={post.id}>
-                        <NewsFeedCard post={post} />
-                        {index < newsPosts.length - 1 && <Separator className="my-4" />}
+            <CardContent className="pt-0">
+              <Tabs defaultValue="news">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="news">News</TabsTrigger>
+                  <TabsTrigger value="activity">Activity</TabsTrigger>
+                </TabsList>
+                <TabsContent value="news">
+                  {feedEmpty ? (
+                    <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                      No news posts yet. LIVEY admins can publish photo updates from the admin news
+                      page.
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[28rem] pr-4">
+                      <div className="space-y-4">
+                        {newsPosts.map((post, index) => (
+                          <div key={post.id}>
+                            <NewsFeedCard post={post} />
+                            {index < newsPosts.length - 1 && <Separator className="my-4" />}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
+                    </ScrollArea>
+                  )}
+                </TabsContent>
+                <TabsContent value="activity">
+                  {activityEmpty ? (
+                    <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                      No activity events yet.
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[28rem] pr-4">
+                      <div className="divide-y">
+                        {activityEvents.map((event) => (
+                          <div key={event.id} className="flex items-start gap-3 py-3">
+                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                              <Activity className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium">
+                                {event.event_name
+                                  .replace(/_/g, " ")
+                                  .replace(/^./, (c) => c.toUpperCase())}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {event.subject_type} &middot; {formatDateLabel(event.created_at)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  )}
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
 

@@ -20,6 +20,7 @@ import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { RegionFilterSelect } from "@/components/region-filter-select";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { buildShellContextSummary } from "@/components/app-shell.utils";
 
 const statusLabel: Record<string, string> = {
@@ -48,6 +49,7 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { profile, user, roles, activeContext, assignment, signOut, refresh } = useAuth();
+  const access = usePartnerAccess();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
   const initials =
@@ -74,7 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (profile?.id && !profile?.partner_id) {
         query = query.eq("user_id", profile.id);
       }
-      if (roles.includes("super_admin")) {
+      if (access.isLiveyInternal) {
         query = supabase.from("notifications").select("id, read").eq("read", false);
       }
       const { data } = await query;

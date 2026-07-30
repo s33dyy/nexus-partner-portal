@@ -20,12 +20,7 @@ export const PRICING_RECORD_STATUSES = ["draft", "active", "archived"] as const;
 
 export type PricingRecordStatus = (typeof PRICING_RECORD_STATUSES)[number];
 
-export const PRICING_TARGET_KINDS = [
-  "product",
-  "product_variant",
-  "product_sku",
-  "combo",
-] as const;
+export const PRICING_TARGET_KINDS = ["product", "product_variant", "product_sku", "combo"] as const;
 
 export type PricingTargetKind = (typeof PRICING_TARGET_KINDS)[number];
 
@@ -354,7 +349,7 @@ function buildVersionedRecordNext<T extends PricingVersionedRecord>(
     updates.archived_at !== undefined
       ? updates.archived_at
       : status === "archived"
-        ? record.archived_at ?? now
+        ? (record.archived_at ?? now)
         : record.archived_at;
 
   return {
@@ -383,15 +378,12 @@ export function assertPricingRecordDeletionAllowed(input: {
   }
 }
 
-export function archivePricingRecord<T extends PricingVersionedRecord>(
-  record: T,
-  reason?: string,
-) {
+export function archivePricingRecord<T extends PricingVersionedRecord>(record: T, reason?: string) {
   return buildVersionedRecordNext(record, {
     status: "archived",
     archived_at: nowIso(),
     archived_reason: reason ?? record.archived_reason ?? null,
-  });
+  } as unknown as Partial<T>);
 }
 
 export function buildNextPricingVersion<T extends PricingVersionedRecord>(
@@ -698,7 +690,10 @@ export function calculatePartnerTransferPrice(input: {
   }
 
   if (input.partnerDiscountPercent !== undefined && input.partnerDiscountPercent !== null) {
-    const percentValue = ensureNonNegativeNumber(input.partnerDiscountPercent, "partnerDiscountPercent");
+    const percentValue = ensureNonNegativeNumber(
+      input.partnerDiscountPercent,
+      "partnerDiscountPercent",
+    );
     const percent = percentValue > 1 ? percentValue / 100 : percentValue;
     const multiplier = 1 - percent;
     const quotedMinorUnits = multiplyMinorUnitsByDecimal(moneyToMinorUnits(msrp), multiplier);
@@ -729,7 +724,10 @@ export function calculateAdditionalDiscount(input: {
     return formatMoneyAmount(0n, listPrice.currencyCode, listPrice.scale);
   }
 
-  const partnerTransferPrice = normalizeMoneyInput(input.partnerTransferPrice, listPrice.currencyCode);
+  const partnerTransferPrice = normalizeMoneyInput(
+    input.partnerTransferPrice,
+    listPrice.currencyCode,
+  );
   const discount = subtractMoneyValues(listPrice, partnerTransferPrice);
   const positiveMinorUnits = moneyToMinorUnits(discount) < 0n ? 0n : moneyToMinorUnits(discount);
   return formatMoneyAmount(positiveMinorUnits, discount.currencyCode, discount.scale);
@@ -742,10 +740,7 @@ export function calculateDiscountedTransferPrice(input: {
   legacyPriceCount?: number | null;
   currencyCode?: CurrencyCode;
 }) {
-  const partnerTransferPrice = normalizeMoneyInput(
-    input.partnerTransferPrice,
-    input.currencyCode,
-  );
+  const partnerTransferPrice = normalizeMoneyInput(input.partnerTransferPrice, input.currencyCode);
   const inferredDiscount = calculateAdditionalDiscount({
     listPrice: input.listPrice ?? partnerTransferPrice,
     partnerTransferPrice,
@@ -786,7 +781,8 @@ export function calculateWeightedPipeline(input: {
 }) {
   const amount = normalizeMoneyInput(input.amount, input.currencyCode);
   const normalizedProbability = ensureNonNegativeNumber(input.probability, "probability");
-  const probabilityFraction = normalizedProbability > 1 ? normalizedProbability / 100 : normalizedProbability;
+  const probabilityFraction =
+    normalizedProbability > 1 ? normalizedProbability / 100 : normalizedProbability;
   const weightedMinorUnits = multiplyMinorUnitsByDecimal(
     moneyToMinorUnits(amount),
     probabilityFraction,
@@ -805,12 +801,11 @@ export function quoteFxSnapshotAmount(input: {
     );
   }
 
-  const quotedMinorUnits = multiplyMinorUnitsByDecimal(moneyToMinorUnits(amount), input.snapshot.rate);
-  return formatMoneyAmount(
-    quotedMinorUnits,
-    input.snapshot.target_currency_code,
-    amount.scale,
+  const quotedMinorUnits = multiplyMinorUnitsByDecimal(
+    moneyToMinorUnits(amount),
+    input.snapshot.rate,
   );
+  return formatMoneyAmount(quotedMinorUnits, input.snapshot.target_currency_code, amount.scale);
 }
 
 export function buildPriceRowRecord(input: BuildPriceRowRecordInput): PriceRowRecord {
@@ -866,7 +861,10 @@ export function buildPriceRowRecord(input: BuildPriceRowRecordInput): PriceRowRe
     target_code: normalizeText(input.target_code),
     currency_code: currencyCode,
     quantity: ensurePositiveInteger(input.quantity ?? 1, "quantity"),
-    legacy_price_count: ensureNonNegativeInteger(input.legacy_price_count ?? 0, "legacy_price_count"),
+    legacy_price_count: ensureNonNegativeInteger(
+      input.legacy_price_count ?? 0,
+      "legacy_price_count",
+    ),
     msrp,
     partner_transfer_price: partnerTransferPrice,
     discounted_transfer_price: discountedTransferPrice,
@@ -876,7 +874,10 @@ export function buildPriceRowRecord(input: BuildPriceRowRecordInput): PriceRowRe
       input.weighted_probability === undefined || input.weighted_probability === null
         ? 1
         : (() => {
-            const probability = ensureNonNegativeNumber(input.weighted_probability, "weighted_probability");
+            const probability = ensureNonNegativeNumber(
+              input.weighted_probability,
+              "weighted_probability",
+            );
             return probability > 1 ? probability / 100 : probability;
           })(),
   };
@@ -924,10 +925,22 @@ export function validatePricingImportRows(
   rows: PricingImportRow[],
   options: PricingImportOptions,
 ): PricingImportResult<
-  ProductRecord | ProductVariantRecord | ProductSkuRecord | ComboRecord | ComboComponentRecord | PriceBookRecord | PriceRowRecord
+  | ProductRecord
+  | ProductVariantRecord
+  | ProductSkuRecord
+  | ComboRecord
+  | ComboComponentRecord
+  | PriceBookRecord
+  | PriceRowRecord
 > {
   const normalizedRows: Array<
-    ProductRecord | ProductVariantRecord | ProductSkuRecord | ComboRecord | ComboComponentRecord | PriceBookRecord | PriceRowRecord
+    | ProductRecord
+    | ProductVariantRecord
+    | ProductSkuRecord
+    | ComboRecord
+    | ComboComponentRecord
+    | PriceBookRecord
+    | PriceRowRecord
   > = [];
   const errors: PricingImportError[] = [];
 
@@ -1070,7 +1083,9 @@ export function validatePricingImportRows(
           const priceRowCode = normalizeText(normalizedRow.price_row_code);
           const targetKind = normalizeText(normalizedRow.target_kind || normalizedRow.catalog_kind);
           const targetCode = normalizeText(normalizedRow.target_code);
-          const currencyCode = normalizeText(normalizedRow.currency_code || normalizedRow.price_book_currency_code);
+          const currencyCode = normalizeText(
+            normalizedRow.currency_code || normalizedRow.price_book_currency_code,
+          );
           const msrp = normalizeText(normalizedRow.msrp || normalizedRow.list_price);
           if (!priceBookCode) rowErrors.push("price_book_code is required");
           if (!priceRowCode) rowErrors.push("price_row_code is required");
@@ -1087,12 +1102,15 @@ export function validatePricingImportRows(
                 target_kind: targetKind as PricingTargetKind,
                 target_code: targetCode,
                 currency_code: currencyCode,
-                quantity: normalizeText(normalizedRow.quantity) ? Number(normalizedRow.quantity) : undefined,
+                quantity: normalizeText(normalizedRow.quantity)
+                  ? Number(normalizedRow.quantity)
+                  : undefined,
                 legacy_price_count: normalizeText(normalizedRow.legacy_price_count)
                   ? Number(normalizedRow.legacy_price_count)
                   : 0,
                 msrp,
-                partner_transfer_price: normalizeText(normalizedRow.partner_transfer_price) || undefined,
+                partner_transfer_price:
+                  normalizeText(normalizedRow.partner_transfer_price) || undefined,
                 discounted_transfer_price:
                   normalizeText(normalizedRow.discounted_transfer_price) || undefined,
                 reward_eligible_dtp: normalizeText(normalizedRow.reward_eligible_dtp) || undefined,
@@ -1108,11 +1126,10 @@ export function validatePricingImportRows(
           }
           break;
         }
-        default:
-          {
-            const unsupportedKind: never = options.kind;
-            rowErrors.push(`Unsupported pricing import kind: ${unsupportedKind}`);
-          }
+        default: {
+          const unsupportedKind: never = options.kind;
+          rowErrors.push(`Unsupported pricing import kind: ${unsupportedKind}`);
+        }
       }
     } catch (error) {
       rowErrors.push(error instanceof Error ? error.message : "Unable to validate pricing row");

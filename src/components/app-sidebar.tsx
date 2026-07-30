@@ -65,24 +65,6 @@ const partnerAdmin: Item[] = [
   { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
 ];
 
-const admin: Item[] = [
-  { title: "Partner Approvals", url: "/admin/partners", icon: ShieldCheck, roles: ["super_admin"] },
-  { title: "Deal Approvals", url: "/admin/deals", icon: Handshake, roles: ["super_admin"] },
-  { title: "Users & Roles", url: "/admin/users", icon: Users, roles: ["super_admin"] },
-  {
-    title: "Role Permissions",
-    url: "/admin/roles",
-    icon: ShieldQuestion,
-    roles: ["super_admin"],
-  },
-  { title: "Product Catalog", url: "/admin/catalog", icon: Sparkles, roles: ["super_admin"] },
-  { title: "Rewards", url: "/admin/rewards", icon: Trophy, roles: ["super_admin"] },
-  { title: "News Feed", url: "/admin/news", icon: Image, roles: ["super_admin"] },
-  { title: "Learning", url: "/admin/learning", icon: GraduationCap, roles: ["super_admin"] },
-  { title: "Integrations", url: "/admin/integrations", icon: Activity, roles: ["super_admin"] },
-  { title: "Audit Logs", url: "/admin/audit", icon: FileText, roles: ["super_admin"] },
-];
-
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -92,8 +74,11 @@ export function AppSidebar() {
 
   const visible = (items: Item[]) =>
     items.filter((i) => !i.roles || i.roles.some((r) => roles.includes(r)));
+
+  const { can } = useAuth();
+
   const isPartnerAdmin = hasRole("partner_admin");
-  const canSeeWorkspace = hasRole("super_admin") || access.canAccessDeals;
+  const canSeeWorkspace = access.canAccessDeals;
   const portalItems = [
     ...(access.canAccessDashboard ? [portal[0]] : []),
     ...(access.canAccessDealDocuments ? [portal[1]] : []),
@@ -113,6 +98,33 @@ export function AppSidebar() {
           },
         ]
       : []),
+  ];
+
+  const adminItems = [
+    ...(can("partners", "read")
+      ? [{ title: "Partner Approvals", url: "/admin/partners", icon: ShieldCheck }]
+      : []),
+    ...(can("deals", "read")
+      ? [{ title: "Deal Approvals", url: "/admin/deals", icon: Handshake }]
+      : []),
+    ...(can("users", "read")
+      ? [
+          { title: "Users & Roles", url: "/admin/users", icon: Users },
+          { title: "Role Permissions", url: "/admin/roles", icon: ShieldQuestion },
+        ]
+      : []),
+    ...(can("catalog", "read")
+      ? [{ title: "Product Catalog", url: "/admin/catalog", icon: Sparkles }]
+      : []),
+    ...(can("rewards", "read") ? [{ title: "Rewards", url: "/admin/rewards", icon: Trophy }] : []),
+    ...(can("news", "read") ? [{ title: "News Feed", url: "/admin/news", icon: Image }] : []),
+    ...(can("learning", "read")
+      ? [{ title: "Learning", url: "/admin/learning", icon: GraduationCap }]
+      : []),
+    ...(can("integrations", "read")
+      ? [{ title: "Integrations", url: "/admin/integrations", icon: Activity }]
+      : []),
+    ...(can("audit", "read") ? [{ title: "Audit Logs", url: "/admin/audit", icon: FileText }] : []),
   ];
 
   const renderGroup = (label: string, items: Item[]) => {
@@ -161,7 +173,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {!hasRole("super_admin") ? renderGroup("Rewards", visible(shared)) : null}
+        {access.canAccessRewards ? renderGroup("Rewards", visible(shared)) : null}
         {portalItems.length > 0 ? renderGroup("Portal", portalItems) : null}
         {!canSeeWorkspace && isPartnerAdmin
           ? renderGroup("Getting started", [
@@ -173,7 +185,7 @@ export function AppSidebar() {
         (access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding || canSeeWorkspace)
           ? renderGroup("Company", partnerAdminItems)
           : null}
-        {hasRole("super_admin") && renderGroup("Administration", admin)}
+        {adminItems.length > 0 && renderGroup("Administration", adminItems)}
       </SidebarContent>
 
       <SidebarFooter>

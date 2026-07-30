@@ -420,15 +420,6 @@ function PartnerTeamPage() {
                   Search the current roster or remove old test accounts.
                 </CardDescription>
               </div>
-              <div className="relative w-full max-w-xs">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search members"
-                  className="pl-8"
-                />
-              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">

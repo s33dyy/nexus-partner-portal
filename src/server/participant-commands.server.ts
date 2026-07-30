@@ -44,10 +44,17 @@ export async function tagDealParticipant(input: {
         input.data.participantType,
         input.actor.userId,
         input.data.reason,
-      ]
+      ],
     );
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.tagParticipant",
+      subjectId: participantId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }
 
@@ -75,9 +82,16 @@ export async function untagDealParticipant(input: {
     await tx.query(
       `UPDATE deal_participants SET valid_to = now(), updated_at = now()
        WHERE id = $1 AND deal_id = $2`,
-      [input.data.participantId, input.data.dealId]
+      [input.data.participantId, input.data.dealId],
     );
 
-    return { ok: true, correlationId };
+    return {
+      ok: true,
+      commandName: "deal.untagParticipant",
+      subjectId: input.data.participantId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
   });
 }

@@ -440,15 +440,6 @@ function AdminCatalogPage() {
                   className="hidden"
                   onChange={(event) => void handleImportFile(event)}
                 />
-                <div className="relative w-full max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={`Search ${getCatalogKindLabel(moduleKind).toLowerCase()}s`}
-                    className="pl-8"
-                  />
-                </div>
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.catalogCategory}
                   label="Category"
@@ -504,7 +495,9 @@ function AdminCatalogPage() {
                           {getCatalogKindLabel(normalizeCatalogKind(item.catalog_kind))}
                         </Badge>
                         <Badge variant="outline">{item.partner_tier}</Badge>
-                        {item.product_status ? <Badge variant="outline">{item.product_status}</Badge> : null}
+                        {item.product_status ? (
+                          <Badge variant="outline">{item.product_status}</Badge>
+                        ) : null}
                         {item.price_book_code ? (
                           <Badge variant="outline">
                             {item.price_book_code}
