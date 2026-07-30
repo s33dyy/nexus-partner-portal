@@ -94,3 +94,113 @@ test("createDocumentDataUrl wraps legacy text blobs in a valid PDF", async () =>
     pool.query = originalQuery as typeof pool.query;
   }
 });
+
+test("getAuthContext resolves an active governed assignment's status correctly", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { getAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  const futureExpiry = new Date(Date.now() + 60 * 60 * 1000);
+
+  pool.query = (async (sql: string) => {
+    const text = String(sql);
+    if (text.includes("FROM sessions s")) {
+      return {
+        rows: [
+          {
+            token_hash: "hash",
+            expires_at: futureExpiry,
+            revoked_at: null,
+            id: "user-1",
+            email: "user@example.com",
+            full_name: "Test User",
+            phone: null,
+            company_name: null,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (text.includes("FROM profiles WHERE id = $1")) {
+      return {
+        rows: [
+          {
+            id: "user-1",
+            email: "user@example.com",
+            password_hash: "x",
+            full_name: "Test User",
+            phone: null,
+            company_name: null,
+            avatar_url: null,
+            partner_id: null,
+            partner_status: "approved",
+            must_reset_password: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (text.includes("FROM user_roles WHERE user_id = $1")) {
+      return { rows: [{ role: "super_admin" }], rowCount: 1 } as never;
+    }
+    if (text.includes("FROM active_contexts ac")) {
+      return {
+        rows: [
+          {
+            context_id: "context-1",
+            user_id: "user-1",
+            assignment_id: "assignment-1",
+            tenant_id: "tenant-livey-org",
+            organization_tenant_id: "tenant-livey-org",
+            working_scope: null,
+            issued_at: "2026-07-30T00:00:00.000Z",
+            expires_at: "2026-07-30T08:00:00.000Z",
+            version: 1,
+            revocation_link: null,
+            context_revoked_at: null,
+            context_revocation_reason: null,
+            correlation_id: "corr-1",
+            context_is_seed: true,
+            context_created_at: "2026-07-30T00:00:00.000Z",
+            context_updated_at: "2026-07-30T00:00:00.000Z",
+            assignment_version: 1,
+            assignment_status: "active",
+            role_key: "super_admin",
+            team_domain: "identity",
+            geography_ceiling_node_id: "geo-global",
+            partner_id: null,
+            account_id: null,
+            portfolio_id: null,
+            queue_id: null,
+            manager_assignment_id: null,
+            source: "test",
+            approver_user_id: null,
+            predecessor_assignment_id: null,
+            successor_assignment_id: null,
+            valid_from: "2026-07-30T00:00:00.000Z",
+            valid_to: null,
+            revoked_at: null,
+            revocation_reason: null,
+            assignment_created_at: "2026-07-30T00:00:00.000Z",
+            assignment_updated_at: "2026-07-30T00:00:00.000Z",
+            assignment_is_seed: true,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const authContext = await getAuthContext("any-token");
+    expect(authContext.assignment?.status).toBe("active");
+    expect(authContext.assignment?.assignmentId).toBe("assignment-1");
+    expect(authContext.activeContext?.revokedAt).toBeNull();
+    expect(authContext.activeContext?.assignmentId).toBe("assignment-1");
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
