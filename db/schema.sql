@@ -1626,6 +1626,7 @@ ALTER TABLE learning_enrollments ADD COLUMN IF NOT EXISTS progress_percent INTEG
 -- before product_code/currency_code/price_book_code/price_book_version/
 -- product_status/archived_at were added to its definition above, so none of
 -- those columns ever actually landed.
+ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS catalog_kind TEXT NOT NULL DEFAULT 'product';
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS product_code TEXT;
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'USD';
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS price_book_code TEXT;
