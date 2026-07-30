@@ -21,6 +21,10 @@ A gap analysis against the Phase 1 exit gate found:
 
 Given this, the deal-command work below deliberately closes part of gap 2 for the deal domain specifically (real policy checks using `evaluateActiveContextPolicy` plus partner/geography scoping), rather than waiting on a full Phase 1 policy-layer rewrite. The remaining gaps (1, 3, 4, 5, 6, 7) are unresolved and should be treated as open risk for any future phase that assumes Phase 1 is complete.
 
+### Fixed: super_admin ownership-scope bug (2026-07-30)
+
+While investigating a live report that "Users & Roles" showed only 1 user for a logged-in super_admin, found that `applyTablePolicy` in `src/server/table-policy.server.ts` computed a `superAdmin` flag but never used it to bypass the flat ownership-scope filter on: the `BOOTSTRAP_SELF_SERVICE_TABLES` branch (`profiles`, `partners`), the `BOOTSTRAP_READ_ONLY_TABLES` branch (`user_roles`, `assignments`, `active_contexts`, `sessions`), the generic per-table `column` scope branch (`portal_deals`, `portal_customers`, `notifications`, `reward_point_events`, `reward_redemptions`, `portal_customer_activities`, `partner_documents`, `deal_documents`, `partner_review_notes`, `support_tickets`, `portal_team_members`), and the `linked-deal`/`linked-ticket` no-id fallback paths. In practice this meant a super_admin's own `user_id`/`id` was always forced into the query filters — reads silently returned only their own rows, and updates targeting another user's row (e.g. `admin.users.tsx`'s `saveRoles`/`approveUser`, which does `.eq("id", selectedUser.id)`) threw "Access denied" outright because the client-supplied filter conflicted with the forced own-id filter. This affected Users & Roles, Partner Approvals, and likely Deals/Customers/Pipeline visibility for super_admin across the live app. Fixed by returning the query unscoped (delete still forbidden on self-service tables) whenever `superAdmin` is true, in every branch listed above. Added 6 regression tests in `table-policy.server.test.ts` covering unscoped super_admin reads/updates on each affected branch, plus a baseline test confirming non-super-admin reads remain scoped.
+
 ## Known Taxonomy Mismatch: Deal Stages
 
 `src/domain/contracts/taxonomy.ts`'s `DEAL_STAGES` (canonical, used by `DEAL_STATE_MACHINE`) has exactly eight stages with no "approved" stage, per the blueprint ("Approved is never a pipeline stage"). The deployed pipeline UI and schema (`src/lib/portal-records.ts` `DEAL_STAGE_ORDER`) has always carried a ninth "approved" stage between negotiation and won, and live/seeded deal rows already use it (e.g. the prod-demo "Northstar Cloud Suite" deal is seeded at stage "approved"). The new deal-command module (`src/server/deal-commands.server.ts`) intentionally enforces the nine-stage order actually in production, not the narrower canonical list, to avoid breaking existing data and UI. Reconciling the two (likely: rename the UI's "approved" pipeline column to a deal `status` value instead of a `stage`) is a product decision with visible UI impact and needs explicit sign-off before it's changed.
@@ -152,3 +156,13 @@ Given this, the deal-command work below deliberately closes part of gap 2 for th
 - Result: passed after auto-formatting
 - `bun run build`
 - Result: client, SSR, and Nitro builds completed successfully after the deal-command slice
+- `bun test src/server/table-policy.server.test.ts`
+- Result: `9 pass`, `0 fail`, `19 expect() calls`
+- `bun test` (full suite)
+- Result: `159 pass`, `0 fail`, `1595 expect() calls`
+- `bunx tsc --noEmit -p tsconfig.json` (scoped)
+- Result: no errors in `table-policy.server.ts`, `table-policy.server.test.ts`
+- `bunx eslint src/server/table-policy.server.ts src/server/table-policy.server.test.ts`
+- Result: passed with no warnings
+- `bun run build`
+- Result: client, SSR, and Nitro builds completed successfully after the super_admin scope-bypass fix

@@ -442,11 +442,15 @@ export async function applyTablePolicy(
       throw new Error("Access denied");
     }
 
+    if (superAdmin) {
+      return { ...query, filters: normalizeFilters(query.filters) };
+    }
+
     if (!scopeSpec || scopeSpec.kind !== "column") {
       throw new Error("Access denied");
     }
 
-    if (scopeSpec.value == null && !superAdmin) {
+    if (scopeSpec.value == null) {
       throw new Error("Access denied");
     }
 
@@ -489,6 +493,9 @@ export async function applyTablePolicy(
     if (query.operation !== "select" && query.operation !== "count") {
       throw new Error("Access denied");
     }
+    if (superAdmin) {
+      return { ...query, filters: normalizeFilters(query.filters) };
+    }
     if (!scopeSpec || scopeSpec.kind !== "column" || scopeSpec.value == null) {
       throw new Error("Access denied");
     }
@@ -512,7 +519,11 @@ export async function applyTablePolicy(
   const filters = normalizeFilters(query.filters);
 
   if (scopeSpec?.kind === "column") {
-    if (scopeSpec.value == null && !superAdmin) {
+    if (superAdmin) {
+      return { ...query, filters };
+    }
+
+    if (scopeSpec.value == null) {
       throw new Error("Access denied");
     }
 
@@ -570,6 +581,9 @@ export async function applyTablePolicy(
 
     if (dealIds.some((dealId) => !dealId)) {
       if (query.operation === "select" || query.operation === "count") {
+        if (superAdmin) {
+          return { ...query, filters };
+        }
         if (auth.userId) {
           return {
             ...query,
@@ -599,6 +613,9 @@ export async function applyTablePolicy(
 
     if (ticketIds.some((ticketId) => !ticketId)) {
       if (query.operation === "select" || query.operation === "count") {
+        if (superAdmin) {
+          return { ...query, filters };
+        }
         if (auth.userId) {
           return {
             ...query,
