@@ -357,6 +357,17 @@ export async function approveDiscount(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
+    // authorizeDealActor first: it enforces partner/geography scoping for
+    // this specific deal (every other command in this file calls it before
+    // any write). Without it, any PAM or RM system-wide — regardless of
+    // whether they have any relationship to this deal's partner or region —
+    // could approve a discount on any deal. The role check below is
+    // layered on top of that, not a replacement for it.
+    const policy = authorizeDealActor(input.actor, deal);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
     // Only livey_pam or livey_rm can approve discounts typically (simplified check)
     if (
       input.actor.assignment.roleKey !== "pam" &&
