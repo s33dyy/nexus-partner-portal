@@ -23,6 +23,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { supabase } from "@/integrations/local/client";
 import { enrollInTrack } from "@/integrations/local/learning-commands";
+import { meetsPartnerTierRequirement } from "@/lib/money";
 
 export const Route = createFileRoute("/_authenticated/insight-hub")({
   component: InsightHubPage,
@@ -60,6 +61,7 @@ function InsightHubPage() {
   const [tracks, setTracks] = useState<TrackRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
+  const [partnerTier, setPartnerTier] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [enrollingTrackId, setEnrollingTrackId] = useState<string | null>(null);
@@ -67,7 +69,7 @@ function InsightHubPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [trackRes, subjectRes, enrollRes] = await Promise.all([
+      const [trackRes, subjectRes, enrollRes, partnerRes] = await Promise.all([
         supabase
           .from("learning_tracks")
           .select("*")
@@ -83,21 +85,26 @@ function InsightHubPage() {
               .select("id, track_id, status, progress_percent, completed_at, certificate_token")
               .eq("user_id", profile.id)
           : Promise.resolve({ data: [], error: null }),
+        profile?.partner_id
+          ? supabase.from("partners").select("id, tier").eq("id", profile.partner_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
 
       if (trackRes.error) throw trackRes.error;
       setTracks((trackRes.data as TrackRow[] | null) ?? []);
       setSubjects((subjectRes.data as SubjectRow[] | null) ?? []);
       setEnrollments((enrollRes.data as EnrollmentRow[] | null) ?? []);
+      setPartnerTier((partnerRes.data as { tier: string } | null)?.tier ?? null);
     } catch {
       setTracks([]);
       setSubjects([]);
       setEnrollments([]);
+      setPartnerTier(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.partner_id]);
 
   useEffect(() => {
     void load();
@@ -248,6 +255,13 @@ function InsightHubPage() {
               const isCompleted = enrollment?.status === "completed";
               const isEnrolled = !!enrollment;
               const progress = enrollment?.progress_percent ?? 0;
+              // Previously blocked every viewer whenever tier_requirement
+              // was set, regardless of their actual tier — it never read
+              // partnerTier at all, so a Gold/Platinum partner could never
+              // enroll in a Gold-gated track through this page either.
+              const meetsTier =
+                hasRole("super_admin") ||
+                meetsPartnerTierRequirement(partnerTier, track.tier_requirement);
 
               return (
                 <Card
@@ -321,7 +335,7 @@ function InsightHubPage() {
                     )}
 
                     <div>
-                      {track.tier_requirement && !isEnrolled ? (
+                      {!meetsTier && !isEnrolled ? (
                         <Button variant="outline" className="w-full" disabled>
                           <Lock className="mr-2 h-4 w-4" />
                           {track.tier_requirement} tier required

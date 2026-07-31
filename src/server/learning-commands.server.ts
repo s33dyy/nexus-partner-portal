@@ -112,7 +112,7 @@ export async function enrollInTrack(input: {
   return withTransaction(async (tx) => {
     // Ensure track exists and is published
     const { rows: trackRows } = await tx.query(
-      `SELECT id FROM learning_tracks WHERE id = $1 AND is_published = TRUE`,
+      `SELECT id, tier_requirement FROM learning_tracks WHERE id = $1 AND is_published = TRUE`,
       [input.data.trackId],
     );
     if (trackRows.length === 0) {
@@ -121,6 +121,35 @@ export async function enrollInTrack(input: {
         failure: validationFailure("Track not found or not published"),
         correlationId,
       };
+    }
+    const track = trackRows[0] as { tier_requirement: string | null };
+
+    // insight-hub.tsx's own enroll button only ever *hides* the action for
+    // an under-tier partner — it never actually checked the viewer's real
+    // tier, so it blocked every partner regardless of tier, and (since this
+    // is the only enforcement point) a direct call bypassed the gate
+    // entirely for everyone else. super_admin has no partner tier and is
+    // not gated, matching every other command's super_admin bypass.
+    if (track.tier_requirement && input.actor.assignment.roleKey !== "super_admin") {
+      const { meetsPartnerTierRequirement } = await import("@/lib/money");
+      const partnerId = input.actor.assignment.partnerId;
+      let partnerTier: string | null = null;
+      if (partnerId) {
+        const { rows: partnerRows } = await tx.query(`SELECT tier FROM partners WHERE id = $1`, [
+          partnerId,
+        ]);
+        partnerTier = (partnerRows[0] as { tier: string } | undefined)?.tier ?? null;
+      }
+      if (!meetsPartnerTierRequirement(partnerTier, track.tier_requirement)) {
+        return {
+          ok: false,
+          failure: validationFailure(
+            `This track requires ${track.tier_requirement} tier or higher`,
+            "trackId",
+          ),
+          correlationId,
+        };
+      }
     }
 
     // Upsert enrollment (ignore if already enrolled)

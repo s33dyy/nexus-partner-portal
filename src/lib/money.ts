@@ -24,6 +24,29 @@ const PARTNER_TIER_ADJUSTMENTS = {
   platinum: "0.15",
 } as const;
 
+/** Canonical partner tier ordering (product.md §9.4/§14.2's Registered <
+ * Silver < Gold < Platinum), shared by pricing here and by Insight Hub's
+ * tier-gated content (insight-hub.tsx, learning-commands.server.ts). */
+export const PARTNER_TIER_ORDER = ["registered", "silver", "gold", "platinum"] as const;
+
+/** True if a partner's own tier satisfies a content/feature's required
+ * tier. No requirement always passes. An unrecognised (malformed seed
+ * data) required tier fails closed rather than silently granting access. */
+export function meetsPartnerTierRequirement(
+  partnerTier: string | null | undefined,
+  requiredTier: string | null | undefined,
+): boolean {
+  if (!requiredTier || !requiredTier.trim()) return true;
+  const requiredIndex = PARTNER_TIER_ORDER.indexOf(
+    requiredTier.trim().toLowerCase() as (typeof PARTNER_TIER_ORDER)[number],
+  );
+  if (requiredIndex === -1) return false;
+  const actualIndex = PARTNER_TIER_ORDER.indexOf(
+    (partnerTier ?? "registered").trim().toLowerCase() as (typeof PARTNER_TIER_ORDER)[number],
+  );
+  return actualIndex >= requiredIndex;
+}
+
 function assertScale(scale: number) {
   if (!Number.isInteger(scale) || scale < 0 || scale > MAX_SCALE) {
     throw new Error(`Money scale must be an integer between 0 and ${MAX_SCALE}`);

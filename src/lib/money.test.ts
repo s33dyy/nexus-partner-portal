@@ -9,6 +9,7 @@ import {
   calculateWeightedPipeline,
   divideMoney,
   formatMoney,
+  meetsPartnerTierRequirement,
   multiplyMoney,
   parseMoney,
   quoteFxSnapshotAmount,
@@ -131,4 +132,25 @@ test("FX snapshot quoting uses the stored snapshot and not a live rate", () => {
     currencyCode: "INR",
     scale: 2,
   });
+});
+
+test("meetsPartnerTierRequirement has no gate when no tier is required", () => {
+  expect(meetsPartnerTierRequirement(null, null)).toBe(true);
+  expect(meetsPartnerTierRequirement("registered", "")).toBe(true);
+});
+
+test("meetsPartnerTierRequirement compares actual vs required tier, case-insensitively", () => {
+  expect(meetsPartnerTierRequirement("Gold", "Gold")).toBe(true);
+  expect(meetsPartnerTierRequirement("platinum", "gold")).toBe(true);
+  expect(meetsPartnerTierRequirement("silver", "Gold")).toBe(false);
+  expect(meetsPartnerTierRequirement("registered", "Gold")).toBe(false);
+});
+
+test("meetsPartnerTierRequirement treats a missing partner tier as registered (the lowest tier)", () => {
+  expect(meetsPartnerTierRequirement(null, "registered")).toBe(true);
+  expect(meetsPartnerTierRequirement(null, "silver")).toBe(false);
+});
+
+test("meetsPartnerTierRequirement fails closed on an unrecognised required tier", () => {
+  expect(meetsPartnerTierRequirement("platinum", "diamond")).toBe(false);
 });
