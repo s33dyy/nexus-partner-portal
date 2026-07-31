@@ -23,6 +23,36 @@ list is not mistaken for a full inventory.
 > and fixed, not previously itemized as its own gap here). The §2.6 policy-layer findings,
 > §2.4 notification broadcast issue, §2.3 reward-on-`won`-not-`approved_won` issue, and
 > everything else below are **unchanged and still open** — this pass did not attempt them.
+>
+> **2026-07-31 update (continued session).** Production was seeded (the
+> supplemental seed script, previously written but not yet run against prod,
+> was executed against `DATABASE_PUBLIC_URL` — all tables now populated).
+> Four more S1 items below were fixed, tested, and deployed to production:
+> **§2.3** (rewards now gate on the outcome-review PO approval, not on
+> `stage = won`, and prefer the frozen Pricing Revision's DTP total over the
+> free-text deal amount when one exists); **§13f** (ticket internal notes —
+> found the underlying `is_internal` column had never actually existed in
+> production despite the app code depending on it since the ticket-command
+> module landed, meaning every ticket reply was failing outright; added the
+> column, moved the internal/external filter server-side instead of
+> client-side-only, and found + fixed a related bug where LIVEY-internal
+> roles — rm/pam/kam/isr/livey_support — could not read any ticket except
+> ones they personally created, via the generic table-policy path); **§16e**
+> (Settings' Governance/Configuration export sections are now gated to
+> super_admin only, not rendered even empty for partner roles); and **§19f**
+> (audit events now stamp `actor_id`/`actor_name`/`actor_role` from the
+> server-verified session rather than trusting the client-supplied values
+> `recordAuditEvent`'s callers pass in). §18b (duplicate
+> products/price_books table definitions) was checked and confirmed already
+> resolved — no second `CREATE TABLE IF NOT EXISTS` remains for any of those
+> tables. The §4a-c "cheap to land" UI items (hover-only pipeline fields,
+> dead insight-hub/deal-line-item controls) were checked and are also
+> already resolved from the 2026-07-31 session above; only
+> `admin.integrations.tsx`'s fabricated Operations Centre data remains, and
+> that is properly part of the separate, large §2.7/§17 integration-layer
+> gap, not a quick fix. Everything else below — §2.4, §2.6 (except the one
+> ticket-table read-path fix noted above), §2.7, and every chapter section —
+> is unchanged and still open.
 
 
 
@@ -110,7 +140,17 @@ whole reward chain are unreachable from the primary operational surface.
 
 ---
 
-### 2.3 Rewards are released on `stage = won`, which §15.11 forbids
+### 2.3 Rewards are released on `stage = won`, which §15.11 forbids — **fixed 2026-07-31**
+
+Reward award now runs inside `outcome-review-commands.server.ts`'s `approvePO`
+(the actual outcome-review approval), atomic with the approval transaction,
+idempotent, and preferring the frozen Pricing Revision's DTP total over the
+free-text deal amount when one exists. The `stage === "won"` award call sites
+in `deals.tsx`/`pipeline.tsx`/`admin.deals.tsx` were removed. Remaining gaps
+below (no points-conversion-rate policy, no largest-remainder allocation
+guard, no contributor-eligibility block, no ledger event taxonomy, no
+redemption reservation) are still open.
+
 
 `product.md` §15.1/§15.11: *"Points are not created when Deal is merely marked Won"* —
 `outcome_review_status = Approved Won` is the only trigger, and the basis is the **final
@@ -414,7 +454,7 @@ Beyond §2.4, §2.5, §2.8:
 | 13c | §13.2/§13.3: **one or more product rows**, zero-or-more serials per product, quantity affected, warranty status, symptom, **multiple images and documents** with preview, size/type validation, malware scan | One product + one serial, no attachments at all. This is the source note *"multiple products and serial numbers and option to add images"*. | S2 |
 | 13d | §13.4/§23.4: canonical states `open` / `in_progress` / `waiting_on_partner` / `reopen_requested` / `closed` | `taxonomy.ts:113` has 8 states including non-canonical `triaged`, `waiting_on_livey`, `resolved`, `reopened`, `canceled`. `ticket-commands.server.ts:35` defines a *third*, different list. §13.4 explicitly says `Reopened` is an Activity event, not a state. | S3 |
 | 13e | §13.5: partner requester submits a **reopen request**; Support/Super Admin approves or rejects with reason | `reopen_requested` appears in the command module's status list but there is no request submission, decision, or reason capture in the UI. Explicit source-note item. | S2 |
-| 13f | §13.6: partner-visible vs. internal note classification; edit window with retained original | `support_ticket_comments` (`db/schema.sql:1262`) has no visibility flag. **Internal notes cannot be kept internal** — §13.10 requires "Internal notes never leak to Partner users." | **S1** |
+| 13f | §13.6: partner-visible vs. internal note classification; edit window with retained original | **Fixed 2026-07-31** (visibility half): `is_internal` column added (it was referenced by app code but never actually existed on the table — every ticket reply was failing in prod); filtering moved server-side (`table-policy.server.ts`) instead of client-JS-only; only Support/Super Admin can post one. Edit window with retained original is still not implemented. | S2 |
 | 13g | §13.7: SLA policy by severity/tier/product/country/entitlement/business hours; 9 tracked timestamps; time-remaining, pause, breach-risk, breach, escalation owner; effective-dated and snapshotted | Entirely absent. §13.10 requires SLA to be measurable and auditable. | S2 |
 | 13h | §13.8: two-pane list/detail on large screens, product/serial panel, Activity + SLA timeline, close and reopen-review dialogs, no search bar | `support.tsx` is a single list with a search box (`:392`). | S3 |
 | 13i | §13.9: notify requester + assigned/tagged Support + watchers + escalation participants on 8 event types | No ticket notifications. | S2 |
@@ -463,7 +503,7 @@ Covered as S1 in §2.3. Remaining items:
 | 16b | §16.1: *"All statistics cards and chart segments that represent records are clickable"* | Dashboard KPI cards are (`dashboard.tsx:466`). Analytics cards are not. | S3 |
 | 16c | §16.2: exports include generated timestamp, actor, scope, filters, and data freshness; are audited; expire when delivered by link; run async for large data; PDF for governed reports | CSV/XLSX are generated client-side with no header metadata, no audit event, no async path, no PDF. | S3 |
 | 16d | §16.3: every import provides template download → schema validation → parsing → governed-value + permission validation → duplicate resolution → **dry-run preview** → confirm → row-level result → audit and rollback | Import helpers exist for deals, customers, users, and teams with row validation and feedback (`src/lib/*-import.ts`, `import-feedback.tsx`). Missing across all of them: template download, dry-run preview, permission validation, rollback strategy. No import at all for product/combo catalogue, price books, reward catalogue, or learning content. | S3 |
-| 16e | §16.4: *"Partner-facing Settings do not include: Partner Documents export; Governance exports; Configuration exports"* — and *"Module exports remain on their relevant module pages"* | `settings.tsx` **is** the export hub, and `export-registry.ts:276` marks the `partner-documents` dataset `visibleTo: ALL_ROLES`. This is a direct violation, and an explicit source-note item ("remove Partner documents, Governance exports, Configuration exports"). | **S1** |
+| 16e | §16.4: *"Partner-facing Settings do not include: Partner Documents export; Governance exports; Configuration exports"* — and *"Module exports remain on their relevant module pages"* | **Fixed 2026-07-31** (access-control half): Governance/Configuration sections are now gated to `super_admin` only (not rendered even empty for partner roles); `team-members` export recategorized out of "governance" as genuinely partner-operational data. `settings.tsx` is still literally titled "Export hub" and centralizes exports rather than living on each module's own page — that structural/IA point is still open. | S2 |
 | 16f | §16.4 Super Admin settings: hierarchy and governed values, approval thresholds, stages and task templates, price books, point rate, support SLA, News governance, security/retention, export governance | None of these settings surfaces exist. | S2 |
 | 16g | §16.5: effective-dated versioned policy changes, impact preview, dual approval for security/points/price policy, durable bulk-action reports, *"configuration cannot delete a value referenced by history; it is retired"* | `lookup_values` has `retired_at` and versioning columns — partial. No impact preview, no dual approval, no bulk reports. | S2 |
 
@@ -504,7 +544,7 @@ Covered as S1 in §2.7. Provider-by-provider:
 | 19c | §19.4 Assistant/AI security | Assistant retrieval is server-side and capability-checked (`assistant.server.ts:306`) — good within its narrow scope. | S3 |
 | 19d | §19.5 data protection and encryption | No field-level encryption; no separate key management for secrets (voucher codes, provider tokens). `zoho_sign_tokens` stores tokens in plaintext columns. | S2 |
 | 19e | §19.6/§19.7 privacy, consent, data rights, retention and deletion | No consent model, no retention policy, no deletion workflow, no data-subject request path. | S2 |
-| 19f | §19.8 auditability and non-repudiation | `portal_audit_events` is free-text and written from the browser via `recordAuditEvent` — client-supplied actor/role/details, so it is not non-repudiable. | **S1** |
+| 19f | §19.8 auditability and non-repudiation | **Fixed 2026-07-31** (actor-identity half): `portal_audit_events.actor_id` added; `table-policy.server.ts` now overrides `actor_id`/`actor_name`/`actor_role` from the server-verified session on every insert, discarding whatever `recordAuditEvent`'s client caller sent. Narrative fields (`action`/`details`/`outcome`) are still client-supplied — moving audit writes fully server-side into the command modules is the complete fix and is still open. | S2 |
 | 19g | §19.9 abuse prevention and rate limits | None. | S2 |
 | 19h | §19.10–§19.12 reliability, backup/recovery, observability | No worker/retry infrastructure (outbox is never drained), no documented backup/restore, no metrics/tracing beyond correlation IDs in the command contract. | S2 |
 | 19i | §19.13 performance and scale | No pagination or virtualisation on any list; `analytics.tsx:52` does `select("*")` over all deals and customers, then filters client-side. | S2 |
