@@ -16,13 +16,11 @@ async function resolveActorOrDenial() {
 type SaveRolePermissionsInput = {
   roleKey: string;
   capabilities: Record<FeatureKey, Record<CrudOperation, boolean>>;
-  geographyNodeIds: string[];
-  globalAccess: boolean;
   reason?: string | null;
 };
 
 type SaveRolePermissionsClientResult =
-  | { ok: true; affectedUserCount: number; correlationId: string }
+  | { ok: true; correlationId: string }
   | { ok: false; message: string; correlationId: string };
 
 const saveRolePermissionsFn = createServerFn({ method: "POST" })
@@ -42,18 +40,12 @@ const saveRolePermissionsFn = createServerFn({ method: "POST" })
       actor: actorResult.actor,
       roleKey: data.roleKey,
       capabilities: data.capabilities,
-      geographyNodeIds: data.geographyNodeIds,
-      globalAccess: data.globalAccess,
       reason: data.reason ?? null,
     });
     if (!result.ok) {
       return { ok: false, message: result.failure.message, correlationId: result.correlationId };
     }
-    return {
-      ok: true,
-      affectedUserCount: result.affectedUserCount,
-      correlationId: result.correlationId,
-    };
+    return { ok: true, correlationId: result.correlationId };
   });
 
 export async function saveRolePermissions(

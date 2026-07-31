@@ -83,6 +83,15 @@ export async function assignGovernedRole(input: {
   actor: GovernedActor;
   targetUserId: string;
   roleKey: string;
+  // Region access is set per-user, not per-role (admin.users.tsx) — the
+  // role-level "Region access" panel that used to live on admin.roles.tsx
+  // was removed since every user on a role sharing one geography ceiling
+  // doesn't match how coverage actually varies person-to-person (e.g. two
+  // RMs each covering a different region). When omitted, falls back to the
+  // role's role_geography_access default (unchanged behaviour, e.g. for
+  // createUser/createUsersBulk callers that don't collect a per-user
+  // region yet).
+  geographyCeilingNodeId?: string | null;
   reason?: string | null;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
@@ -118,7 +127,28 @@ export async function assignGovernedRole(input: {
       };
     }
 
-    const geographyCeilingNodeId = await loadRoleGeographyCeiling(tx, roleKey);
+    let geographyCeilingNodeId: string;
+    if (input.geographyCeilingNodeId) {
+      const { rows: nodeRows } = await tx.query(
+        `SELECT node_id FROM geography_nodes WHERE node_id = $1 LIMIT 1`,
+        [input.geographyCeilingNodeId],
+      );
+      if (nodeRows.length === 0) {
+        return {
+          ok: false,
+          failure: {
+            code: "VALIDATION_FAILED",
+            message: `"${input.geographyCeilingNodeId}" is not a known geography node`,
+            fieldErrors: [{ field: "geographyCeilingNodeId", message: "Unknown geography node" }],
+            retryable: false,
+          },
+          correlationId,
+        };
+      }
+      geographyCeilingNodeId = input.geographyCeilingNodeId;
+    } else {
+      geographyCeilingNodeId = await loadRoleGeographyCeiling(tx, roleKey);
+    }
     const teamDomain = ROLE_KEY_TEAM_DOMAIN[roleKey];
     const issuedAt = new Date().toISOString();
 
@@ -283,19 +313,22 @@ export type SaveRolePermissionsInput = {
   actor: GovernedActor;
   roleKey: string;
   capabilities: Record<FeatureKey, Record<CrudOperation, boolean>>;
-  geographyNodeIds: string[];
-  globalAccess: boolean;
   reason?: string | null;
 };
 
 export type SaveRolePermissionsResult =
-  | { ok: true; affectedUserCount: number; correlationId: string }
+  | { ok: true; correlationId: string }
   | { ok: false; failure: ReturnType<typeof makePolicyDenial>; correlationId: string };
 
-/** Replaces a role's permission matrix + region access, then — because a
- * role's Region Access fully determines every current holder's geography
- * ceiling — re-derives geography_ceiling_node_id on every active assignment
- * for that role so the change takes effect immediately. */
+/** Replaces a role's feature-permission matrix (Create/Read/Update/Delete
+ * per feature). Region access is deliberately NOT configured here — it
+ * moved to a per-user setting (admin.users.tsx, assignGovernedRole's
+ * geographyCeilingNodeId) since one geography ceiling per role can't
+ * express two users on the same role covering different territories.
+ * role_geography_access / loadRoleGeographyCeiling still exist as the
+ * DEFAULT ceiling a role falls back to when a user's assignment doesn't
+ * specify an explicit override, but there is no UI to edit that default
+ * anymore — it's fixed at whatever the bootstrap seed set. */
 export async function saveRolePermissions(
   input: SaveRolePermissionsInput,
 ): Promise<SaveRolePermissionsResult> {
@@ -331,54 +364,6 @@ export async function saveRolePermissions(
       );
     }
 
-    await tx.query(`DELETE FROM role_geography_access WHERE role_key = $1`, [roleKey]);
-    const geographyNodeIds = input.globalAccess
-      ? [GOVERNANCE_GEOGRAPHY_NODE_IDS.global]
-      : Array.from(new Set(input.geographyNodeIds));
-    try {
-      for (const nodeId of geographyNodeIds) {
-        await tx.query(
-          `INSERT INTO role_geography_access (role_key, geography_node_id) VALUES ($1,$2)`,
-          [roleKey, nodeId],
-        );
-      }
-    } catch {
-      return {
-        ok: false,
-        failure: makePolicyDenial(null, "One or more selected regions are invalid"),
-        correlationId,
-      };
-    }
-
-    const newCeiling = deriveGeographyCeiling(geographyNodeIds);
-    const { rows: affectedRows } = await tx.query(
-      `UPDATE assignments
-       SET geography_ceiling_node_id = $1, updated_at = now()
-       WHERE role_key = $2 AND status = 'active' AND geography_ceiling_node_id IS DISTINCT FROM $1
-       RETURNING assignment_id, user_id`,
-      [newCeiling, roleKey],
-    );
-
-    const issuedAt = new Date().toISOString();
-    for (const row of affectedRows as Array<{ assignment_id: string; user_id: string }>) {
-      await tx.query(
-        `INSERT INTO assignment_events (
-           event_id, assignment_id, actor_user_id, actor_assignment_id, action, reason,
-           after_state, effective_at, correlation_id, is_seed
-         ) VALUES ($1,$2,$3,$4,'assignment.geography_recalibrated',$5,$6,$7,$8,false)`,
-        [
-          randomUUID(),
-          row.assignment_id,
-          input.actor.userId,
-          input.actor.assignment.assignmentId,
-          input.reason ?? `Role "${roleKey}" region access updated`,
-          JSON.stringify({ roleKey, geographyCeilingNodeId: newCeiling }),
-          issuedAt,
-          correlationId,
-        ],
-      );
-    }
-
     await appendOutboxEnvelope(
       tx,
       createOutboxEnvelope({
@@ -393,14 +378,10 @@ export async function saveRolePermissions(
         correlationId,
         idempotencyKey: null,
         publishAfter: null,
-        payload: {
-          roleKey,
-          geographyCeilingNodeId: newCeiling,
-          affectedUserCount: affectedRows.length,
-        },
+        payload: { roleKey },
       }),
     );
 
-    return { ok: true, affectedUserCount: affectedRows.length, correlationId };
+    return { ok: true, correlationId };
   });
 }

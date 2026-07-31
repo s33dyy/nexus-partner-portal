@@ -49,6 +49,19 @@ import { useAuth } from "@/hooks/use-auth";
 import { PARTNER_STATUSES, type PartnerStatus } from "@/lib/partner-status";
 import { ROLE_KEY_LABELS, isLegacyAppRoleKey } from "@/domain/contracts/features";
 import { ROLE_KEYS, type RoleKey } from "@/domain/contracts/taxonomy";
+import {
+  GOVERNANCE_GEOGRAPHY_NODE_IDS,
+  countryNodeId,
+  salesRegionNodeId,
+} from "@/domain/contracts/governance";
+import { SALES_REGIONS, WORLD_COUNTRIES } from "@/domain/contracts/world-geography";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Profile = {
   id: string;
@@ -69,10 +82,57 @@ type RoleRow = {
 
 type UserRow = Profile & {
   roles: string[];
+  geographyCeilingNodeId: string | null;
+};
+
+type AssignmentRow = {
+  user_id: string;
+  geography_ceiling_node_id: string | null;
+  status: string;
 };
 
 const ROLE_OPTIONS = [...ROLE_KEYS] as const;
 const PARTNER_STATUS_OPTIONS = [...PARTNER_STATUSES] as const;
+
+type GeographyMode = "global" | "region" | "country";
+
+/** Region access is per user (this page), not per role (admin.roles.tsx no
+ * longer has a Region access panel) — one geography ceiling per role can't
+ * express two users on the same role covering different territories. A
+ * user's ceiling is a single geography_nodes subtree root, so this reduces
+ * to a 3-way choice rather than the multi-select the old role-level panel
+ * offered. */
+function decodeGeographyCeiling(nodeId: string | null | undefined): {
+  mode: GeographyMode;
+  regionKey: string;
+  countryCode: string;
+} {
+  if (!nodeId || nodeId === GOVERNANCE_GEOGRAPHY_NODE_IDS.global) {
+    return { mode: "global", regionKey: "", countryCode: "" };
+  }
+  const region = SALES_REGIONS.find((entry) => salesRegionNodeId(entry.key) === nodeId);
+  if (region) {
+    return { mode: "region", regionKey: region.key, countryCode: "" };
+  }
+  const country = WORLD_COUNTRIES.find((entry) => countryNodeId(entry.code) === nodeId);
+  if (country) {
+    return { mode: "country", regionKey: country.regionKey, countryCode: country.code };
+  }
+  // A node this page doesn't model (e.g. a Province/State) — treat as
+  // Global for display rather than crashing; saving will still write
+  // whatever the admin picks next.
+  return { mode: "global", regionKey: "", countryCode: "" };
+}
+
+function encodeGeographyCeiling(
+  mode: GeographyMode,
+  regionKey: string,
+  countryCode: string,
+): string {
+  if (mode === "country" && countryCode) return countryNodeId(countryCode);
+  if (mode === "region" && regionKey) return salesRegionNodeId(regionKey);
+  return GOVERNANCE_GEOGRAPHY_NODE_IDS.global;
+}
 
 const USER_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "full_name", header: "Full Name" },
@@ -101,6 +161,9 @@ function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [draftRole, setDraftRole] = useState("partner_user");
   const [draftStatus, setDraftStatus] = useState<PartnerStatus>("approved");
+  const [draftGeographyMode, setDraftGeographyMode] = useState<GeographyMode>("global");
+  const [draftGeographyRegion, setDraftGeographyRegion] = useState("");
+  const [draftGeographyCountry, setDraftGeographyCountry] = useState("");
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
@@ -118,7 +181,7 @@ function AdminUsersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [profilesRes, rolesRes] = await Promise.all([
+      const [profilesRes, rolesRes, assignmentsRes] = await Promise.all([
         supabase
           .from("profiles")
           .select(
@@ -129,19 +192,26 @@ function AdminUsersPage() {
           .from("user_roles")
           .select("user_id, role")
           .order("created_at", { ascending: true }),
+        supabase.from("assignments").select("user_id, geography_ceiling_node_id, status"),
       ]);
-      if (profilesRes.error || rolesRes.error) {
-        throw profilesRes.error ?? rolesRes.error;
+      if (profilesRes.error || rolesRes.error || assignmentsRes.error) {
+        throw profilesRes.error ?? rolesRes.error ?? assignmentsRes.error;
       }
       const profileRows = (profilesRes.data as Profile[] | null) ?? [];
       const roleRows = (rolesRes.data as RoleRow[] | null) ?? [];
+      const assignmentRows = (assignmentsRes.data as AssignmentRow[] | null) ?? [];
       const roleMap = new Map<string, string[]>();
       for (const row of roleRows) {
         roleMap.set(row.user_id, [...(roleMap.get(row.user_id) ?? []), row.role]);
       }
+      const geographyMap = new Map<string, string | null>();
+      for (const row of assignmentRows) {
+        if (row.status === "active") geographyMap.set(row.user_id, row.geography_ceiling_node_id);
+      }
       const rows = profileRows.map((profile) => ({
         ...profile,
         roles: roleMap.get(profile.id) ?? [],
+        geographyCeilingNodeId: geographyMap.get(profile.id) ?? null,
       }));
       setUsers(rows);
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
@@ -181,6 +251,10 @@ function AdminUsersPage() {
     if (!selectedUser) return;
     setDraftRole(selectedUser.roles[0] ?? "partner_user");
     setDraftStatus(selectedUser.partner_status);
+    const decoded = decodeGeographyCeiling(selectedUser.geographyCeilingNodeId);
+    setDraftGeographyMode(decoded.mode);
+    setDraftGeographyRegion(decoded.regionKey);
+    setDraftGeographyCountry(decoded.countryCode);
   }, [selectedUser]);
 
   if (!hasRole("super_admin")) {
@@ -194,6 +268,11 @@ function AdminUsersPage() {
       const roleResult = await assignGovernedRole({
         targetUserId: selectedUser.id,
         roleKey: draftRole,
+        geographyCeilingNodeId: encodeGeographyCeiling(
+          draftGeographyMode,
+          draftGeographyRegion,
+          draftGeographyCountry,
+        ),
       });
       if (!roleResult.ok) {
         toast.error(roleResult.failure.message);
@@ -246,12 +325,17 @@ function AdminUsersPage() {
       // Self-registered partners never get a governed assignment issued at
       // signup — without this, approval would leave them permanently stuck
       // on the "Assignment pending" screen. Issue one from their current
-      // role so approval always results in working access.
+      // role so approval always results in working access. Passes the
+      // user's existing geography ceiling through if they already have one
+      // (assignGovernedRole ends and reissues the assignment every call) so
+      // approving doesn't silently reset a previously-set region override
+      // back to the role's default.
       const currentRole = selectedUser.roles[0];
       if (currentRole) {
         const roleResult = await assignGovernedRole({
           targetUserId: selectedUser.id,
           roleKey: currentRole,
+          geographyCeilingNodeId: selectedUser.geographyCeilingNodeId,
         });
         if (!roleResult.ok) throw new Error(roleResult.failure.message);
       }
@@ -666,6 +750,72 @@ function AdminUsersPage() {
                     options={[...PARTNER_STATUS_OPTIONS]}
                   />
                 </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Field label="Region access">
+                  <Select
+                    value={draftGeographyMode}
+                    onValueChange={(value) => {
+                      const mode = value as GeographyMode;
+                      setDraftGeographyMode(mode);
+                      if (mode === "global") {
+                        setDraftGeographyRegion("");
+                        setDraftGeographyCountry("");
+                      } else if (mode === "region") {
+                        setDraftGeographyCountry("");
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="global">Global</SelectItem>
+                      <SelectItem value="region">Sales region</SelectItem>
+                      <SelectItem value="country">Country</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {draftGeographyMode !== "global" ? (
+                  <Field label="Sales region">
+                    <Select
+                      value={draftGeographyRegion}
+                      onValueChange={(value) => {
+                        setDraftGeographyRegion(value);
+                        setDraftGeographyCountry("");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a region" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SALES_REGIONS.map((region) => (
+                          <SelectItem key={region.key} value={region.key}>
+                            {region.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ) : null}
+                {draftGeographyMode === "country" && draftGeographyRegion ? (
+                  <Field label="Country">
+                    <Select value={draftGeographyCountry} onValueChange={setDraftGeographyCountry}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WORLD_COUNTRIES.filter(
+                          (country) => country.regionKey === draftGeographyRegion,
+                        ).map((country) => (
+                          <SelectItem key={country.code} value={country.code}>
+                            {country.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ) : null}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button

@@ -21,7 +21,14 @@ async function actorDenialResult(
 }
 
 const assignGovernedRoleFn = createServerFn({ method: "POST" })
-  .validator((input: { targetUserId: string; roleKey: string; reason?: string | null }) => input)
+  .validator(
+    (input: {
+      targetUserId: string;
+      roleKey: string;
+      geographyCeilingNodeId?: string | null;
+      reason?: string | null;
+    }) => input,
+  )
   .handler(async ({ data }): Promise<CommandExecutionResult> => {
     const actorResult = await resolveActorOrDenial();
     if (!actorResult.ok) return actorDenialResult(actorResult.failure);
@@ -30,6 +37,7 @@ const assignGovernedRoleFn = createServerFn({ method: "POST" })
       actor: actorResult.actor,
       targetUserId: data.targetUserId,
       roleKey: data.roleKey,
+      geographyCeilingNodeId: data.geographyCeilingNodeId ?? null,
       reason: data.reason ?? null,
     });
   });
@@ -37,6 +45,7 @@ const assignGovernedRoleFn = createServerFn({ method: "POST" })
 export async function assignGovernedRole(input: {
   targetUserId: string;
   roleKey: string;
+  geographyCeilingNodeId?: string | null;
   reason?: string | null;
 }): Promise<CommandExecutionResult> {
   return assignGovernedRoleFn({ data: input });
