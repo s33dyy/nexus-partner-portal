@@ -50,9 +50,17 @@ list is not mistaken for a full inventory.
 > already resolved from the 2026-07-31 session above; only
 > `admin.integrations.tsx`'s fabricated Operations Centre data remains, and
 > that is properly part of the separate, large §2.7/§17 integration-layer
-> gap, not a quick fix. Everything else below — §2.4, §2.6 (except the one
-> ticket-table read-path fix noted above), §2.7, and every chapter section —
-> is unchanged and still open.
+> gap, not a quick fix. A fifth item, **§2.6's document-access bypass**, was
+> also fixed: the `createServerFn` handlers behind document
+> upload/download/delete had *no* authentication or authorization check at
+> all — any caller, including an anonymous one, could read, overwrite, or
+> delete any partner/deal document by `file_path`. Now enforces the same
+> partner_id/uploaded_by ownership rule the generic table-policy path
+> already applies to those two tables. Everything else below — §2.4, the
+> rest of §2.6 (role-power/geography-ceiling enforcement, dead session
+> revocation, no Assignment lifecycle commands, no Active Context chooser,
+> static navigation, the Zoho Sign webhook's own bypass), §2.7, and every
+> chapter section — is unchanged and still open.
 
 
 
@@ -227,11 +235,18 @@ delivery channel.
 
 ### 2.6 Policy layer still bypassed (Phase 1 audit, re-confirmed)
 
-The findings in `docs/implementation-status.md` are unchanged in the working tree:
+The findings in `docs/implementation-status.md` are unchanged in the working tree, except item 1's document half:
 
-1. `uploadDocumentBlob` / `createDocumentDataUrl` / `removeDocumentBlobs`
-   (`src/server/livey-service.server.ts:1775,1864,1936`) and the Zoho Sign webhook handler
-   query the database directly, bypassing `applyTablePolicy` entirely.
+1. ~~`uploadDocumentBlob` / `createDocumentDataUrl` / `removeDocumentBlobs`
+   (`src/server/livey-service.server.ts:1775,1864,1936`)~~ query the database directly, but the
+   `createServerFn` entry points that call them (`uploadDocument`/`createSignedUrl`/
+   `removeDocuments` in `src/integrations/local/client.ts`) — **fixed 2026-07-31**: previously
+   had *zero* authentication or authorization check, meaning any caller (including anonymous)
+   could read/overwrite/delete any partner or deal document by `file_path`. Added
+   `assertDocumentAccessWithAuthContext`, mirroring the same partner_id/uploaded_by ownership
+   rule `table-policy.server.ts` already applies to the `partner_documents`/`deal_documents`
+   rows, wired into all three entry points. The Zoho Sign webhook handler's bypass is
+   unrelated and still open.
 2. `src/server/table-policy.server.ts` performs flat `partner_id`/`user_id` ownership scoping
    and never calls `src/domain/contracts/governance.ts`. The governed role-power and
    geography-ceiling model is not enforced for generic reads/writes. Export, import, file,
