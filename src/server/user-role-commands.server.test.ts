@@ -72,7 +72,10 @@ function buildActor(overrides: Partial<AssignmentRecord> = {}): GovernedActor {
   };
 }
 
-function installFakePool(existingRoles: string[]) {
+function installFakePool(
+  existingRoles: string[],
+  options: { targetPartnerId?: string | null } = {},
+) {
   return async () => {
     const { pool } = await import("@/server/postgres.server");
     const calls: string[] = [];
@@ -82,6 +85,15 @@ function installFakePool(existingRoles: string[]) {
       query: async (sql: string, params?: unknown[]) => {
         const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
         calls.push(verb);
+        if (sql.includes("FROM profiles")) {
+          return {
+            rows:
+              options.targetPartnerId === undefined
+                ? []
+                : [{ partner_id: options.targetPartnerId }],
+            rowCount: options.targetPartnerId === undefined ? 0 : 1,
+          };
+        }
         if (verb === "SELECT") {
           return { rows: existingRoles.map((role) => ({ role })), rowCount: existingRoles.length };
         }
@@ -138,11 +150,15 @@ test("changeUserRole denies partner_admin escalating to super_admin", async () =
   }
 });
 
-test("changeUserRole allows partner_admin granting partner_user", async () => {
-  const harness = await installFakePool(["partner_admin"])();
+test("changeUserRole allows partner_admin granting partner_user within their own partner", async () => {
+  const harness = await installFakePool(["partner_admin"], { targetPartnerId: "partner-1" })();
   try {
     const { changeUserRole } = await import("@/server/user-role-commands.server");
-    const actor = buildActor({ roleKey: "partner_admin", teamDomain: "partner_success" });
+    const actor = buildActor({
+      roleKey: "partner_admin",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
     const result = await changeUserRole({
       actor,
       targetUserId: "user-a",
@@ -151,6 +167,68 @@ test("changeUserRole allows partner_admin granting partner_user", async () => {
     expect(result.ok).toBe(true);
     expect(harness.insertCalls).toHaveLength(1);
     expect(harness.insertCalls[0]?.params[1]).toBe("partner_user");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("changeUserRole denies a partner_admin targeting a user outside their own partner (tenant isolation)", async () => {
+  const harness = await installFakePool(["partner_admin"], { targetPartnerId: "partner-2" })();
+  try {
+    const { changeUserRole } = await import("@/server/user-role-commands.server");
+    const actor = buildActor({
+      roleKey: "partner_admin",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
+    const result = await changeUserRole({
+      actor,
+      targetUserId: "user-in-another-partner",
+      newRole: "partner_user",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("POLICY_DENIED");
+    }
+    expect(harness.insertCalls).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("changeUserRole denies a partner_admin whose own assignment has no partnerId", async () => {
+  const harness = await installFakePool(["partner_admin"], { targetPartnerId: "partner-1" })();
+  try {
+    const { changeUserRole } = await import("@/server/user-role-commands.server");
+    const actor = buildActor({
+      roleKey: "partner_admin",
+      teamDomain: "partner_success",
+      partnerId: null,
+    });
+    const result = await changeUserRole({
+      actor,
+      targetUserId: "user-a",
+      newRole: "partner_user",
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.insertCalls).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("changeUserRole lets super_admin change a role for a user in any partner", async () => {
+  const harness = await installFakePool(["partner_admin"], {
+    targetPartnerId: "some-other-partner",
+  })();
+  try {
+    const { changeUserRole } = await import("@/server/user-role-commands.server");
+    const result = await changeUserRole({
+      actor: buildActor(),
+      targetUserId: "user-a",
+      newRole: "partner_user",
+    });
+    expect(result.ok).toBe(true);
   } finally {
     harness.restore();
   }

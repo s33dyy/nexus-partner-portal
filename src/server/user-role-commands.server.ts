@@ -75,6 +75,33 @@ export async function changeUserRole(input: {
   }
 
   return withTransaction(async (tx) => {
+    // authorizeRoleChange only validates what role is being granted — it
+    // never checks who the target user actually is. Without this, a
+    // partner_admin (who can only ever grant "partner_user" per
+    // canGrantRole) could still target ANY user_id system-wide: demoting a
+    // super_admin's own account to partner_user (locking them out of the
+    // admin panel), or a rival partner's partner_admin, as long as they
+    // ever obtained that user_id from any other source. A non-super_admin
+    // actor may only ever change roles for a user in their own partner.
+    if (input.actor.assignment.roleKey !== "super_admin") {
+      const { rows: targetRows } = await tx.query(
+        `SELECT partner_id FROM profiles WHERE id = $1 LIMIT 1`,
+        [input.targetUserId],
+      );
+      const targetPartnerId = (targetRows[0] as { partner_id: string | null } | undefined)
+        ?.partner_id;
+      if (
+        !input.actor.assignment.partnerId ||
+        targetPartnerId !== input.actor.assignment.partnerId
+      ) {
+        return {
+          ok: false,
+          failure: makePolicyDenial(null, "User is not accessible"),
+          correlationId,
+        };
+      }
+    }
+
     const { rows } = await tx.query(`SELECT role FROM user_roles WHERE user_id = $1`, [
       input.targetUserId,
     ]);
