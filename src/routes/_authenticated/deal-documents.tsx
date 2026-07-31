@@ -145,7 +145,10 @@ function DealDocumentsPage() {
       setDeals(visibleDeals);
       setDocuments(visibleDocuments);
       setPartners((partnerRes.data as Partner[] | null) ?? []);
-      setSelectedId((current) => current ?? visibleDocuments[0]?.id ?? null);
+      // Deliberately does not default selectedId to the first document —
+      // selectedId drives the review Dialog's `open` prop below, so
+      // auto-selecting a document here made the modal auto-open on every
+      // page load/refresh whenever any document existed.
       setSelectedDealId((current) => current ?? visibleDeals[0]?.id ?? null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load deal documents");
@@ -193,7 +196,12 @@ function DealDocumentsPage() {
   }, [dealById, dealFilter, docTypeFilter, documents, partnerById, query]);
 
   const selectedDocument = useMemo(
-    () => filteredDocuments.find((doc) => doc.id === selectedId) ?? filteredDocuments[0] ?? null,
+    // No fallback to filteredDocuments[0]: this drives the review Dialog's
+    // `open` prop below, so falling back to "the first document" here is
+    // what made the modal impossible to close — closing sets selectedId to
+    // null, which this fallback immediately turned back into the first
+    // document, reopening it on the very next render.
+    () => filteredDocuments.find((doc) => doc.id === selectedId) ?? null,
     [filteredDocuments, selectedId],
   );
 
