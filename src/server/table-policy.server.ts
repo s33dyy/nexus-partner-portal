@@ -458,6 +458,48 @@ async function assertLinkedDealAccess(dealId: string, auth: TablePolicyAuthConte
   throw new Error("Access denied");
 }
 
+/** product.md §19.8: audit events must be non-repudiable. recordAuditEvent
+ * (workflow-events.ts) is called from client route components with
+ * actor_name/actor_role taken from client-side React state — a tampered
+ * client could insert an audit row attributing any action to any name/role.
+ * Overrides those two fields (and stamps actor_id) from the server-verified
+ * session on every insert, discarding whatever the client sent, regardless
+ * of what recordAuditEvent's caller passed in. Narrative fields (action,
+ * details, outcome, ...) remain client-supplied — a fuller fix moves audit
+ * writes entirely server-side inside the domain command modules, tracked
+ * separately as a larger change (product.md §18.8). */
+async function withNonRepudiableActor(
+  values: TableQueryLike["values"],
+  auth: TablePolicyAuthContext,
+): Promise<TableQueryLike["values"]> {
+  if (!auth.userId) {
+    throw new Error("Access denied");
+  }
+
+  const actorRole = isSuperAdmin(auth)
+    ? "super_admin"
+    : auth.roles.includes("partner_admin")
+      ? "partner_admin"
+      : auth.roles.includes("partner_user")
+        ? "partner_user"
+        : (auth.governedRoleKey ?? "unknown");
+
+  const { rows } = await pool.query(`SELECT full_name FROM profiles WHERE id = $1 LIMIT 1`, [
+    auth.userId,
+  ]);
+  const actorName = (rows[0] as { full_name: string } | undefined)?.full_name ?? "Unknown user";
+
+  const rowsToScope = Array.isArray(values) ? values : [values ?? {}];
+  const overridden = rowsToScope.map((row) => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw new Error("Insert values must be objects");
+    }
+    return { ...row, actor_id: auth.userId, actor_name: actorName, actor_role: actorRole };
+  });
+
+  return Array.isArray(values) ? overridden : (overridden[0] ?? {});
+}
+
 async function assertLinkedTicketAccess(ticketId: string, auth: TablePolicyAuthContext) {
   const { rows } = await pool.query(
     `SELECT id, partner_id, created_by
@@ -795,7 +837,7 @@ async function applyTablePolicyInner(
     }
 
     if (query.operation === "insert") {
-      return { ...query, filters };
+      return { ...query, filters, values: await withNonRepudiableActor(query.values, auth) };
     }
 
     throw new Error("Access denied");

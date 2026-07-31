@@ -1641,6 +1641,12 @@ ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPT
 -- exist" since the ticket-command module landed.
 ALTER TABLE support_ticket_comments ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- product.md §19.8: audit events must be non-repudiable. Links every audit
+-- row to the real authenticated user who caused it (stamped server-side by
+-- table-policy.server.ts's withNonRepudiableActor), instead of trusting
+-- only the free-text actor_name/actor_role the client sends.
+ALTER TABLE portal_audit_events ADD COLUMN IF NOT EXISTS actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
 -- Same pre-existing gap, systematically: every governed pricing/catalogue
 -- table below (products, product_variants, product_skus, combos,
 -- combo_components, price_books, price_rows, fx_snapshots) already existed

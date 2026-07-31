@@ -514,3 +514,83 @@ test("support_tickets reads are unscoped for a globally-ceilinged LIVEY-internal
     pool.query = originalQuery as typeof pool.query;
   }
 });
+
+test("portal_audit_events insert overrides client-supplied actor identity with the server-verified session (product.md §19.8)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM profiles WHERE id")) {
+      return { rows: [{ full_name: "Real Logged-In User" }], rowCount: 1 };
+    }
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "audit",
+            can_create: true,
+            can_read: false,
+            can_update: false,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  }) as never;
+
+  try {
+    const scoped = await applyTablePolicy(
+      {
+        table: "portal_audit_events",
+        operation: "insert",
+        values: {
+          id: "event-1",
+          actor_name: "Forged Name",
+          actor_role: "super_admin",
+          action: "deal_won",
+          target_type: "deal",
+          target_name: "Acme Co",
+          outcome: "won",
+          details: "test",
+          severity: "low",
+        },
+      },
+      {
+        userId: "user-a",
+        roles: ["partner_user"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_user",
+      },
+    );
+
+    expect(scoped.values).toMatchObject({
+      actor_id: "user-a",
+      actor_name: "Real Logged-In User",
+      actor_role: "partner_user",
+    });
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("portal_audit_events insert denies an anonymous caller", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  await expect(
+    applyTablePolicy(
+      { table: "portal_audit_events", operation: "insert", values: { id: "event-1" } },
+      {
+        userId: null,
+        roles: [],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: false,
+      },
+    ),
+  ).rejects.toThrow("Access denied");
+});

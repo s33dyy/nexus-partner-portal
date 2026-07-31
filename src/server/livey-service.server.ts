@@ -486,6 +486,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   ],
   portal_audit_events: [
     "id",
+    "actor_id",
     "actor_name",
     "actor_role",
     "action",
