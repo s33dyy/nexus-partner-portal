@@ -484,4 +484,23 @@ The review Dialog's `open` prop was `Boolean(selectedDocument)`, and `selectedDo
 
 ### Explicitly still open
 
-Same as before, plus: `participant-commands.server.ts` was checked and found correctly scoped (no changes needed). The remaining named command modules not yet audited directly: `task-commands.server.ts`, `ticket-commands.server.ts` (both have some existing test coverage already), `assistant.server.ts`, `zoho-api.server.ts`'s webhook handler (already known-open from the Phase 1 audit), and every remaining `createServerFn` in `src/integrations/local/*.ts` not yet checked one-by-one. Given this session's hit rate (a real, confirmed, fixable bug in essentially every module checked so far), continuing the same direct-reading sweep over what's left is still the highest-value next step.
+Same as before, plus: `participant-commands.server.ts`, `assistant.server.ts` (resolves `getAuthContext()` internally in both entry points — correct), and the client wrappers `deal-commands.ts`/`task-commands.ts`/`ticket-commands.ts`/`outcome-review-commands.ts`/`participant-commands.ts` (all correctly call `getAuthContext()`/`resolveActorOrDenial()`) were checked and found correctly scoped. Not yet audited directly: `task-commands.server.ts`, `ticket-commands.server.ts` (both have some existing test coverage already), `zoho-api.server.ts`'s webhook handler (already known-open from the Phase 1 audit). Given this session's hit rate (a real, confirmed, fixable bug in essentially every module checked so far), continuing the same direct-reading sweep over what's left is still the highest-value next step.
+
+## 2026-07-31 session (continued further still): the most severe finding of the session
+
+Continuing the same direct-reading sweep, checked every remaining file in `src/integrations/local/`. `dropdown-sources.ts` (and its server module `dropdown-sources.server.ts`) had **zero authentication anywhere** — not "checks the wrong thing," not "checks role but not scope" like the earlier findings, but no `getAuthContext()` call at all in any of its four functions.
+
+`listDropdownSourceValues`'s "account", "client", and default/profile branches build their SQL `WHERE` clause from an *optional* client-supplied `partnerId`/`userId` — when omitted (the normal case for many callers) or set to any value, the query ran completely unscoped. This function is called from `lookup-combobox.tsx`, a shared dropdown component used throughout the app (customers, deals, team pickers, etc.), reachable by any caller including an anonymous one:
+- "account": every partner's company/legal name, system-wide.
+- "client": every customer across every partner (company, region, segment, MRR).
+- default: every profile's full_name/email/company_name, system-wide.
+
+`createCatalogItemFromDropdown`/`updateCatalogItemFromDropdown` let anyone write arbitrary pricing/stock/tier into the shared product catalogue, even though the only UI caller (`admin.catalog.tsx`) is `super_admin`-gated. `createCustomerFromDropdown` let anyone plant a customer record under any `partner_id`/`user_id` of their choosing.
+
+Fixed by resolving the real session server-side and, for every non-`super_admin` caller, forcing partner/user scope to their own identity rather than trusting client input — the same pattern already applied to `createWorkspaceUser` and the document-access endpoints earlier this session. "lookup" and "catalog" reads remain intentionally open to any caller, matching `table-policy.server.ts`'s existing `PUBLIC_READ_TABLES` precedent for those same two tables. The scoping logic is extracted into pure, exported functions (`resolveDropdownScope`, `resolveDropdownCustomerOwner`, `assertSuperAdminCaller`) so it's unit-testable without a live session.
+
+Proved the vulnerability before fixing (reverted the scoping function to trust client input, confirmed 3 of 7 new tests fail). Verified end-to-end in a local browser against a real database (30 profiles, 10 partners): logged in as a real `partner_user`, confirmed the Customers page's "Owner" dropdown shows only that partner's own 2 team members, not all 30 profiles system-wide. Full suite (262 tests), typecheck, lint, and build all pass. Deployed (`704f0e2`) and confirmed live.
+
+### Explicitly still open
+
+Same as above. All files in `src/integrations/local/` have now been checked at least for the "missing auth entirely" pattern. `task-commands.server.ts`, `ticket-commands.server.ts`, and `zoho-api.server.ts`'s webhook handler remain the highest-value next targets for a deeper (not just "is there an auth check") audit pass.
