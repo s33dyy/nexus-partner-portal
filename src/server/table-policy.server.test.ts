@@ -594,3 +594,34 @@ test("portal_audit_events insert denies an anonymous caller", async () => {
     ),
   ).rejects.toThrow("Access denied");
 });
+
+test("document_blobs and password_reset_tokens are unreachable through the generic table path for every role", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const PARTNER_USER_AUTH = {
+    userId: "user-a",
+    roles: ["partner_user"],
+    partnerId: "partner-a",
+    companyName: "Acme Labs",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_user" as const,
+  };
+
+  for (const table of ["document_blobs", "password_reset_tokens"]) {
+    for (const operation of ["select", "count", "insert", "update", "delete"] as const) {
+      // A plain partner_user previously fell through to the unscoped
+      // catch-all here: select leaked every tenant's raw document bytes,
+      // and insert into password_reset_tokens allowed forging a reset
+      // token for any account, including super_admin.
+      await expect(
+        applyTablePolicy({ table, operation, filters: [], values: {} }, PARTNER_USER_AUTH),
+      ).rejects.toThrow("Access denied");
+
+      // Denied for super_admin too — every legitimate access to these
+      // tables uses a dedicated server function with raw pool.query.
+      await expect(
+        applyTablePolicy({ table, operation, filters: [], values: {} }, SUPER_ADMIN_AUTH),
+      ).rejects.toThrow("Access denied");
+    }
+  }
+});

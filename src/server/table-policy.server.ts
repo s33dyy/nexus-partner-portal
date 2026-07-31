@@ -81,6 +81,30 @@ const GOVERNANCE_TABLES = new Set([
   "role_geography_access",
 ]);
 
+// Tables that must NEVER be reachable through the generic
+// queryTable()/supabase.from() path by anyone, including super_admin.
+// They are registered in TABLE_COLUMNS (so the inventory analyzer and the
+// client-table regression test can see them) but every legitimate access
+// goes through a dedicated server function using raw pool.query, which
+// never calls applyTablePolicy — so denying here breaks nothing.
+//
+// Both previously fell through applyTablePolicyInner's final unscoped
+// `return { ...query, filters }` catch-all, with no scope spec, no
+// TABLE_FEATURE_MAP entry, and no per-table branch. Only anonymous callers
+// were blocked, so ANY authenticated user — including the lowest-privilege
+// partner_user — could read and write them across every tenant:
+//   - document_blobs holds the raw file_data bytes of every partner
+//     agreement, GST certificate, PO and deal document. A plain
+//     `supabase.from("document_blobs").select("*")` exfiltrated every
+//     tenant's documents, bypassing assertDocumentAccess entirely (that
+//     guards the storage entry points, not this generic table path).
+//   - password_reset_tokens is worse than a read leak: it was writable, so
+//     an attacker could INSERT a row pointing at any victim user_id with a
+//     token_hash of their own choosing and a future expires_at, then call
+//     the public completePasswordReset() with the matching plaintext token
+//     to seize any account, including super_admin.
+const SERVER_ONLY_TABLES = new Set(["document_blobs", "password_reset_tokens"]);
+
 // Tables reachable through the generic queryTable()/supabase.from() path
 // that are gated by the role permission matrix (admin.roles.tsx). Identity/
 // session tables (profiles, user_roles, assignments, active_contexts,
@@ -580,6 +604,12 @@ async function applyTablePolicyInner(
   const isPublicRead = PUBLIC_READ_TABLES.has(query.table);
   const scopeSpec = getScopeSpec(query.table, auth);
   const isWrite = query.operation !== "select" && query.operation !== "count";
+
+  // Checked before every other branch, and deliberately without a
+  // super_admin bypass — see SERVER_ONLY_TABLES.
+  if (SERVER_ONLY_TABLES.has(query.table)) {
+    throw new Error("Access denied");
+  }
 
   if (!superAdmin && !auth.userId && !isPublicRead) {
     throw new Error("Access denied");
