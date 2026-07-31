@@ -16,7 +16,7 @@ import {
   uploadToCloudinary,
 } from "@/server/cloudinary.server";
 
-import type { RoleKey } from "@/domain/contracts/taxonomy";
+import { ROLE_KEYS, type RoleKey } from "@/domain/contracts/taxonomy";
 
 export type AppRole = RoleKey;
 export type { PartnerStatus };
@@ -1566,8 +1566,12 @@ export async function createWorkspaceUser(input: {
   partner_id?: string;
   must_reset_password?: boolean;
 }) {
+  // admin.users.tsx (the only caller) gates its entire "Create user" UI to
+  // super_admin — see the note on assertCanGrantWorkspaceUser below for why
+  // this must also be enforced server-side, not just by the page's own
+  // `hasRole("super_admin")` redirect.
   const ctx = await getAuthContext();
-  if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
+  if (!ctx.roles.includes("super_admin")) {
     throw new Error("Unauthorized");
   }
 
@@ -1585,11 +1589,69 @@ export async function createWorkspaceUser(input: {
   }
 }
 
+/** insertWorkspaceUserRecord is shared by two genuinely different authority
+ * contexts, so their allowed-role sets differ:
+ *   - createWorkspaceUser/createWorkspaceUsersBulk (admin.users.tsx, an
+ *     internal LIVEY-admin screen for creating any of the 9 canonical
+ *     roles, including rm/pam/kam/isr/livey_support) — now restricted to
+ *     super_admin callers only, above.
+ *   - createPartnerTeamMembersBulk (partner.team.tsx) — a Partner Admin
+ *     managing their own org's roster, which may legitimately grant a
+ *     lateral "partner_admin" co-admin as well as "partner_user" (product.md
+ *     §6.9: "a Partner Admin can grant only at or below their own
+ *     authority" — partner_admin is "at", not above), but never anything
+ *     from the internal RoleKey set.
+ *
+ * Previously, BOTH paths accepted a caller who merely had super_admin OR
+ * partner_admin, with nothing checking what role or partner_id was actually
+ * being granted — so a plain partner_admin could pass `role: "super_admin"`
+ * (or any other partner's partner_id) straight through to this function's
+ * INSERTs and get instant privilege escalation to full super_admin, or
+ * plant an account inside a different tenant. TanStack Start's
+ * `.validator((input: T) => input)` pattern used by every createServerFn in
+ * integrations/local/client.ts is a type-only identity function with no
+ * runtime effect, so the `AppRole`/`RoleKey` TypeScript typing on these
+ * fields provided no real protection either — a raw request body can carry
+ * any string. */
+export function assertCanGrantWorkspaceUser(
+  ctx: { roles: readonly string[]; profile: { partner_id?: string | null } | null },
+  input: Pick<WorkspaceUserInput, "role" | "partner_id">,
+  options: { allowedRoles?: readonly RoleKey[] } = {},
+): { callerIsSuperAdmin: boolean; ownPartnerId: string | null } {
+  const callerIsSuperAdmin = ctx.roles.includes("super_admin");
+
+  if (!(ROLE_KEYS as readonly string[]).includes(input.role)) {
+    throw new Error(`Unknown role: ${input.role}`);
+  }
+
+  // Defence in depth: even if a future call site forgets to pass
+  // allowedRoles, a non-super_admin caller can never grant anything beyond
+  // a lateral partner_admin/partner_user by default — never any of the
+  // internal RoleKey values (rm/pam/kam/isr/livey_support/
+  // restricted_distributor) or super_admin itself.
+  const effectiveAllowedRoles =
+    options.allowedRoles ??
+    (callerIsSuperAdmin ? null : (["partner_admin", "partner_user"] as const));
+  if (effectiveAllowedRoles && !effectiveAllowedRoles.includes(input.role)) {
+    throw new Error(`"${input.role}" cannot be granted through this path`);
+  }
+
+  const ownPartnerId = ctx.profile?.partner_id ?? null;
+  if (!callerIsSuperAdmin && input.partner_id && input.partner_id !== ownPartnerId) {
+    throw new Error("Cannot create a user under a different partner");
+  }
+
+  return { callerIsSuperAdmin, ownPartnerId };
+}
+
 async function insertWorkspaceUserRecord(
   client: PoolClient,
   ctx: Awaited<ReturnType<typeof getAuthContext>>,
   input: WorkspaceUserInput,
+  options: { allowedRoles?: readonly RoleKey[] } = {},
 ) {
+  const { callerIsSuperAdmin, ownPartnerId } = assertCanGrantWorkspaceUser(ctx, input, options);
+
   const normalizedEmail = input.email.trim().toLowerCase();
   const existing = await client.query(`SELECT id FROM profiles WHERE lower(email) = lower($1)`, [
     normalizedEmail,
@@ -1603,8 +1665,11 @@ async function insertWorkspaceUserRecord(
   const partnerStatus =
     input.partner_status ??
     (input.role === "super_admin" ? "approved" : "pending_partner_registration");
-  const partnerId =
-    input.partner_id || (ctx.profile as { partner_id?: string | null } | null)?.partner_id || null;
+  // A non-super_admin caller can only ever land the new user in their own
+  // partner (assertCanGrantWorkspaceUser already rejected a mismatched
+  // input.partner_id above) — never trust a client-supplied partner_id on
+  // its own for who it targets.
+  const partnerId = callerIsSuperAdmin ? (input.partner_id ?? ownPartnerId ?? null) : ownPartnerId;
 
   await client.query(
     `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, must_reset_password, is_seed)
@@ -1638,8 +1703,11 @@ async function insertWorkspaceUserRecord(
 }
 
 export async function createWorkspaceUsersBulk(input: { rows: WorkspaceUserInput[] }) {
+  // See the note on createWorkspaceUser above — this shares its authority
+  // context (admin.users.tsx's bulk import), so the same super_admin-only
+  // restriction applies.
   const ctx = await getAuthContext();
-  if (!ctx.roles.includes("super_admin") && !ctx.roles.includes("partner_admin")) {
+  if (!ctx.roles.includes("super_admin")) {
     throw new Error("Unauthorized");
   }
 
@@ -1678,6 +1746,16 @@ export async function createPartnerTeamMembersBulk(input: {
     throw new Error("Unauthorized");
   }
 
+  const callerIsSuperAdmin = ctx.roles.includes("super_admin");
+  const ownCompanyName = (ctx.profile as { company_name?: string | null } | null)?.company_name;
+  // A partner_admin's team import must land in their own company's roster.
+  // Without this, a partner_admin could pass a different company_name and
+  // plant rows into another partner's team-member listing (scoped by
+  // company_name in table-policy.server.ts's portal_team_members case).
+  if (!callerIsSuperAdmin && input.company_name.trim() !== (ownCompanyName ?? "").trim()) {
+    throw new Error("Cannot import team members for a different company");
+  }
+
   const companyName = input.company_name.trim();
   if (!companyName) {
     throw new Error("Company name is required for team imports");
@@ -1689,15 +1767,24 @@ export async function createPartnerTeamMembersBulk(input: {
     const createdAt = new Date().toISOString();
 
     for (const row of input.rows) {
-      const createdUser = await insertWorkspaceUserRecord(client, ctx, {
-        full_name: row.full_name,
-        email: row.email,
-        phone: row.phone,
-        company_name: companyName,
-        password: row.password,
-        role: row.portal_role,
-        partner_status: "approved",
-      });
+      const createdUser = await insertWorkspaceUserRecord(
+        client,
+        ctx,
+        {
+          full_name: row.full_name,
+          email: row.email,
+          phone: row.phone,
+          company_name: companyName,
+          password: row.password,
+          role: row.portal_role,
+          partner_status: "approved",
+        },
+        // A raw request could still send a portal_role outside this
+        // union — the "partner_admin" | "partner_user" TS type on the
+        // outer function's input has no runtime effect (see the note on
+        // assertCanGrantWorkspaceUser above).
+        { allowedRoles: ["partner_admin", "partner_user"] },
+      );
       await client.query(
         `INSERT INTO portal_team_members (
            id, company_name, full_name, email, role_title, portal_role, responsibility,

@@ -420,3 +420,113 @@ test("assertDocumentAccessWithAuthContext denies an unknown bucket", async () =>
     ),
   ).rejects.toThrow("Access denied");
 });
+
+function partnerAdminCtx(partnerId: string | null) {
+  return { roles: ["partner_admin"] as const, profile: { partner_id: partnerId } };
+}
+
+function superAdminCtx() {
+  return { roles: ["super_admin"] as const, profile: { partner_id: null } };
+}
+
+test("assertCanGrantWorkspaceUser blocks a partner_admin from granting super_admin (privilege escalation)", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  expect(() =>
+    assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), {
+      role: "super_admin",
+      partner_id: undefined,
+    }),
+  ).toThrow();
+});
+
+test("assertCanGrantWorkspaceUser blocks a partner_admin from granting any internal LIVEY role", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  for (const role of [
+    "rm",
+    "pam",
+    "kam",
+    "isr",
+    "livey_support",
+    "restricted_distributor",
+  ] as const) {
+    expect(() =>
+      assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), { role, partner_id: undefined }),
+    ).toThrow();
+  }
+});
+
+test("assertCanGrantWorkspaceUser blocks a partner_admin from creating a user under a different partner", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  expect(() =>
+    assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), {
+      role: "partner_user",
+      partner_id: "partner-2",
+    }),
+  ).toThrow();
+});
+
+test("assertCanGrantWorkspaceUser allows a partner_admin to create a partner_user in their own partner", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  const result = assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), {
+    role: "partner_user",
+    partner_id: "partner-1",
+  });
+  expect(result).toEqual({ callerIsSuperAdmin: false, ownPartnerId: "partner-1" });
+
+  // Omitting partner_id entirely (the normal case) must also succeed.
+  expect(() =>
+    assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), {
+      role: "partner_user",
+      partner_id: undefined,
+    }),
+  ).not.toThrow();
+});
+
+test("assertCanGrantWorkspaceUser lets a partner_admin grant a lateral partner_admin co-admin (product.md §6.9)", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  expect(() =>
+    assertCanGrantWorkspaceUser(
+      partnerAdminCtx("partner-1"),
+      { role: "partner_admin", partner_id: undefined },
+      { allowedRoles: ["partner_admin", "partner_user"] },
+    ),
+  ).not.toThrow();
+});
+
+test("assertCanGrantWorkspaceUser's allowedRoles option still blocks super_admin from the team-invite path", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  expect(() =>
+    assertCanGrantWorkspaceUser(
+      superAdminCtx(),
+      { role: "super_admin", partner_id: undefined },
+      { allowedRoles: ["partner_admin", "partner_user"] },
+    ),
+  ).toThrow();
+});
+
+test("assertCanGrantWorkspaceUser lets super_admin grant any role to any partner", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  for (const role of ["super_admin", "rm", "pam", "partner_admin", "partner_user"] as const) {
+    expect(() =>
+      assertCanGrantWorkspaceUser(superAdminCtx(), { role, partner_id: "any-partner" }),
+    ).not.toThrow();
+  }
+});
+
+test("assertCanGrantWorkspaceUser rejects an unknown role string (a raw request bypassing the TS type)", async () => {
+  const { assertCanGrantWorkspaceUser } = await import("@/server/livey-service.server");
+
+  expect(() =>
+    assertCanGrantWorkspaceUser(partnerAdminCtx("partner-1"), {
+      role: "not_a_real_role" as never,
+      partner_id: undefined,
+    }),
+  ).toThrow("Unknown role");
+});
