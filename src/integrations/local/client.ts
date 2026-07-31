@@ -209,7 +209,19 @@ const uploadDocument = createServerFn({ method: "POST" })
 const uploadCloudinaryImage = createServerFn({ method: "POST" })
   .validator((input: FormData) => input)
   .handler(async ({ data }) => {
+    const { getAuthContext } = await import("@/server/livey-service.server");
     const { uploadToCloudinary } = await import("@/server/cloudinary.server");
+
+    // Only reachable in the UI from admin.rewards.tsx and admin.news.tsx,
+    // both gated to super_admin — but the handler itself had no server-side
+    // check, so any authenticated (or even anonymous) caller could upload
+    // arbitrary images to the org's Cloudinary account under any folder/
+    // publicId, including overwriting the shared reward-catalogue/news
+    // images every partner sees.
+    const ctx = await getAuthContext();
+    if (!ctx.roles.includes("super_admin")) {
+      throw new Error("Unauthorized");
+    }
 
     const file = data.get("file");
     if (!(file instanceof File)) {
