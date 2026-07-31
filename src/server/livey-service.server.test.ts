@@ -268,3 +268,155 @@ test("every table queried by the client UI is registered in the generic query pa
     pool.query = originalQuery as typeof pool.query;
   }
 });
+
+test("assertDocumentAccessWithAuthContext denies an anonymous caller", async () => {
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+
+  await expect(
+    assertDocumentAccessWithAuthContext(
+      { bucket: "deal-documents", filePath: "partner-1/deal-1/file.pdf", operation: "read" },
+      { userId: null, partnerId: null, isSuperAdmin: false },
+    ),
+  ).rejects.toThrow("Access denied");
+});
+
+test("assertDocumentAccessWithAuthContext lets super_admin read/write/delete anything without a DB lookup", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  let queried = false;
+  pool.query = (async () => {
+    queried = true;
+    return { rows: [], rowCount: 0 };
+  }) as never;
+
+  try {
+    for (const operation of ["read", "write", "delete"] as const) {
+      await assertDocumentAccessWithAuthContext(
+        { bucket: "partner-documents", filePath: "someone-elses-partner/file.pdf", operation },
+        { userId: "super-admin-user", partnerId: null, isSuperAdmin: true },
+      );
+    }
+    expect(queried).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("assertDocumentAccessWithAuthContext allows the owning partner and denies a different partner", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => ({
+    rows: [{ partner_id: "partner-1", uploaded_by: "user-owner" }],
+    rowCount: 1,
+  })) as never;
+
+  try {
+    await assertDocumentAccessWithAuthContext(
+      { bucket: "deal-documents", filePath: "partner-1/deal-1/file.pdf", operation: "read" },
+      { userId: "user-other", partnerId: "partner-1", isSuperAdmin: false },
+    );
+
+    await expect(
+      assertDocumentAccessWithAuthContext(
+        { bucket: "deal-documents", filePath: "partner-1/deal-1/file.pdf", operation: "read" },
+        { userId: "user-other", partnerId: "partner-2", isSuperAdmin: false },
+      ),
+    ).rejects.toThrow("Access denied");
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("assertDocumentAccessWithAuthContext allows the uploader even without a matching partner_id", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => ({
+    rows: [{ partner_id: null, uploaded_by: "user-owner" }],
+    rowCount: 1,
+  })) as never;
+
+  try {
+    await assertDocumentAccessWithAuthContext(
+      { bucket: "partner-documents", filePath: "some/path.pdf", operation: "delete" },
+      { userId: "user-owner", partnerId: null, isSuperAdmin: false },
+    );
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("assertDocumentAccessWithAuthContext denies reading/deleting a path with no matching document row", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => ({ rows: [], rowCount: 0 })) as never;
+
+  try {
+    await expect(
+      assertDocumentAccessWithAuthContext(
+        { bucket: "deal-documents", filePath: "partner-1/ghost.pdf", operation: "read" },
+        { userId: "user-a", partnerId: "partner-1", isSuperAdmin: false },
+      ),
+    ).rejects.toThrow("Access denied");
+
+    await expect(
+      assertDocumentAccessWithAuthContext(
+        { bucket: "deal-documents", filePath: "partner-1/ghost.pdf", operation: "delete" },
+        { userId: "user-a", partnerId: "partner-1", isSuperAdmin: false },
+      ),
+    ).rejects.toThrow("Access denied");
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("assertDocumentAccessWithAuthContext allows a fresh upload only under the caller's own partner_id prefix", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => ({ rows: [], rowCount: 0 })) as never;
+
+  try {
+    await assertDocumentAccessWithAuthContext(
+      { bucket: "partner-documents", filePath: "partner-1/agreement_123.pdf", operation: "write" },
+      { userId: "user-a", partnerId: "partner-1", isSuperAdmin: false },
+    );
+
+    await expect(
+      assertDocumentAccessWithAuthContext(
+        {
+          bucket: "partner-documents",
+          filePath: "partner-2/agreement_123.pdf",
+          operation: "write",
+        },
+        { userId: "user-a", partnerId: "partner-1", isSuperAdmin: false },
+      ),
+    ).rejects.toThrow("Access denied");
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("assertDocumentAccessWithAuthContext denies an unknown bucket", async () => {
+  const { assertDocumentAccessWithAuthContext } = await import("@/server/livey-service.server");
+
+  await expect(
+    assertDocumentAccessWithAuthContext(
+      { bucket: "rewards", filePath: "anything.png", operation: "read" },
+      { userId: "user-a", partnerId: "partner-1", isSuperAdmin: false },
+    ),
+  ).rejects.toThrow("Access denied");
+});

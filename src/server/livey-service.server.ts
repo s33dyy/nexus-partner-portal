@@ -1869,6 +1869,81 @@ export async function issueTemporaryPasswordForUser(userId: string) {
   return { temporaryPassword };
 }
 
+const DOCUMENT_BUCKET_TABLES: Record<string, "partner_documents" | "deal_documents"> = {
+  "partner-documents": "partner_documents",
+  "deal-documents": "deal_documents",
+};
+
+/** product.md §9.16/§2.6 finding 1: uploadDocument/createSignedUrl/removeDocuments
+ * (the createServerFn handlers in integrations/local/client.ts that call
+ * uploadDocumentBlob/createDocumentDataUrl/removeDocumentBlobs below) had no
+ * authentication or authorization check at all — any caller, including an
+ * anonymous one, could read, overwrite, or delete any document by
+ * file_path, entirely bypassing table-policy.server.ts. Mirrors the exact
+ * ownership rule table-policy.server.ts already applies to reads/writes of
+ * the partner_documents/deal_documents rows themselves (partner_id or
+ * uploaded_by match; unscoped for super_admin) — not a new, separately
+ * invented policy. A path with no matching row yet is only valid for a
+ * fresh upload into a path prefixed with the caller's own partner_id,
+ * matching the `{partnerId}/...` convention both upload call sites already
+ * use. Known residual gap, matching the identical gap already documented
+ * for support_tickets: LIVEY-internal roles (rm/pam/kam/isr/livey_support)
+ * have no bypass here, same as they currently don't on the generic
+ * partner_documents/deal_documents read path either — not widened here. */
+export async function assertDocumentAccessWithAuthContext(
+  input: {
+    bucket: string;
+    filePath: string;
+    operation: "read" | "write" | "delete";
+  },
+  auth: { userId: string | null; partnerId: string | null; isSuperAdmin: boolean },
+) {
+  if (!auth.userId) {
+    throw new Error("Access denied");
+  }
+  if (auth.isSuperAdmin) {
+    return;
+  }
+
+  const table = DOCUMENT_BUCKET_TABLES[input.bucket];
+  if (!table) {
+    throw new Error("Access denied");
+  }
+
+  const { rows } = await pool.query(
+    `SELECT partner_id, uploaded_by FROM ${table} WHERE file_path = $1 LIMIT 1`,
+    [input.filePath],
+  );
+  const row = rows[0] as { partner_id: string | null; uploaded_by: string | null } | undefined;
+
+  if (row) {
+    if (auth.partnerId && row.partner_id === auth.partnerId) return;
+    if (row.uploaded_by === auth.userId) return;
+    throw new Error("Access denied");
+  }
+
+  if (input.operation !== "write") {
+    throw new Error("Access denied");
+  }
+  const prefix = input.filePath.split("/")[0];
+  if (!auth.partnerId || prefix !== auth.partnerId) {
+    throw new Error("Access denied");
+  }
+}
+
+export async function assertDocumentAccess(input: {
+  bucket: string;
+  filePath: string;
+  operation: "read" | "write" | "delete";
+}) {
+  const authContext = await getAuthContext();
+  return assertDocumentAccessWithAuthContext(input, {
+    userId: authContext.session?.user.id ?? null,
+    partnerId: authContext.profile?.partner_id ?? null,
+    isSuperAdmin: authContext.roles.includes("super_admin"),
+  });
+}
+
 export async function uploadDocumentBlob(input: {
   bucket: string;
   filePath: string;

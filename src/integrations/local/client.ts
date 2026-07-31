@@ -181,7 +181,8 @@ const completeReset = createServerFn({ method: "POST" })
 const uploadDocument = createServerFn({ method: "POST" })
   .validator((input: FormData) => input)
   .handler(async ({ data }) => {
-    const { uploadDocumentBlob } = await import("@/server/livey-service.server");
+    const { assertDocumentAccess, uploadDocumentBlob } =
+      await import("@/server/livey-service.server");
 
     const bucket = String(data.get("bucket") ?? "partner-documents");
     const filePath = String(data.get("filePath") ?? "");
@@ -192,6 +193,8 @@ const uploadDocument = createServerFn({ method: "POST" })
     if (!(file instanceof File)) {
       throw new Error("Missing file");
     }
+
+    await assertDocumentAccess({ bucket, filePath, operation: "write" });
 
     return uploadDocumentBlob({
       bucket,
@@ -227,7 +230,9 @@ const uploadCloudinaryImage = createServerFn({ method: "POST" })
 const createSignedUrl = createServerFn({ method: "POST" })
   .validator((input: { bucket: string; path: string; expiresIn: number }) => input)
   .handler(async ({ data }) => {
-    const { createDocumentDataUrl } = await import("@/server/livey-service.server");
+    const { assertDocumentAccess, createDocumentDataUrl } =
+      await import("@/server/livey-service.server");
+    await assertDocumentAccess({ bucket: data.bucket, filePath: data.path, operation: "read" });
     const result = await createDocumentDataUrl(data.path);
     return { signedUrl: result.signedUrl };
   });
@@ -235,7 +240,13 @@ const createSignedUrl = createServerFn({ method: "POST" })
 const removeDocuments = createServerFn({ method: "POST" })
   .validator((input: { bucket: string; paths: string[] }) => input)
   .handler(async ({ data }) => {
-    const { removeDocumentBlobs } = await import("@/server/livey-service.server");
+    const { assertDocumentAccess, removeDocumentBlobs } =
+      await import("@/server/livey-service.server");
+    await Promise.all(
+      data.paths.map((filePath) =>
+        assertDocumentAccess({ bucket: data.bucket, filePath, operation: "delete" }),
+      ),
+    );
     return removeDocumentBlobs(data.paths);
   });
 
@@ -489,10 +500,7 @@ type AuthApi = {
       status: "invited" | "active" | "paused";
     }>;
   }) => Promise<RpcResult<{ createdCount: number }>>;
-  quoteCurrencyToUsd: (input: {
-    sourceCurrency: string;
-    amount: number;
-  }) => Promise<
+  quoteCurrencyToUsd: (input: { sourceCurrency: string; amount: number }) => Promise<
     RpcResult<{
       sourceCurrency: string;
       amount: number;
