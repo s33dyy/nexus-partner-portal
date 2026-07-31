@@ -27,13 +27,11 @@ import {
   nextDealStage,
   type DealRecord,
 } from "@/lib/portal-records";
-import { awardDealWinPoints } from "@/lib/rewards";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
-import { normalizeDealCollaborators, type DealCollaboratorDraft } from "@/lib/deal-collaboration";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
@@ -69,9 +67,6 @@ function PipelinePage() {
   const { selectedRegion } = useRegionFilter();
 
   const [deals, setDeals] = useState<DealRecord[]>([]);
-  const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
-    Record<string, DealCollaboratorDraft[]>
-  >({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -111,12 +106,6 @@ function PipelinePage() {
           sort_order: number;
         }> | null) ?? [];
       const collaboratorIdsByDeal = groupCollaboratorIdsByDeal(collaboratorRows);
-      const collaboratorMap = Object.fromEntries(
-        ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => {
-          const dealCollaborators = collaboratorRows.filter((row) => row.deal_id === deal.id);
-          return [deal.id, normalizeDealCollaborators(dealCollaborators)];
-        }),
-      ) as Record<string, DealCollaboratorDraft[]>;
       const rows = filterVisibleDeals(
         ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => ({
           ...deal,
@@ -135,11 +124,9 @@ function PipelinePage() {
         },
       );
       setDeals(rows);
-      setCollaboratorsByDealId(collaboratorMap);
       setSource(rows.length > 0 ? "database" : "empty");
     } catch {
       setDeals([]);
-      setCollaboratorsByDealId({});
       setSource("empty");
     } finally {
       setLoading(false);
@@ -272,23 +259,9 @@ function PipelinePage() {
         details: `${deal.product} moved to ${stage} in the pipeline`,
         severity: "low",
       });
-      if (stage === "won") {
-        try {
-          await awardDealWinPoints(supabase, {
-            dealId: deal.id,
-            accountName: deal.account_name,
-            product: deal.product,
-            dealAmount: deal.amount,
-            rewardRatePercent: Number(deal.reward_rate_percent) || 5,
-            collaborators: collaboratorsByDealId[deal.id] ?? [],
-            fallbackUserId: deal.user_id,
-            partnerId: deal.partner_id,
-            actorId: null,
-          });
-        } catch (rewardError) {
-          console.error("Failed to record reward points for deal win", rewardError);
-        }
-      }
+      // Reward points are awarded when the PO review reaches its approved
+      // terminal state (outcome-review-commands.server.ts's approvePO), not
+      // when the pipeline stage merely reaches "won" — product.md §15.11.
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move deal");

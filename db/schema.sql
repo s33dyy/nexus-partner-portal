@@ -1634,6 +1634,13 @@ ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS price_book_version INT
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS product_status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 
+-- Same gap again: ticket-commands.server.ts and support.tsx have always
+-- read/written support_ticket_comments.is_internal, but the column was
+-- never in this table's CREATE TABLE definition, so every ticket reply
+-- INSERT has been failing in production with "column is_internal does not
+-- exist" since the ticket-command module landed.
+ALTER TABLE support_ticket_comments ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Same pre-existing gap, systematically: every governed pricing/catalogue
 -- table below (products, product_variants, product_skus, combos,
 -- combo_components, price_books, price_rows, fx_snapshots) already existed

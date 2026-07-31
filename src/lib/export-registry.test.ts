@@ -33,6 +33,19 @@ test("listVisibleExportDatasets keeps team exports available to partner admins",
   expect(visible).not.toContain("profiles");
 });
 
+test("no governance or configuration dataset is visible to a partner-facing role (product.md §16.4)", () => {
+  for (const role of ["partner_admin", "partner_user"] as const) {
+    const visibleGroups = new Set(listVisibleExportDatasets(role).map((dataset) => dataset.group));
+    expect(visibleGroups.has("governance")).toBe(false);
+    expect(visibleGroups.has("configuration")).toBe(false);
+  }
+});
+
+test("team members export is categorised as operational, not governance", () => {
+  const dataset = EXPORT_DATASETS.find((entry) => entry.id === "portal-team-members");
+  expect(dataset?.group).toBe("operational");
+});
+
 test("product catalog export uses the new surface label", () => {
   const dataset = EXPORT_DATASETS.find((entry) => entry.id === "portal-catalog-items");
 

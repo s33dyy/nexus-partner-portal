@@ -1,4 +1,5 @@
 import type { FeatureKey } from "@/domain/contracts/features";
+import { GOVERNANCE_GEOGRAPHY_NODE_IDS } from "@/domain/contracts/governance";
 import type { RoleKey } from "@/domain/contracts/taxonomy";
 import { pool } from "@/server/postgres.server";
 import {
@@ -134,6 +135,35 @@ type ScopeSpec =
 
 function isSuperAdmin(auth: TablePolicyAuthContext) {
   return auth.roles.includes("super_admin");
+}
+
+function canSeeInternalTicketNotes(auth: TablePolicyAuthContext) {
+  return auth.roles.includes("super_admin") || auth.roles.includes("livey_support");
+}
+
+/** The generic ownership-scope path (getScopeSpec/getGenericScopeSpec) only
+ * ever recognises partner_id-owns-row or userId-created-row — it has no
+ * concept of a LIVEY-internal role's queue. Without this, rm/pam/kam/isr/
+ * livey_support fall through to "created_by = self", meaning a Support
+ * agent's ticket queue is invisible unless they personally created every
+ * ticket. Scoped narrowly to support_tickets/support_ticket_comments for
+ * now (the ticket module this fix touches); the same gap likely exists on
+ * other ownership-scoped tables for LIVEY-internal roles and is tracked
+ * separately as it needs its own review per table. Matches the identical
+ * "geography ceiling === Global" fail-closed policy already implemented in
+ * ticket-commands.server.ts's authorizeTicketActor for the write side. */
+function hasGlobalLiveySupportAccess(auth: TablePolicyAuthContext) {
+  if (auth.partnerId) return false;
+  const role = auth.governedRoleKey;
+  if (
+    !role ||
+    role === "partner_admin" ||
+    role === "partner_user" ||
+    role === "restricted_distributor"
+  ) {
+    return false;
+  }
+  return auth.geographyCeilingNodeId === GOVERNANCE_GEOGRAPHY_NODE_IDS.global;
 }
 
 function isGenericSuperAdmin(auth: GenericTableAuthContext) {
@@ -444,7 +474,7 @@ async function assertLinkedTicketAccess(ticketId: string, auth: TablePolicyAuthC
     throw new Error("Access denied");
   }
 
-  if (isSuperAdmin(auth)) {
+  if (isSuperAdmin(auth) || hasGlobalLiveySupportAccess(auth)) {
     return;
   }
 
@@ -610,6 +640,14 @@ async function applyTablePolicyInner(
       return { ...query, filters };
     }
 
+    if (
+      query.table === "support_tickets" &&
+      (query.operation === "select" || query.operation === "count") &&
+      hasGlobalLiveySupportAccess(auth)
+    ) {
+      return { ...query, filters };
+    }
+
     if (scopeSpec.value == null) {
       throw new Error("Access denied");
     }
@@ -698,15 +736,20 @@ async function applyTablePolicyInner(
           })
         : [extractFilterValue(filters, "ticket_id")];
 
+    const canSeeInternal = canSeeInternalTicketNotes(auth);
+
     if (ticketIds.some((ticketId) => !ticketId)) {
       if (query.operation === "select" || query.operation === "count") {
         if (superAdmin) {
           return { ...query, filters };
         }
         if (auth.userId) {
+          const authorScoped = appendScopeFilter(filters, "author_id", auth.userId);
           return {
             ...query,
-            filters: appendScopeFilter(filters, "author_id", auth.userId),
+            filters: canSeeInternal
+              ? authorScoped
+              : [...authorScoped, { column: "is_internal", value: false, operator: "eq" as const }],
           };
         }
       }
@@ -716,6 +759,30 @@ async function applyTablePolicyInner(
     for (const ticketId of ticketIds) {
       await assertLinkedTicketAccess(ticketId as string, auth);
     }
+
+    if (query.operation === "insert") {
+      const rows = Array.isArray(query.values) ? query.values : [query.values ?? {}];
+      if (!canSeeInternal) {
+        for (const row of rows) {
+          if (
+            typeof row === "object" &&
+            row !== null &&
+            (row as Record<string, unknown>).is_internal
+          ) {
+            throw new Error("Access denied");
+          }
+        }
+      }
+      return { ...query, filters };
+    }
+
+    if ((query.operation === "select" || query.operation === "count") && !canSeeInternal) {
+      return {
+        ...query,
+        filters: [...filters, { column: "is_internal", value: false, operator: "eq" as const }],
+      };
+    }
+
     return { ...query, filters };
   }
 

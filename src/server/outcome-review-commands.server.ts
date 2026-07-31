@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 import { type CommandExecutionResult } from "@/domain/contracts/commands";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
+import { calculateDealRewardAllocations } from "@/lib/deal-collaboration";
 import { withTransaction } from "@/server/command-runtime.server";
 import {
   authorizeDealActor,
@@ -8,6 +10,103 @@ import {
   validationFailure,
   type DealCommandActor,
 } from "@/server/deal-commands.server";
+
+/** product.md §15.1/§15.11: "Points are not created when Deal is merely
+ * marked Won" — outcome_review_status reaching its approved terminal state
+ * (this codebase's "approved", the closest existing state to the canonical
+ * approved_won) is the only trigger, not the pipeline stage transition.
+ * Runs inside the same transaction as the approval so award and approval
+ * are atomic. Idempotent: a prior award for this deal short-circuits, so
+ * approvePO can't double-award if ever re-invoked. Basis prefers the final
+ * frozen Pricing Revision's DTP total over the free-text deal amount when
+ * one exists (product.md's "final approved reward-eligible DTP total"). */
+async function awardApprovedWinRewards(tx: PoolClient, dealId: string, approverId: string | null) {
+  const { rows: existingRows } = await tx.query(
+    `SELECT 1 FROM reward_point_events WHERE source_type = 'deal_win' AND source_id = $1 LIMIT 1`,
+    [dealId],
+  );
+  if (existingRows.length > 0) return;
+
+  const { rows: dealRows } = await tx.query(
+    `SELECT account_name, product, amount, amount_usd, reward_rate_percent, partner_id, user_id
+     FROM portal_deals WHERE id = $1`,
+    [dealId],
+  );
+  const deal = dealRows[0] as
+    | {
+        account_name: string;
+        product: string;
+        amount: string;
+        amount_usd: string | number | null;
+        reward_rate_percent: string | number;
+        partner_id: string | null;
+        user_id: string;
+      }
+    | undefined;
+  if (!deal) return;
+
+  const { rows: revisionRows } = await tx.query(
+    `SELECT total_dtp_usd FROM pricing_revisions
+     WHERE deal_id = $1 AND is_final = TRUE
+     ORDER BY revision_number DESC LIMIT 1`,
+    [dealId],
+  );
+  const finalRevisionTotal = (revisionRows[0] as { total_dtp_usd: string | number } | undefined)
+    ?.total_dtp_usd;
+
+  const dealAmountBasis: string | number =
+    finalRevisionTotal != null
+      ? Number(finalRevisionTotal)
+      : deal.amount_usd != null
+        ? Number(deal.amount_usd)
+        : deal.amount;
+
+  const { rows: collaboratorRows } = await tx.query(
+    `SELECT user_id, split_percent, sort_order FROM portal_deal_collaborators
+     WHERE deal_id = $1 ORDER BY sort_order`,
+    [dealId],
+  );
+  const collaborators = (
+    collaboratorRows as Array<{
+      user_id: string;
+      split_percent: string | number;
+      sort_order: number;
+    }>
+  ).map((row) => ({
+    userId: row.user_id,
+    splitPercent: Number(row.split_percent),
+    sortOrder: Number(row.sort_order),
+  }));
+
+  const allocations = calculateDealRewardAllocations({
+    dealId,
+    dealAmount: dealAmountBasis,
+    rewardRatePercent: Number(deal.reward_rate_percent) || 0,
+    collaborators:
+      collaborators.length > 0
+        ? collaborators
+        : [{ userId: deal.user_id, splitPercent: 100, sortOrder: 0 }],
+  });
+
+  const now = new Date().toISOString();
+  for (const allocation of allocations) {
+    await tx.query(
+      `INSERT INTO reward_point_events (
+         id, user_id, partner_id, source_type, source_id, points_delta, reason, approved_by, approved_at, is_seed, created_at
+       ) VALUES ($1, $2, $3, 'deal_win', $4, $5, $6, $7, $8, FALSE, $8)`,
+      [
+        randomUUID(),
+        allocation.userId,
+        deal.partner_id,
+        dealId,
+        allocation.points,
+        `${deal.account_name} closed won for ${deal.product}`,
+        approverId,
+        now,
+      ],
+    );
+  }
+}
 
 export type SubmitPOInput = {
   dealId: string;
@@ -120,6 +219,8 @@ export async function approvePO(input: {
     await tx.query(`UPDATE portal_deals SET stage = 'won', updated_at = now() WHERE id = $1`, [
       input.data.dealId,
     ]);
+
+    await awardApprovedWinRewards(tx, input.data.dealId, input.actor.userId);
 
     return {
       ok: true,

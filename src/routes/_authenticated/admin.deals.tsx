@@ -34,7 +34,6 @@ import {
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
 import { formatDealProbability, normalizeDealProbability } from "@/lib/deal-probability";
-import { awardDealWinPoints } from "@/lib/rewards";
 import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
@@ -337,23 +336,9 @@ function AdminDealsPage() {
           details: `Admin reviewed ${selectedDeal.product} and set status to ${status.replace("_", " ")}`,
           severity: status === "won" ? "medium" : "low",
         });
-        if (status === "won") {
-          try {
-            await awardDealWinPoints(supabase, {
-              dealId: selectedDeal.id,
-              accountName: selectedDeal.account_name,
-              product: selectedDeal.product,
-              dealAmount: selectedDeal.amount,
-              rewardRatePercent: Number(reviewDraft.reward_rate_percent) || 5,
-              collaborators: reviewCollaborators,
-              fallbackUserId: selectedDeal.user_id,
-              partnerId: selectedDeal.partner_id,
-              actorId: (await supabase.auth.getUser()).data.user?.id ?? null,
-            });
-          } catch (rewardError) {
-            console.error("Failed to record reward points for deal win", rewardError);
-          }
-        }
+        // Reward points are awarded when the PO review reaches its approved
+        // terminal state (outcome-review-commands.server.ts's approvePO),
+        // not when a deal is marked won here — product.md §15.11.
         toast.success(`Deal marked ${status.replace("_", " ")}`);
       } else {
         toast.success("Deal updated");

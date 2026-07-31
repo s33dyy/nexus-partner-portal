@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import { GOVERNANCE_GEOGRAPHY_NODE_IDS } from "@/domain/contracts/governance";
+
 test("generic table policy allows bootstrap-safe lookup reads and scopes partner reads", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
 
@@ -360,4 +362,155 @@ test("domain_activity_events reads are super-admin only, matching portal_audit_e
       SUPER_ADMIN_AUTH,
     ),
   ).rejects.toThrow("Access denied");
+});
+
+test("support_ticket_comments hides internal notes from partner roles but not Support/Super Admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "tickets",
+            can_create: true,
+            can_read: true,
+            can_update: true,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    return {
+      rows: [{ id: "ticket-1", partner_id: "partner-a", created_by: "user-a" }],
+      rowCount: 1,
+    };
+  }) as never;
+
+  try {
+    const partnerRead = await applyTablePolicy(
+      {
+        table: "support_ticket_comments",
+        operation: "select",
+        filters: [{ column: "ticket_id", value: "ticket-1", operator: "eq" }],
+      },
+      {
+        userId: "user-a",
+        roles: ["partner_admin"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
+      },
+    );
+    expect(partnerRead.filters).toEqual([
+      { column: "ticket_id", value: "ticket-1", operator: "eq" },
+      { column: "is_internal", value: false, operator: "eq" },
+    ]);
+
+    const supportRead = await applyTablePolicy(
+      {
+        table: "support_ticket_comments",
+        operation: "select",
+        filters: [{ column: "ticket_id", value: "ticket-1", operator: "eq" }],
+      },
+      {
+        userId: "support-user",
+        roles: ["livey_support"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "livey_support",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    expect(supportRead.filters).toEqual([
+      { column: "ticket_id", value: "ticket-1", operator: "eq" },
+    ]);
+
+    await expect(
+      applyTablePolicy(
+        {
+          table: "support_ticket_comments",
+          operation: "insert",
+          values: { ticket_id: "ticket-1", is_internal: true },
+        },
+        {
+          userId: "user-a",
+          roles: ["partner_admin"],
+          partnerId: "partner-a",
+          companyName: "Acme Labs",
+          hasGovernedContext: true,
+          governedRoleKey: "partner_admin",
+        },
+      ),
+    ).rejects.toThrow("Access denied");
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("support_tickets reads are unscoped for a globally-ceilinged LIVEY-internal role, not just super_admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "tickets",
+            can_create: true,
+            can_read: true,
+            can_update: true,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  }) as never;
+
+  try {
+    const supportRead = await applyTablePolicy(
+      { table: "support_tickets", operation: "select", filters: [] },
+      {
+        userId: "support-user",
+        roles: ["livey_support"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "livey_support",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    expect(supportRead.filters).toEqual([]);
+
+    // A narrower-than-Global ceiling still falls back to the old
+    // created_by-only scope (fails closed on breadth, not access), matching
+    // the same documented risk as deal-commands.server.ts's LIVEY-role
+    // geography check.
+    const narrowCeilingRead = await applyTablePolicy(
+      { table: "support_tickets", operation: "select", filters: [] },
+      {
+        userId: "support-user",
+        roles: ["livey_support"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "livey_support",
+        geographyCeilingNodeId: "geo-country-in",
+      },
+    );
+    expect(narrowCeilingRead.filters).toEqual([
+      { column: "created_by", value: "support-user", operator: "eq" },
+    ]);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
 });

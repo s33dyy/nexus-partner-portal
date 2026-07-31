@@ -289,6 +289,42 @@ test("addTicketReply rejects replying to a closed ticket", async () => {
   }
 });
 
+test("addTicketReply denies a partner posting an internal note", async () => {
+  const harness = await installFakePool(baseTicketRow({ status: "open" }))();
+  try {
+    const { addTicketReply } = await import("@/server/ticket-commands.server");
+    const actor = buildActor({
+      userId: REQUESTER_USER_ID,
+      roleKey: "partner_user",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
+    const result = await addTicketReply({
+      actor,
+      data: { ticketId: "ticket-1", body: "Marking this internal", isInternal: true },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("addTicketReply allows livey_support to post an internal note", async () => {
+  const harness = await installFakePool(baseTicketRow({ status: "open" }))();
+  try {
+    const { addTicketReply } = await import("@/server/ticket-commands.server");
+    const actor = buildActor({ roleKey: "livey_support" });
+    const result = await addTicketReply({
+      actor,
+      data: { ticketId: "ticket-1", body: "Internal triage note", isInternal: true },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("addTicketReply from the partner returns a waiting ticket to in_progress", async () => {
   const harness = await installFakePool(baseTicketRow({ status: "waiting_on_partner" }))();
   try {

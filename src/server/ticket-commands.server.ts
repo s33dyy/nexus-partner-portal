@@ -461,6 +461,17 @@ export async function addTicketReply(input: {
       return { ok: false, failure: policy.denial, correlationId };
     }
 
+    const canWriteInternal =
+      input.actor.assignment.roleKey === "super_admin" ||
+      input.actor.assignment.roleKey === "livey_support";
+    if (input.data.isInternal && !canWriteInternal) {
+      return {
+        ok: false,
+        failure: makePolicyDenial(null, "Only Support or Super Admin can post an internal note"),
+        correlationId,
+      };
+    }
+
     if (ticket.status === "closed" || ticket.status === "reopen_requested") {
       return {
         ok: false,

@@ -53,7 +53,6 @@ import { applyPartnerScope } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
-import { awardDealWinPoints } from "@/lib/rewards";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
@@ -623,8 +622,6 @@ function DealsPage() {
   const selectedDealCollaboratorEditingLocked = selectedDeal
     ? isDealCollaboratorEditingLocked(selectedDeal)
     : false;
-  const selectedDealCollaboratorsForPayout =
-    selectedDeal && selectedDealCollaborators.length > 0 ? selectedDealCollaborators : [];
 
   useEffect(() => {
     if (!selectedDeal) {
@@ -1523,23 +1520,9 @@ function DealsPage() {
       details: `${selectedDeal.product} moved to ${stage}`,
       severity: "low",
     });
-    if (stage === "won") {
-      try {
-        await awardDealWinPoints(supabase, {
-          dealId: selectedDeal.id,
-          accountName: selectedDeal.account_name,
-          product: selectedDeal.product,
-          dealAmount: selectedDeal.amount,
-          rewardRatePercent: Number(selectedDeal.reward_rate_percent) || 5,
-          collaborators: selectedDealCollaboratorsForPayout,
-          fallbackUserId: selectedDeal.user_id,
-          partnerId: selectedDeal.partner_id,
-          actorId: profile?.id ?? null,
-        });
-      } catch (error) {
-        console.error("Failed to record reward points for deal win", error);
-      }
-    }
+    // Reward points are awarded when the PO review reaches its approved
+    // terminal state (outcome-review-commands.server.ts's approvePO), not
+    // when the pipeline stage merely reaches "won" — product.md §15.11.
   };
 
   const closeAs = async (status: "won" | "lost") => {
@@ -1595,23 +1578,9 @@ function DealsPage() {
           : `${selectedDeal.product} closed lost`,
       severity: status === "won" ? "medium" : "low",
     });
-    if (status === "won") {
-      try {
-        await awardDealWinPoints(supabase, {
-          dealId: selectedDeal.id,
-          accountName: selectedDeal.account_name,
-          product: selectedDeal.product,
-          dealAmount: selectedDeal.amount,
-          rewardRatePercent: Number(selectedDeal.reward_rate_percent) || 5,
-          collaborators: selectedDealCollaboratorsForPayout,
-          fallbackUserId: selectedDeal.user_id,
-          partnerId: selectedDeal.partner_id,
-          actorId: profile?.id ?? null,
-        });
-      } catch (error) {
-        console.error("Failed to record reward points for deal win", error);
-      }
-    }
+    // Reward points are awarded when the PO review reaches its approved
+    // terminal state (outcome-review-commands.server.ts's approvePO), not
+    // when the deal is merely closed won — product.md §15.11.
   };
 
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);

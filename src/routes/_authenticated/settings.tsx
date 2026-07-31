@@ -327,25 +327,33 @@ function SettingsPage() {
         countsLoading={countsLoading}
       />
 
-      <SectionBlock
-        title={SECTION_META.governance.title}
-        description={SECTION_META.governance.description}
-        icon={SECTION_META.governance.icon}
-        datasets={groupedDatasets.governance}
-        scope={scope}
-        counts={counts}
-        countsLoading={countsLoading}
-      />
+      {/* product.md §16.4: "Partner-facing Settings do not include ...
+          Governance exports; Configuration exports" — gated to super_admin
+          rather than relying on per-dataset visibleTo, so a partner role
+          never sees these section headers at all, even empty. */}
+      {role === "super_admin" && (
+        <>
+          <SectionBlock
+            title={SECTION_META.governance.title}
+            description={SECTION_META.governance.description}
+            icon={SECTION_META.governance.icon}
+            datasets={groupedDatasets.governance}
+            scope={scope}
+            counts={counts}
+            countsLoading={countsLoading}
+          />
 
-      <SectionBlock
-        title={SECTION_META.configuration.title}
-        description={SECTION_META.configuration.description}
-        icon={SECTION_META.configuration.icon}
-        datasets={groupedDatasets.configuration}
-        scope={scope}
-        counts={counts}
-        countsLoading={countsLoading}
-      />
+          <SectionBlock
+            title={SECTION_META.configuration.title}
+            description={SECTION_META.configuration.description}
+            icon={SECTION_META.configuration.icon}
+            datasets={groupedDatasets.configuration}
+            scope={scope}
+            counts={counts}
+            countsLoading={countsLoading}
+          />
+        </>
+      )}
 
       {role === "super_admin" && (
         <>

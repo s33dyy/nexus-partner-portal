@@ -396,7 +396,11 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
     table: "portal_team_members",
     label: "Team members",
     description: "Partner team records across the workspace.",
-    group: "governance",
+    // Genuinely operational, company-scoped data (this dataset backs
+    // /partner/team's own export) — not an administrative/governance
+    // record, so it must not put a Governance section on partner-facing
+    // Settings (product.md §16.4 forbids that regardless of scoping).
+    group: "operational",
     filenameStem: "livey-team-members",
     visibleTo: ADMIN_ROLES,
     routePath: "/partner/team",
@@ -462,7 +466,10 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
     description: "Published portal announcements and media captions.",
     group: "governance",
     filenameStem: "livey-news-posts",
-    visibleTo: ADMIN_ROLES,
+    // Bulk export of the global published-content feed is a LIVEY content-
+    // administration action, not partner-operational data — product.md
+    // §16.4 forbids any Governance export on partner-facing Settings.
+    visibleTo: SUPER_ADMIN_ONLY,
     routePath: "/admin/news",
     scopeMode: "global",
     columns: [
