@@ -23,7 +23,7 @@ import {
   requestReopen,
 } from "@/integrations/local/ticket-commands";
 import { formatDateTimeLabel } from "@/lib/date-utils";
-import { applyPartnerScope } from "@/lib/partner-scope";
+import { applyPartnerScope, hasSupportScopeBypass } from "@/lib/partner-scope";
 import { type SupportTicketCommentRecord, type SupportTicketRecord } from "@/lib/portal-records";
 
 export const Route = createFileRoute("/_authenticated/support")({
@@ -31,7 +31,7 @@ export const Route = createFileRoute("/_authenticated/support")({
 });
 
 function SupportPage() {
-  const { profile, hasRole } = useAuth();
+  const { profile, hasRole, roleKey, assignment } = useAuth();
   useRequireAccess("partial");
 
   const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
@@ -71,6 +71,7 @@ function SupportPage() {
         partnerId: profile?.partner_id ?? null,
         userId: profile?.id ?? null,
         fallbackColumn: "created_by",
+        bypassOwnershipFilter: hasSupportScopeBypass(roleKey, assignment?.geographyCeilingNodeId),
       });
 
       const { data, error } = await ticketQuery;
@@ -90,7 +91,7 @@ function SupportPage() {
 
   useEffect(() => {
     void loadTickets();
-  }, [hasRole, profile?.id, profile?.partner_id]);
+  }, [hasRole, profile?.id, profile?.partner_id, roleKey, assignment?.geographyCeilingNodeId]);
 
   const selectedTicket = useMemo(
     () => tickets.find((ticket) => ticket.id === selectedId) ?? null,

@@ -40,6 +40,49 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// supabase.from("assignments").select("*") returns the raw Postgres row —
+// snake_case columns (role_key, geography_ceiling_node_id, ...) — but
+// AssignmentRecord is camelCase. A bare `as AssignmentRecord` cast (no
+// runtime mapping) left every compound-word field silently undefined:
+// roleKey, geographyCeilingNodeId, partnerId, isSeed, etc. Single-word
+// fields like status/version happened to match either way, which is why
+// this went unnoticed — anything gating on assignment.roleKey (this file's
+// own roleKey export, app-shell's role label, every LIVEY-internal-role
+// scope-bypass check added this session) silently saw `undefined` instead
+// of e.g. "rm", collapsing straight to the most restrictive branch.
+function mapAssignmentRow(row: Record<string, unknown>): AssignmentRecord {
+  return {
+    assignmentId: String(row.assignment_id),
+    userId: String(row.user_id),
+    tenantId: String(row.tenant_id),
+    organizationTenantId: String(row.organization_tenant_id),
+    roleKey: row.role_key as AssignmentRecord["roleKey"],
+    teamDomain: row.team_domain as AssignmentRecord["teamDomain"],
+    geographyCeilingNodeId: String(row.geography_ceiling_node_id),
+    partnerId: row.partner_id == null ? null : String(row.partner_id),
+    accountId: row.account_id == null ? null : String(row.account_id),
+    portfolioId: row.portfolio_id == null ? null : String(row.portfolio_id),
+    queueId: row.queue_id == null ? null : String(row.queue_id),
+    status: row.status as AssignmentRecord["status"],
+    validFrom: String(row.valid_from),
+    validTo: row.valid_to == null ? null : String(row.valid_to),
+    managerAssignmentId:
+      row.manager_assignment_id == null ? null : String(row.manager_assignment_id),
+    source: String(row.source),
+    approverUserId: row.approver_user_id == null ? null : String(row.approver_user_id),
+    predecessorAssignmentId:
+      row.predecessor_assignment_id == null ? null : String(row.predecessor_assignment_id),
+    successorAssignmentId:
+      row.successor_assignment_id == null ? null : String(row.successor_assignment_id),
+    revokedAt: row.revoked_at == null ? null : String(row.revoked_at),
+    revocationReason: row.revocation_reason == null ? null : String(row.revocation_reason),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    version: Number(row.version),
+    isSeed: Boolean(row.is_seed),
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -73,7 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       getMyCapabilities().catch(() => null),
     ]);
     setProfile((prof as Profile | null) ?? null);
-    const typedAssignments = ((assignmentRows ?? []) as AssignmentRecord[]) ?? [];
+    const typedAssignments = ((assignmentRows ?? []) as Record<string, unknown>[]).map(
+      mapAssignmentRow,
+    );
     setRoles(((roleRows ?? []) as { role: AppRole }[]).map((r) => r.role));
     const assignmentRow = typedAssignments[0] ?? null;
     setAssignment(assignmentRow);

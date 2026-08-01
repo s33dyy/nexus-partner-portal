@@ -450,6 +450,67 @@ test("domain_activity_events reads are super-admin only, matching portal_audit_e
   ).rejects.toThrow("Access denied");
 });
 
+test("support_ticket_comments' is_internal filter actually reaches SQL execution — TABLE_COLUMNS must list it", async () => {
+  // applyTablePolicy alone (the other test below) only proves the filter
+  // *object* gets appended — it never runs the SQL-building layer that
+  // validates each filter's column against TABLE_COLUMNS. is_internal was
+  // added to table-policy's filtering logic without being added to that
+  // allowlist in livey-service.server.ts, so every non-support/non-admin
+  // viewer's ticket-thread load threw "Unsupported filter column:
+  // is_internal" in production — this is the integration test that catches
+  // that class of gap.
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "tickets",
+            can_create: true,
+            can_read: true,
+            can_update: true,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (String(sql).includes("FROM support_tickets")) {
+      return {
+        rows: [{ id: "ticket-1", partner_id: "partner-a", created_by: "user-a" }],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      {
+        table: "support_ticket_comments",
+        operation: "select",
+        filters: [{ column: "ticket_id", value: "ticket-1", operator: "eq" }],
+      },
+      {
+        userId: "user-a",
+        roles: ["partner_admin"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
+      },
+    );
+    expect(result.error).toBeNull();
+    expect(Array.isArray(result.data)).toBe(true);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
 test("support_ticket_comments hides internal notes from partner roles but not Support/Super Admin", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
   const { pool } = await import("@/server/postgres.server");
@@ -596,6 +657,240 @@ test("support_tickets reads are unscoped for a globally-ceilinged LIVEY-internal
     expect(narrowCeilingRead.filters).toEqual([
       { column: "created_by", value: "support-user", operator: "eq" },
     ]);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("portal_team_members reads for a caller with no company_name (any LIVEY-internal role) return an empty scope, not Access denied", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  // Before this fix, this threw — which took down deals.tsx's entire
+  // Promise.all load for every RM/PAM/KAM/ISR/Support user, since that
+  // page unconditionally queries portal_team_members alongside deals.
+  const read = await applyTablePolicy(
+    { table: "portal_team_members", operation: "select", filters: [] },
+    {
+      userId: "rm-user-1",
+      roles: ["rm"],
+      partnerId: null,
+      companyName: null,
+      hasGovernedContext: true,
+      governedRoleKey: "rm",
+    },
+  );
+  expect(read.filters).toEqual([
+    { column: "company_name", value: "__no_company_scope__", operator: "eq" },
+  ]);
+});
+
+test("portal_deals reads are unscoped by ownership for RM/PAM/KAM/ISR/Support — geography, not self-created-only", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  for (const role of ["rm", "pam", "kam", "isr", "livey_support"] as const) {
+    const read = await applyTablePolicy(
+      { table: "portal_deals", operation: "select", filters: [] },
+      {
+        userId: "internal-user",
+        roles: [role],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: role,
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    // No user_id/partner_id ownership filter — appendGeographyFilter (run
+    // separately, after applyTablePolicyInner) is what narrows this by
+    // region, not this function.
+    expect(read.filters).toEqual([]);
+  }
+});
+
+test("portal_deals reads stay partner-scoped for partner_admin/partner_user, and self-scoped for restricted_distributor via their partnerId", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const partnerRead = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    {
+      userId: "partner-user-1",
+      roles: ["partner_admin"],
+      partnerId: "partner-a",
+      companyName: "Acme",
+      hasGovernedContext: true,
+      governedRoleKey: "partner_admin",
+    },
+  );
+  expect(partnerRead.filters).toEqual([
+    { column: "partner_id", value: "partner-a", operator: "eq" },
+  ]);
+
+  // restricted_distributor always has a real partnerId (they're tenant-
+  // scoped, not internal), so they never reach the LIVEY-internal branch —
+  // still whole-tenant, not tag-scoped (§2.4/8.7a — a separate, still-open
+  // finding about the write/command layer, not this read-scope fix).
+  const distributorRead = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    {
+      userId: "distributor-1",
+      roles: ["restricted_distributor"],
+      partnerId: "partner-a",
+      companyName: null,
+      hasGovernedContext: true,
+      governedRoleKey: "restricted_distributor",
+    },
+  );
+  expect(distributorRead.filters).toEqual([
+    { column: "partner_id", value: "partner-a", operator: "eq" },
+  ]);
+});
+
+test("tasks reads are scoped to creator OR assignee for LIVEY-internal roles, not creator-only", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const read = await applyTablePolicy(
+    { table: "tasks", operation: "select", filters: [] },
+    {
+      userId: "rm-user-1",
+      roles: ["rm"],
+      partnerId: null,
+      companyName: null,
+      hasGovernedContext: true,
+      governedRoleKey: "rm",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    },
+  );
+  expect(read.filters).toEqual([]);
+  expect(read.scopeAnyColumnEquals).toEqual({
+    columns: ["creator_id", "assignee_id"],
+    value: "rm-user-1",
+  });
+});
+
+test("tasks reads for queryTableWithAuthContext generate a real (creator_id = $1 OR assignee_id = $1) SQL clause", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  const observed: Array<{ sql: string; params: unknown[] }> = [];
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    observed.push({ sql: String(sql), params });
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "tasks",
+            can_create: true,
+            can_read: true,
+            can_update: true,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      { table: "tasks", operation: "select" },
+      {
+        userId: "rm-user-1",
+        roles: ["rm"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "rm",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    expect(result.error).toBeNull();
+    const tasksQuery = observed.find((entry) => entry.sql.includes('FROM "tasks"'));
+    expect(tasksQuery?.sql).toContain('WHERE ("creator_id" = $1 OR "assignee_id" = $1)');
+    expect(tasksQuery?.params).toEqual(["rm-user-1"]);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("domain_activity_events allows a non-super-admin to read events for a specific deal they can already see", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM portal_deals")) {
+      return {
+        rows: [{ id: "deal-1", partner_id: "partner-a", user_id: null }],
+        rowCount: 1,
+      } as never;
+    }
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: [
+          {
+            feature_key: "audit",
+            can_create: false,
+            can_read: true,
+            can_update: false,
+            can_delete: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const auth = {
+      userId: "partner-user-1",
+      roles: ["partner_admin"],
+      partnerId: "partner-a",
+      companyName: "Acme",
+      hasGovernedContext: true,
+      governedRoleKey: "partner_admin" as const,
+    };
+
+    const allowed = await applyTablePolicy(
+      {
+        table: "domain_activity_events",
+        operation: "select",
+        filters: [
+          { column: "subject_type", value: "deal", operator: "eq" },
+          { column: "subject_id", value: "deal-1", operator: "eq" },
+        ],
+      },
+      auth,
+    );
+    expect(allowed.filters).toEqual([
+      { column: "subject_type", value: "deal", operator: "eq" },
+      { column: "subject_id", value: "deal-1", operator: "eq" },
+    ]);
+
+    // A different partner's deal: assertLinkedDealAccess denies.
+    await expect(
+      applyTablePolicy(
+        {
+          table: "domain_activity_events",
+          operation: "select",
+          filters: [
+            { column: "subject_type", value: "deal", operator: "eq" },
+            { column: "subject_id", value: "deal-1", operator: "eq" },
+          ],
+        },
+        { ...auth, partnerId: "partner-b" },
+      ),
+    ).rejects.toThrow("Access denied");
+
+    // No subject_id filter at all (e.g. the dashboard's broad recent-
+    // activity feed) still denies for non-super-admin — that broader case
+    // remains unscoped/unbuilt, not silently widened by this fix.
+    await expect(
+      applyTablePolicy({ table: "domain_activity_events", operation: "select", filters: [] }, auth),
+    ).rejects.toThrow("Access denied");
   } finally {
     pool.query = originalQuery as typeof pool.query;
   }

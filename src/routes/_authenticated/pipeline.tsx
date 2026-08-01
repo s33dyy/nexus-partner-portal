@@ -30,7 +30,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
-import { applyPartnerScope } from "@/lib/partner-scope";
+import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
@@ -62,7 +62,7 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 ];
 
 function PipelinePage() {
-  const { profile, hasRole } = useAuth();
+  const { profile, hasRole, roleKey } = useAuth();
   const access = useRequireAccess("full");
   const { selectedRegion } = useRegionFilter();
 
@@ -88,6 +88,7 @@ function PipelinePage() {
         isSuperAdmin: hasRole("super_admin"),
         partnerId: profile?.partner_id ?? null,
         userId: profile?.id ?? null,
+        bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
       const [dealRes, collaboratorRes] = await Promise.all([
@@ -132,7 +133,7 @@ function PipelinePage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id]);
+  }, [hasRole, profile?.id, profile?.partner_id, roleKey]);
 
   useEffect(() => {
     void load();

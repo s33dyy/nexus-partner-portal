@@ -74,6 +74,10 @@ export type TableQuery = {
   // omitting password_hash) actually gets it left out now, instead of the
   // server always returning every column regardless of what was asked for.
   select?: string;
+  // Set only by the policy layer (never client-supplied) when a single
+  // ownership column can't express a read scope — e.g. tasks visible to
+  // whoever created OR was assigned them.
+  scopeAnyColumnEquals?: { columns: [string, string]; value: string };
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
@@ -616,6 +620,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "author_name",
     "author_role",
     "body",
+    "is_internal",
     "is_seed",
     "created_at",
   ],
@@ -972,6 +977,34 @@ export function buildSelectColumnsSql(select: string | undefined, columns: strin
   return requested.map(quoteIdent).join(", ");
 }
 
+// Appends the policy layer's "creator OR assignee" style read scope (see
+// TableQuery.scopeAnyColumnEquals) on top of whatever regular filters were
+// already built — this is never client-supplied, only ever set by
+// applyTablePolicyInner, but the column names are still validated against
+// the table's own allowlist as defense in depth.
+function appendAnyColumnScope(
+  whereSql: string,
+  whereParams: unknown[],
+  scope: { columns: [string, string]; value: string } | undefined,
+  columns: string[],
+): { sql: string; params: unknown[] } {
+  if (!scope) {
+    return { sql: whereSql, params: whereParams };
+  }
+  for (const column of scope.columns) {
+    if (!columns.includes(column)) {
+      throw new Error(`Unsupported scope column: ${column}`);
+    }
+  }
+  const paramIndex = whereParams.length + 1;
+  const [columnA, columnB] = scope.columns;
+  const condition = `(${quoteIdent(columnA)} = $${paramIndex} OR ${quoteIdent(columnB)} = $${paramIndex})`;
+  return {
+    sql: whereSql ? `${whereSql} AND ${condition}` : ` WHERE ${condition}`,
+    params: [...whereParams, scope.value],
+  };
+}
+
 function serializeDbValue<T>(value: T): T {
   if (value instanceof Date) {
     return value.toISOString() as T;
@@ -1064,10 +1097,16 @@ export async function queryTableWithAuthContext(
 
   if (policyQuery.operation === "select") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
+    const { sql: scopedWhereSql, params: scopedParams } = appendAnyColumnScope(
+      whereSql,
+      whereParams,
+      policyQuery.scopeAnyColumnEquals,
+      columns,
+    );
     const selectSql = buildSelectColumnsSql(policyQuery.select, columns);
     const result = await pool.query(
-      `SELECT ${selectSql} FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}${limitSql}`,
-      whereParams,
+      `SELECT ${selectSql} FROM ${quoteIdent(policyQuery.table)}${scopedWhereSql}${orderSql}${limitSql}`,
+      scopedParams,
     );
     const data = result.rows.map((row) => serializeDbValue(row));
     return {
@@ -1083,9 +1122,15 @@ export async function queryTableWithAuthContext(
 
   if (policyQuery.operation === "count") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
-    const result = await pool.query(
-      `SELECT count(*) AS count FROM ${quoteIdent(policyQuery.table)}${whereSql}`,
+    const { sql: scopedWhereSql, params: scopedParams } = appendAnyColumnScope(
+      whereSql,
       whereParams,
+      policyQuery.scopeAnyColumnEquals,
+      columns,
+    );
+    const result = await pool.query(
+      `SELECT count(*) AS count FROM ${quoteIdent(policyQuery.table)}${scopedWhereSql}`,
+      scopedParams,
     );
     return {
       data: result.rows[0]?.count ?? 0,

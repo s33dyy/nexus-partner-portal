@@ -84,11 +84,13 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.2 Ch.5 5b (§5.5/§5.6) — LIVEY-internal roles can only see deals/tasks they personally created, not their authorised scope
+### 2.2 Ch.5 5b (§5.5/§5.6) — LIVEY-internal roles can only see deals/tasks they personally created, not their authorised scope — **fixed 2026-08-01**
 
 **Spec (§5.5/§5.6):** The permission matrix gives RM "S" (authorised assignment scope), PAM/KAM "Assigned/T", and ISR "T" for View Deal — visibility must be the intersection of active assignment, geography scope, and participant/tag relationship, never collapsed to self-created-only.
 
 **Shipped:** For portal_deals, getScopeSpec (src/server/table-policy.server.ts:361-368) returns `{column: partner_id}` when auth.partnerId is set, else `{column: user_id, value: auth.userId}` — LIVEY-internal roles (rm/pam/kam/isr/livey_support) have no partnerId, so they fall into the user_id=self branch, and this filter is applied unconditionally at :710-765 with no analogous carve-out to the one added for support_tickets (hasGlobalLiveySupportAccess, used only at :718 and :543, table === "support_tickets" only). appendGeographyFilter (:945-963) only ADDS a country-in-ceiling filter on top of this, it does not replace it. The two primary UI pages that list deals — deals.tsx (src/routes/_authenticated/deals.tsx:339-348) and pipeline.tsx (src/routes/_authenticated/pipeline.tsx:83-89) — both also apply the identical client-side restriction via applyPartnerScope (src/lib/partner-scope.ts:16-24: `.eq(fallbackColumn ?? "user_id", input.userId)` whenever partnerId is absent). Net effect: an RM/PAM/KAM/ISR/Support user can only ever see deals they personally created, never deals in their region, assigned Partner/Customer, or explicitly tagged to them — the opposite of the S/Assigned-T/T grants the matrix requires. The code's own comment at :168-178 acknowledges this exact class of bug was fixed only for support_tickets and "likely exists on other ownership-scoped tables... needs its own review per table" — portal_deals (and tasks, same getScopeSpec pattern at :406-414) is that unreviewed table.
+
+**Fix:** Added `isLiveyInternalRole(auth)` (rm/pam/kam/isr/livey_support only, never restricted_distributor, who has a real partnerId and stays tenant-scoped). For `portal_deals` reads, this bypasses the ownership filter entirely and lets the existing `appendGeographyFilter`/`GEOGRAPHY_SCOPED_TABLES` machinery do the real narrowing by the caller's geography ceiling — a deliberate interim step (the spec's fuller PAM/KAM/ISR model is participant-tag-based per §5.7, but that auto-tagging engine doesn't exist yet per §5c/§9g, still open). Also fixed the identical, previously-undiscovered client-side re-narrowing bug: `deals.tsx`/`pipeline.tsx`'s `applyPartnerScope(...)` call was applying the OLD self-only filter on top of an already-correct server response, silently zeroing it back out — added a `bypassOwnershipFilter` flag, computed client-side via a new `hasDealsScopeBypass(roleKey)` helper. While tracing this found the SAME class of client-side re-narrowing bug already present for `support_tickets` (from an earlier session's server-side fix) — `support.tsx` still applied its own stale self-only filter; fixed with an equivalent `hasSupportScopeBypass` helper matching the server's `hasGlobalLiveySupportAccess` (Global-ceiling-only) condition exactly. See `docs/implementation-status.md` for three further bugs discovered and fixed while verifying this end-to-end (a broken client-side assignment-row field mapping, `portal_team_members` throwing "Access denied" for any caller with no company, and `support_ticket_comments.is_internal` missing from the server's column allowlist).
 
 ---
 
@@ -148,11 +150,13 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.10 Ch.10 10b (§10.3) — "My Tasks" scopes by creator, not assignee — tasks assigned to you are invisible on your own page
+### 2.10 Ch.10 10b (§10.3) — "My Tasks" scopes by creator, not assignee — tasks assigned to you are invisible on your own page — **fixed 2026-08-01**
 
 **Spec (§10.3):** "My Tasks" is the primary task workspace, built around tasks assigned to the current user (Today/Upcoming/Overdue/Blocked/Assigned by Me/Completed).
 
 **Shipped:** The read-scope filter for the "tasks" table (getScopeSpec, src/server/table-policy.server.ts:406-414) is `partner_id = actor's partner` when the actor has a partnerId, else `creator_id = actor's userId` — assignee_id is never used as a scope column anywhere in table-policy.server.ts (confirmed by grep). tasks.tsx's only query (src/routes/_authenticated/tasks.tsx:84-99, `supabase.from("tasks").select("*")`) relies solely on this scope. Consequence: for every LIVEY-internal role without a partnerId (rm, pam, kam, isr, livey_support — i.e. everyone except super_admin, who bypasses scope entirely at table-policy.server.ts:710-712), a task assigned to them by someone else (a different creator_id) is completely invisible on their own "My Tasks" page; they only ever see tasks they personally created. This breaks the core premise of the page for the exact roles the blueprint's stage-generated tasks target (e.g. "acknowledge PAM/KAM assignment" in §10.4's table).
+
+**Fix:** A single ownership column can't express "creator OR assignee", so added a new, narrowly-scoped mechanism (`scopeAnyColumnEquals` on the query object, purpose-built rather than a generic raw-SQL escape hatch) that the policy layer sets for LIVEY-internal `tasks` reads and the SQL-building layer in `livey-service.server.ts` turns into `("creator_id" = $1 OR "assignee_id" = $1)`. `tasks.tsx` needed no client-side change — unlike deals/support, it has no `applyPartnerScope` client-side filter, so the server fix alone was sufficient. Verified end-to-end: created a real governed `rm` test user locally, assigned them a task created by a different user, confirmed it appeared under "My Tasks" (previously invisible).
 
 ---
 
@@ -250,11 +254,13 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.22 Ch.18 18e (§18.8 (Audit versus Activity — Activity audience)) — Activity Timeline is super-admin-only and silently renders empty for every other role
+### 2.22 Ch.18 18e (§18.8 (Audit versus Activity — Activity audience)) — Activity Timeline is super-admin-only and silently renders empty for every other role — **partially fixed 2026-08-01**
 
 **Spec (§18.8 (Audit versus Activity — Activity audience)):** Table §18.8 explicitly differentiates Audit Event audience ('Privileged and scope-authorised auditors') from Activity Event audience ('Users authorised to see the subject') — an Activity Event must be visible to anyone who can see the record it's attached to, not just privileged auditors.
 
 **Shipped:** src/server/table-policy.server.ts lines 884-892 gates every select/count on domain_activity_events (the Activity Event table) behind `if (!superAdmin) throw new Error('Access denied')`, with the code's own comment acknowledging this is a placeholder ('until it lands, apply the same super-admin-only reads... rather than ship an under-scoped rule'). src/components/deal-activity-timeline.tsx (rendered on every deal detail page, deals.tsx:2423) queries this table directly via the generic client path (`supabase.from('domain_activity_events')`, lines 28-34) and silently swallows the resulting Access-Denied error into an empty list (`catch { setEvents([]); }`). src/routes/_authenticated/dashboard.tsx lines 189-193 does the same for the dashboard's recent-activity feed, also silently absorbed via Promise.allSettled. Net effect: the Activity Timeline and dashboard activity feed are completely non-functional (permanently empty, no error shown) for every role except super_admin — including partner_admin/partner_user viewing their own deal, and every internal rm/pam/kam/isr/livey_support role.
+
+**Fix (partial):** Handled the one shape actually reachable from the shipped UI — `DealActivityTimeline` always queries with an exact `subject_type="deal"` + `subject_id=<dealId>` filter pair for one already-open deal. When both are present and `subject_type === "deal"`, the policy layer now reuses the existing `assertLinkedDealAccess` check (the same one `portal_deal_collaborators`/`deal_line_items` already use) instead of requiring super_admin. Deliberately did **not** attempt the general case (`domain_activity_events` spans deal/task/ticket/user/... subject types with no single owning column) — the dashboard's broad, unfiltered recent-activity feed (no subject_id at all) still denies for non-super-admin and remains a real, separate open gap, same as the code's own comment already flagged.
 
 ---
 

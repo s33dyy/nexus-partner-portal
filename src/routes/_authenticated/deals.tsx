@@ -49,7 +49,7 @@ import {
   markDealWon,
   moveDealStageForward,
 } from "@/integrations/local/deal-commands";
-import { applyPartnerScope } from "@/lib/partner-scope";
+import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
@@ -325,7 +325,7 @@ function DealsPage() {
     null,
   );
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const { profile, hasRole, can } = useAuth();
+  const { profile, hasRole, can, roleKey } = useAuth();
   const canCreateDeals = can("deals", "create");
   const { selectedRegion } = useRegionFilter();
   useRequireAccess("full");
@@ -345,6 +345,7 @@ function DealsPage() {
         isSuperAdmin: hasRole("super_admin"),
         partnerId: profile?.partner_id ?? null,
         userId: profile?.id ?? null,
+        bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
       const [dealResult, collaboratorResult, memberResult] = await Promise.all([
@@ -430,7 +431,7 @@ function DealsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.company_name, profile?.id, profile?.partner_id]);
+  }, [hasRole, profile?.company_name, profile?.id, profile?.partner_id, roleKey]);
 
   useEffect(() => {
     void load();

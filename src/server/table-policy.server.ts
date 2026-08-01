@@ -25,6 +25,10 @@ export type TableQueryLike = {
   values?: Record<string, unknown> | Array<Record<string, unknown>>;
   single?: "single" | "maybeSingle" | null;
   limit?: number;
+  // A read-only-scope OR condition the policy layer itself computes — never
+  // client-supplied. Used where a single ownership column can't express the
+  // grant (e.g. tasks: visible if you created OR were assigned it).
+  scopeAnyColumnEquals?: { columns: [string, string]; value: string };
 };
 
 export type TablePolicyAuthContext = {
@@ -188,6 +192,21 @@ function hasGlobalLiveySupportAccess(auth: TablePolicyAuthContext) {
     return false;
   }
   return auth.geographyCeilingNodeId === GOVERNANCE_GEOGRAPHY_NODE_IDS.global;
+}
+
+const LIVEY_INTERNAL_ROLES = new Set<RoleKey>(["rm", "pam", "kam", "isr", "livey_support"]);
+
+/** True for rm/pam/kam/isr/livey_support (never restricted_distributor, who
+ * has a real partnerId and is scoped by tenant instead — see §2.4/8.7a,
+ * tracked separately). These roles have no partnerId of their own, so
+ * getScopeSpec's partner_id-or-self fallback collapses them to
+ * "self-created only" — the same class of bug hasGlobalLiveySupportAccess
+ * fixed for support_tickets, generalised to the other ownership-scoped
+ * tables product.md §5.5/§5.6 grants them an authorised-scope view of. */
+function isLiveyInternalRole(auth: TablePolicyAuthContext): boolean {
+  if (auth.partnerId) return false;
+  const role = auth.governedRoleKey;
+  return !!role && LIVEY_INTERNAL_ROLES.has(role);
 }
 
 function isGenericSuperAdmin(auth: GenericTableAuthContext) {
@@ -720,6 +739,61 @@ async function applyTablePolicyInner(
       return { ...query, filters };
     }
 
+    // §5.5/§5.6: RM/PAM/KAM/ISR/Support get an "authorised scope" view of
+    // deals, not "only what I personally created". Bypass the ownership
+    // filter here and let appendGeographyFilter (called after this
+    // function returns, for every table in GEOGRAPHY_SCOPED_TABLES) do the
+    // real narrowing by the caller's geography ceiling — a Global ceiling
+    // sees every deal, a narrower one only deals in-region. This is a
+    // deliberate interim step: the spec's fuller PAM/KAM/ISR model is
+    // participant-tag-based (§5.7), but that tagging is not automatically
+    // populated yet (§5c/§9g, still open) — geography scope is strictly
+    // more correct than today's self-created-only bug without requiring
+    // that unbuilt tagging engine first.
+    if (
+      query.table === "portal_deals" &&
+      (query.operation === "select" || query.operation === "count") &&
+      isLiveyInternalRole(auth)
+    ) {
+      return { ...query, filters };
+    }
+
+    // §10.3: "My Tasks" must show tasks assigned to the current user, not
+    // only ones they created — the two are tracked in separate columns.
+    // A single ownership column can't express "creator OR assignee", so
+    // this bypasses the normal appendScopeFilter path with a dedicated
+    // OR-of-two-columns scope the SQL layer applies afterward.
+    if (
+      query.table === "tasks" &&
+      (query.operation === "select" || query.operation === "count") &&
+      isLiveyInternalRole(auth) &&
+      auth.userId
+    ) {
+      return {
+        ...query,
+        filters,
+        scopeAnyColumnEquals: { columns: ["creator_id", "assignee_id"], value: auth.userId },
+      };
+    }
+
+    // portal_team_members is scoped by company_name — a partner-side
+    // concept a LIVEY-internal caller's profile never has. That isn't a
+    // security violation (there's no company roster to leak), just an
+    // empty one; deals.tsx's team-member dropdown query unconditionally
+    // runs for every viewer, so throwing "Access denied" here previously
+    // took down the entire Deals page load for every RM/PAM/KAM/ISR/
+    // Support user via its shared Promise.all.
+    if (
+      query.table === "portal_team_members" &&
+      (query.operation === "select" || query.operation === "count") &&
+      scopeSpec.value == null
+    ) {
+      return {
+        ...query,
+        filters: appendScopeFilter(filters, "company_name", "__no_company_scope__"),
+      };
+    }
+
     if (scopeSpec.value == null) {
       throw new Error("Access denied");
     }
@@ -875,18 +949,29 @@ async function applyTablePolicyInner(
 
   // domain_activity_events spans every subject type (deal, task, ticket,
   // user, ...) with no single owning column, unlike portal_audit_events'
-  // sibling block above. A precise per-record scope (only events on records
-  // the caller can already open — product.md §5.6/§9.17) is a larger piece
-  // of work; until it lands, apply the same super-admin-only reads as
-  // portal_audit_events rather than ship an under-scoped rule. Writes only
-  // ever happen server-side inside domain command modules (deal-commands.
-  // server.ts etc.), never through this generic client path.
+  // sibling block above. A precise per-record scope for every subject_type
+  // (product.md §5.6/§9.17/§18.8: visible to "users authorised to see the
+  // subject") is a larger piece of work; until it lands, apply the same
+  // super-admin-only reads as portal_audit_events rather than ship an
+  // under-scoped rule — EXCEPT the one shape actually reachable from the
+  // shipped UI today: DealActivityTimeline always queries with an exact
+  // subject_type="deal" + subject_id=<dealId> filter pair for one already-
+  // open deal, which reuses the existing linked-deal access check rather
+  // than needing a generic per-row scope. Writes only ever happen
+  // server-side inside domain command modules (deal-commands.server.ts
+  // etc.), never through this generic client path.
   if (query.table === "domain_activity_events") {
     if (query.operation === "select" || query.operation === "count") {
-      if (!superAdmin) {
-        throw new Error("Access denied");
+      if (superAdmin) {
+        return { ...query, filters };
       }
-      return { ...query, filters };
+      const subjectType = extractFilterValue(filters, "subject_type");
+      const subjectId = extractFilterValue(filters, "subject_id");
+      if (subjectType === "deal" && subjectId) {
+        await assertLinkedDealAccess(subjectId, auth);
+        return { ...query, filters };
+      }
+      throw new Error("Access denied");
     }
     throw new Error("Access denied");
   }
