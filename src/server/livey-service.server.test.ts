@@ -1,5 +1,40 @@
 import { expect, test } from "bun:test";
 
+test("sessionExpiresAt gives super_admin/partner_admin/LIVEY-internal roles the stricter 12h lifetime", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { sessionExpiresAt } = await import("@/server/livey-service.server");
+
+  const now = Date.now();
+  for (const roles of [["super_admin"], ["partner_admin"], ["rm"], ["partner_admin", "rm"]]) {
+    const expiresAt = sessionExpiresAt(roles).getTime();
+    const hours = (expiresAt - now) / (60 * 60 * 1000);
+    expect(hours).toBeGreaterThan(11.9);
+    expect(hours).toBeLessThan(12.1);
+  }
+});
+
+test("sessionExpiresAt gives a caller whose sole role is partner_user the looser 24h lifetime", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { sessionExpiresAt } = await import("@/server/livey-service.server");
+
+  const now = Date.now();
+  const expiresAt = sessionExpiresAt(["partner_user"]).getTime();
+  const hours = (expiresAt - now) / (60 * 60 * 1000);
+  expect(hours).toBeGreaterThan(23.9);
+  expect(hours).toBeLessThan(24.1);
+});
+
+test("sessionExpiresAt defaults to the stricter 12h lifetime when no role is known", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { sessionExpiresAt } = await import("@/server/livey-service.server");
+
+  const now = Date.now();
+  const expiresAt = sessionExpiresAt([]).getTime();
+  const hours = (expiresAt - now) / (60 * 60 * 1000);
+  expect(hours).toBeGreaterThan(11.9);
+  expect(hours).toBeLessThan(12.1);
+});
+
 test("createDocumentDataUrl fetches raw Cloudinary PDFs from their stored secure URL", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
 

@@ -362,7 +362,7 @@ function ForgotForm() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
+    const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     setLoading(false);
@@ -370,14 +370,7 @@ function ForgotForm() {
       toast.error(error.message);
       return;
     }
-    if (data?.resetLink) {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(data.resetLink).catch(() => undefined);
-      }
-      toast.success("Reset link generated and copied to clipboard.");
-    } else {
-      toast.success("If that account exists, a reset link is on its way.");
-    }
+    toast.success("If that account exists, a reset link is on its way.");
   };
 
   return (

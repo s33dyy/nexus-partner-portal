@@ -646,7 +646,12 @@ const TABLE_COLUMNS: Record<string, string[]> = {
 };
 
 const SESSION_COOKIE = "livey_session";
-const SESSION_DAYS = 14;
+// §19.2: Super Admin, Partner Admin, and every LIVEY-internal role get the
+// stricter 12h absolute lifetime; only a caller whose sole role is
+// partner_user gets the looser 24h one. Unknown/no role falls back to the
+// stricter tier rather than the looser one.
+const INTERNAL_SESSION_HOURS = 12;
+const PARTNER_USER_SESSION_HOURS = 24;
 const RESET_TOKEN_MINUTES = 60;
 
 function assertTable(table: string): asserts table is keyof typeof TABLE_COLUMNS {
@@ -962,8 +967,17 @@ function toBoolean(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
-function sessionExpiresAt(): Date {
-  return new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+export function sessionExpiresAt(roles: readonly string[] = []): Date {
+  const hours =
+    roles.length > 0 && roles.every((role) => role === "partner_user")
+      ? PARTNER_USER_SESSION_HOURS
+      : INTERNAL_SESSION_HOURS;
+  return new Date(Date.now() + hours * 60 * 60 * 1000);
+}
+
+async function loadUserRoles(userId: string, client: Pick<PoolClient, "query"> = pool) {
+  const { rows } = await client.query(`SELECT role FROM user_roles WHERE user_id = $1`, [userId]);
+  return rows.map((row) => String((row as { role: string }).role));
 }
 
 function resetExpiresAt(): Date {
@@ -1476,8 +1490,9 @@ export async function signInWithPassword(email: string, password: string) {
     throw new Error("Invalid email or password");
   }
 
+  const roles = await loadUserRoles(profile.id);
   const token = createToken();
-  const expiresAt = sessionExpiresAt();
+  const expiresAt = sessionExpiresAt(roles);
   await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
     profile.id,
     hashSha256(token),
@@ -1525,7 +1540,7 @@ export async function signUpLocal(input: {
   await pool.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'partner_admin')`, [id]);
 
   const token = createToken();
-  const expiresAt = sessionExpiresAt();
+  const expiresAt = sessionExpiresAt(["partner_admin"]);
   await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
     id,
     hashSha256(token),
@@ -1842,26 +1857,33 @@ export async function updatePasswordFromSession(password: string) {
 }
 
 export async function requestPasswordReset(email: string) {
+  // Deliberately returns the same { ok: true } shape regardless of whether the
+  // account exists, and never puts the reset token/link in the response — a
+  // caller who can see either the account's existence or a working token can
+  // take the account over. No email transport is configured yet (see
+  // docs/implementation-status.md), so the link is logged server-side only;
+  // an operator with log access relays it out-of-band until real email
+  // delivery is wired up.
   const result = await pool.query(
-    `SELECT id, email, full_name FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
+    `SELECT id, email FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
     [email],
   );
-  const profile = result.rows[0] as { id: string; email: string; full_name: string } | undefined;
-  if (!profile) {
-    return { resetLink: null };
+  const profile = result.rows[0] as { id: string; email: string } | undefined;
+
+  if (profile) {
+    const token = createToken();
+    const expiresAt = resetExpiresAt();
+    await pool.query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+      [profile.id, hashSha256(token), expiresAt],
+    );
+    const origin = getRequestUrl().origin;
+    console.info(
+      `[password-reset] requested for ${profile.email}: ${origin}/reset-password?token=${token}`,
+    );
   }
 
-  const token = createToken();
-  const expiresAt = resetExpiresAt();
-  await pool.query(
-    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-    [profile.id, hashSha256(token), expiresAt],
-  );
-
-  const origin = getRequestUrl().origin;
-  return {
-    resetLink: `${origin}/reset-password?token=${token}`,
-  };
+  return { ok: true as const };
 }
 
 export async function completePasswordReset(token: string, password: string) {
@@ -1904,8 +1926,14 @@ export async function completePasswordReset(token: string, password: string) {
     tokenHash,
   ]);
 
+  // A password reset means any previously-issued session may have been
+  // obtained by whoever no longer has the (now-changed) password — revoke
+  // every prior session before issuing the fresh one below.
+  await revokeUserSessionsAndContexts({ userId: row.user_id, reason: "password_reset" });
+
+  const roles = await loadUserRoles(row.user_id);
   const sessionToken = createToken();
-  const expiresAt = sessionExpiresAt();
+  const expiresAt = sessionExpiresAt(roles);
   await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
     row.user_id,
     hashSha256(sessionToken),
@@ -1952,6 +1980,10 @@ export async function issueTemporaryPasswordForUser(userId: string) {
      WHERE id = $2`,
     [passwordHash, userId],
   );
+
+  // The user's old password no longer works; any session issued under it
+  // should not either.
+  await revokeUserSessionsAndContexts({ userId, reason: "admin_forced_password_reset" });
 
   return { temporaryPassword };
 }
@@ -2245,8 +2277,9 @@ export async function createSessionForUser(userId: string) {
   if (!profile) {
     throw new Error("User not found");
   }
+  const roles = await loadUserRoles(userId);
   const token = createToken();
-  const expiresAt = sessionExpiresAt();
+  const expiresAt = sessionExpiresAt(roles);
   await pool.query(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, [
     userId,
     hashSha256(token),

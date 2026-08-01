@@ -80,6 +80,7 @@ function installFakePool(
     const { pool } = await import("@/server/postgres.server");
     const calls: string[] = [];
     const insertCalls: Array<{ params: unknown[] }> = [];
+    const updateCalls: Array<{ sql: string; params: unknown[] }> = [];
 
     const fakeClient = {
       query: async (sql: string, params?: unknown[]) => {
@@ -100,6 +101,9 @@ function installFakePool(
         if (verb === "INSERT" && sql.includes("user_roles")) {
           insertCalls.push({ params: params ?? [] });
         }
+        if (verb === "UPDATE") {
+          updateCalls.push({ sql, params: params ?? [] });
+        }
         return { rows: [], rowCount: 1 };
       },
       release: () => undefined,
@@ -111,6 +115,7 @@ function installFakePool(
     return {
       calls,
       insertCalls,
+      updateCalls,
       restore: () => {
         pool.connect = originalConnect as typeof pool.connect;
       },
@@ -307,10 +312,33 @@ test("changeUserRole replaces the role set and writes activity/outbox atomically
       "SELECT",
       "DELETE",
       "INSERT",
+      "UPDATE",
+      "UPDATE",
       "INSERT",
       "INSERT",
       "COMMIT",
     ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("changeUserRole revokes the target's existing sessions and active contexts", async () => {
+  const harness = await installFakePool(["partner_user"])();
+  try {
+    const { changeUserRole } = await import("@/server/user-role-commands.server");
+    const result = await changeUserRole({
+      actor: buildActor(),
+      targetUserId: "user-a",
+      newRole: "partner_admin",
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.updateCalls).toHaveLength(2);
+    for (const call of harness.updateCalls) {
+      expect(call.params[0]).toBe("user-a");
+    }
+    expect(harness.updateCalls[0]?.sql).toContain("sessions");
+    expect(harness.updateCalls[1]?.sql).toContain("active_contexts");
   } finally {
     harness.restore();
   }

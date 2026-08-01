@@ -449,7 +449,7 @@ type AuthApi = {
   resetPasswordForEmail: (
     email: string,
     options?: { redirectTo?: string },
-  ) => Promise<RpcResult<{ resetLink: string | null }>>;
+  ) => Promise<RpcResult<{ ok: true }>>;
   updateUser: (input: { password: string }) => Promise<RpcResult<{}>>;
   signOut: () => Promise<RpcResult<{}>>;
   createWorkspaceUser: (input: {

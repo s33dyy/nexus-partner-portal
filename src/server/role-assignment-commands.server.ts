@@ -25,6 +25,7 @@ import {
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
 import type { GovernedActor } from "@/server/governed-actor.server";
+import { revokeUserSessionsAndContexts } from "@/server/livey-service.server";
 
 const ASSIGNMENT_EVENT_SCHEMA_VERSION = 1;
 
@@ -212,10 +213,12 @@ export async function assignGovernedRole(input: {
       correlationId,
     });
 
-    await tx.query(
-      `UPDATE active_contexts SET revoked_at = now(), revocation_reason = 'role_reassigned'
-       WHERE user_id = $1 AND revoked_at IS NULL`,
-      [input.targetUserId],
+    // Revokes both the prior active_context (superseded by the one inserted
+    // below) and any live session — a reassignment changes the tenant/scope
+    // a session's cached authorization was issued under.
+    await revokeUserSessionsAndContexts(
+      { userId: input.targetUserId, reason: "role_reassigned" },
+      tx,
     );
 
     await tx.query(

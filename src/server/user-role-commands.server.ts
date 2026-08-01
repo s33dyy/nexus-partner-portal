@@ -8,6 +8,7 @@ import { canGrantRole, evaluateActiveContextPolicy } from "@/domain/contracts/go
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
 import type { GovernedActor } from "@/server/governed-actor.server";
+import { revokeUserSessionsAndContexts } from "@/server/livey-service.server";
 
 const USER_ROLE_EVENT_SCHEMA_VERSION = 1;
 
@@ -133,6 +134,10 @@ export async function changeUserRole(input: {
        ON CONFLICT (user_id, role) DO UPDATE SET is_seed = EXCLUDED.is_seed`,
       [input.targetUserId, newRole],
     );
+
+    // The target's authorised capabilities just changed; any session issued
+    // under the old role could otherwise keep acting on stale permissions.
+    await revokeUserSessionsAndContexts({ userId: input.targetUserId, reason: "role_changed" }, tx);
 
     const payload = { previousRoles, newRole, reason: input.reason ?? null };
 
