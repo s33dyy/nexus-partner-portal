@@ -1143,6 +1143,8 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   status TEXT NOT NULL DEFAULT 'open',
   priority TEXT NOT NULL DEFAULT 'medium',
   assignee_name TEXT,
+  product_sku TEXT,
+  serial_number TEXT,
   response_due_at TIMESTAMPTZ,
   resolve_due_at TIMESTAMPTZ,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1157,6 +1159,7 @@ CREATE TABLE IF NOT EXISTS support_ticket_comments (
   author_name TEXT NOT NULL,
   author_role TEXT NOT NULL,
   body TEXT NOT NULL,
+  is_internal BOOLEAN NOT NULL DEFAULT FALSE,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1701,3 +1704,36 @@ ALTER TABLE fx_snapshots ADD COLUMN IF NOT EXISTS target_amount NUMERIC(18, 4);
 ALTER TABLE fx_snapshots ALTER COLUMN target_amount SET NOT NULL;
 ALTER TABLE fx_snapshots ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'internal';
 ALTER TABLE fx_snapshots ADD COLUMN IF NOT EXISTS archived_reason TEXT;
+
+-- Insight Hub completion flow: lessons had no viewable body (content_url was
+-- always null in every seed/authoring path), and there was no way to record
+-- that a learner actually opened a given lesson — enrollment progress could
+-- never move past 0% except by an admin hand-editing the row. content_body
+-- holds inline lesson text (dummy content is all content_type='text', no
+-- external video URLs); learning_lesson_progress is the per-lesson
+-- completion record learning-commands.server.ts's completeLesson() writes,
+-- which drives learning_enrollments.progress_percent/status/certificate_token
+-- the same way submitAssessmentAttempt already does for the assessment path.
+ALTER TABLE learning_lessons ADD COLUMN IF NOT EXISTS content_body TEXT;
+
+CREATE TABLE IF NOT EXISTS learning_lesson_progress (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  lesson_id UUID NOT NULL REFERENCES learning_lessons(id) ON DELETE CASCADE,
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, lesson_id)
+);
+
+CREATE INDEX IF NOT EXISTS learning_lesson_progress_user_id_idx ON learning_lesson_progress (user_id);
+CREATE INDEX IF NOT EXISTS learning_lesson_progress_lesson_id_idx ON learning_lesson_progress (lesson_id);
+
+-- Auto-task-on-tag: deal_participants/customer_participants only ever
+-- recorded a role-type label plus who performed the tagging action, never
+-- which specific person was tagged, so nothing could ever be routed to them.
+-- tagDealParticipant already accepted a participantUserId in its input type
+-- but silently dropped it before this column existed. Nullable: automatic/
+-- role-level tags (product.md §5.7) may still exist with no specific person
+-- resolved yet.
+ALTER TABLE deal_participants ADD COLUMN IF NOT EXISTS participant_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE customer_participants ADD COLUMN IF NOT EXISTS participant_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL;

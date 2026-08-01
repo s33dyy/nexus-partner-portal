@@ -171,3 +171,103 @@ export async function enrollInTrack(input: {
     };
   });
 }
+
+export type CompleteLessonInput = {
+  lessonId: string;
+};
+
+/** Marks one Lesson as viewed for the caller and recomputes their Enrollment
+ * progress from real learning_lesson_progress rows. Track completion is
+ * defined as "every required Lesson in the track has been marked complete"
+ * (this product has no question-bank-backed assessment UI yet — see
+ * insight-hub.$trackId.tsx). Reaching 100% issues a certificate the same way
+ * submitAssessmentAttempt already does for the quiz path, so both paths
+ * converge on the same learning_enrollments terminal state. */
+export async function completeLesson(input: {
+  actor: LearningCommandActor;
+  data: CompleteLessonInput;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+
+  return withTransaction(async (tx) => {
+    const { rows: lessonRows } = await tx.query(
+      `SELECT ll.id, ls.track_id
+       FROM learning_lessons ll
+       JOIN learning_subjects ls ON ls.id = ll.subject_id
+       WHERE ll.id = $1`,
+      [input.data.lessonId],
+    );
+    if (lessonRows.length === 0) {
+      return { ok: false, failure: validationFailure("Lesson not found"), correlationId };
+    }
+    const lesson = lessonRows[0] as { id: string; track_id: string };
+
+    const { rows: enrollmentRows } = await tx.query(
+      `SELECT id FROM learning_enrollments WHERE user_id = $1 AND track_id = $2`,
+      [input.actor.userId, lesson.track_id],
+    );
+    if (enrollmentRows.length === 0) {
+      return {
+        ok: false,
+        failure: validationFailure("Enroll in this track before completing its lessons"),
+        correlationId,
+      };
+    }
+
+    await tx.query(
+      `INSERT INTO learning_lesson_progress (id, user_id, lesson_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, lesson_id) DO NOTHING`,
+      [randomUUID(), input.actor.userId, input.data.lessonId],
+    );
+
+    const { rows: countRows } = await tx.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE ll.is_required) AS total_required,
+         COUNT(*) FILTER (WHERE ll.is_required AND lp.id IS NOT NULL) AS completed_required
+       FROM learning_lessons ll
+       JOIN learning_subjects ls ON ls.id = ll.subject_id
+       LEFT JOIN learning_lesson_progress lp
+         ON lp.lesson_id = ll.id AND lp.user_id = $1
+       WHERE ls.track_id = $2`,
+      [input.actor.userId, lesson.track_id],
+    );
+    const counts = countRows[0] as { total_required: string; completed_required: string };
+    const totalRequired = Number(counts.total_required);
+    const completedRequired = Number(counts.completed_required);
+    const progressPercent =
+      totalRequired > 0 ? Math.round((completedRequired / totalRequired) * 100) : 100;
+    const isComplete = totalRequired > 0 && completedRequired >= totalRequired;
+
+    if (isComplete) {
+      const certificateToken = randomUUID();
+      await tx.query(
+        `UPDATE learning_enrollments
+         SET progress_percent = $3,
+             status = 'completed',
+             completed_at = COALESCE(completed_at, now()),
+             certificate_token = COALESCE(certificate_token, $4),
+             is_certified = TRUE,
+             updated_at = now()
+         WHERE user_id = $1 AND track_id = $2`,
+        [input.actor.userId, lesson.track_id, progressPercent, certificateToken],
+      );
+    } else {
+      await tx.query(
+        `UPDATE learning_enrollments
+         SET progress_percent = $3, updated_at = now()
+         WHERE user_id = $1 AND track_id = $2 AND status != 'completed'`,
+        [input.actor.userId, lesson.track_id, progressPercent],
+      );
+    }
+
+    return {
+      ok: true,
+      commandName: "learning.complete_lesson",
+      subjectId: input.data.lessonId,
+      newVersion: 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
+  });
+}

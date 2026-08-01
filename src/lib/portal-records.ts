@@ -109,6 +109,7 @@ export type CustomerParticipantRecord = {
   participant_type: string;
   source: string;
   actor_id: string | null;
+  participant_user_id: string | null;
   reason: string;
   valid_from: string;
   valid_to: string | null;
@@ -125,6 +126,7 @@ export type DealParticipantRecord = {
   participant_type: string;
   source: string;
   actor_id: string | null;
+  participant_user_id: string | null;
   reason: string;
   valid_from: string;
   valid_to: string | null;

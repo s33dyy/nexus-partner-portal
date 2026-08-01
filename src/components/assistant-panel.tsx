@@ -14,7 +14,16 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import type { AssistantDealDraft, AssistantDealSummary } from "@/domain/contracts/assistant";
+import type {
+  AssistantCustomerSummary,
+  AssistantDealDraft,
+  AssistantDealSummary,
+  AssistantLearningSummary,
+  AssistantPartnerSummary,
+  AssistantTaskSummary,
+  AssistantTicketSummary,
+  AssistantUserSummary,
+} from "@/domain/contracts/assistant";
 import { confirmAssistantDeal, sendAssistantMessage } from "@/integrations/local/assistant";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -22,12 +31,75 @@ type PanelMessage = {
   role: "user" | "assistant";
   content: string;
   deals?: AssistantDealSummary[];
+  partners?: AssistantPartnerSummary[];
+  customers?: AssistantCustomerSummary[];
+  tasks?: AssistantTaskSummary[];
+  tickets?: AssistantTicketSummary[];
+  users?: AssistantUserSummary[];
+  learning?: AssistantLearningSummary[];
 };
+
+type ListItem = { id: string; primary: string; secondary: string; badge?: string };
+
+function toListItems(entry: PanelMessage): ListItem[] {
+  if (entry.deals?.length) {
+    return entry.deals.map((d) => ({
+      id: d.id,
+      primary: d.accountName,
+      secondary: `${d.product} · ${d.currencyCode} ${d.amount}`,
+      badge: d.stage,
+    }));
+  }
+  if (entry.partners?.length) {
+    return entry.partners.map((p) => ({
+      id: p.id,
+      primary: p.companyName,
+      secondary: `${p.country || "—"} · ${p.tier || "no tier"}`,
+      badge: p.status,
+    }));
+  }
+  if (entry.customers?.length) {
+    return entry.customers.map((c) => ({
+      id: c.id,
+      primary: c.companyName,
+      secondary: `${c.region || "—"} · ${c.segment || "unsegmented"}`,
+      badge: c.status,
+    }));
+  }
+  if (entry.tasks?.length) {
+    return entry.tasks.map((t) => ({
+      id: t.id,
+      primary: t.title,
+      secondary: t.dueAt ? `Due ${new Date(t.dueAt).toLocaleDateString()}` : "No due date",
+      badge: `${t.status} · ${t.priority}`,
+    }));
+  }
+  if (entry.tickets?.length) {
+    return entry.tickets.map((t) => ({
+      id: t.id,
+      primary: t.subject,
+      secondary: t.priority,
+      badge: t.status,
+    }));
+  }
+  if (entry.users?.length) {
+    return entry.users.map((u) => ({ id: u.id, primary: u.fullName, secondary: u.email || "—" }));
+  }
+  if (entry.learning?.length) {
+    return entry.learning.map((l) => ({
+      id: l.trackId,
+      primary: l.title,
+      secondary: `${l.progressPercent}% complete`,
+      badge: l.status.replace(/_/g, " "),
+    }));
+  }
+  return [];
+}
 
 const WELCOME_MESSAGE: PanelMessage = {
   role: "assistant",
   content:
-    "Hi, I'm the LIVEY Assistant. I can create a new deal from what you tell me, or answer questions about your existing deals — that's all I do here.",
+    "Hi, I'm the LIVEY Assistant. I can create a new deal from what you tell me, or help you find things — Deals, Partners, Customers, Tasks, Tickets, Learning tracks, or a colleague.",
 };
 
 export function AssistantPanel() {
@@ -60,7 +132,17 @@ export function AssistantPanel() {
       setConversationId(result.conversationId);
       setMessages([
         ...nextMessages,
-        { role: "assistant", content: result.reply, deals: result.deals },
+        {
+          role: "assistant",
+          content: result.reply,
+          deals: result.deals,
+          partners: result.partners,
+          customers: result.customers,
+          tasks: result.tasks,
+          tickets: result.tickets,
+          users: result.users,
+          learning: result.learning,
+        },
       ]);
       if (result.requiresConfirmation && result.draft) {
         setPendingDraft(result.draft);
@@ -123,45 +205,48 @@ export function AssistantPanel() {
           </SheetTitle>
           <SheetDescription>
             {canCreateDeals
-              ? "Create a deal or ask about your existing deals."
-              : "Ask about your existing deals — your role can't create deals here."}
+              ? "Create a deal, or search Deals, Partners, Customers, Tasks, Tickets, Learning, and your team."
+              : "Search Deals, Partners, Customers, Tasks, Tickets, Learning, and your team — your role can't create deals here."}
           </SheetDescription>
         </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1 px-4 py-3">
           <div className="flex flex-col gap-3">
-            {messages.map((entry, index) => (
-              <div
-                key={index}
-                className={
-                  entry.role === "user"
-                    ? "ml-8 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-                    : "mr-8 rounded-lg border bg-muted/40 px-3 py-2 text-sm whitespace-pre-wrap"
-                }
-              >
-                {entry.content}
-                {entry.deals && entry.deals.length > 0 && (
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    {entry.deals.map((deal) => (
-                      <div
-                        key={deal.id}
-                        className="rounded-md border bg-background px-2 py-1.5 text-xs"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{deal.accountName}</span>
-                          <Badge variant="outline" className="shrink-0 text-[10px]">
-                            {deal.stage}
-                          </Badge>
+            {messages.map((entry, index) => {
+              const listItems = toListItems(entry);
+              return (
+                <div
+                  key={index}
+                  className={
+                    entry.role === "user"
+                      ? "ml-8 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
+                      : "mr-8 rounded-lg border bg-muted/40 px-3 py-2 text-sm whitespace-pre-wrap"
+                  }
+                >
+                  {entry.content}
+                  {listItems.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1.5">
+                      {listItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-md border bg-background px-2 py-1.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{item.primary}</span>
+                            {item.badge && (
+                              <Badge variant="outline" className="shrink-0 text-[10px]">
+                                {item.badge}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-muted-foreground">{item.secondary}</div>
                         </div>
-                        <div className="mt-0.5 text-muted-foreground">
-                          {deal.product} · {deal.currencyCode} {deal.amount}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {sending && (
               <div className="mr-8 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…

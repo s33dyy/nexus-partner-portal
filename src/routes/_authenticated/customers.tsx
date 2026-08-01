@@ -27,13 +27,14 @@ import {
 } from "@/lib/customer-import";
 import {
   buildCustomerMergePlan,
-  buildParticipantPayload,
   customerMergeRedirectPath,
   detectCustomerDuplicateGroups,
   participantVisibilitySummary,
   shouldPropagateCustomerTagToDeals,
 } from "@/lib/customer-governance";
+import { tagCustomerParticipant } from "@/integrations/local/participant-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import type { DropdownOption } from "@/lib/dropdown-sources";
 import { formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
@@ -133,6 +134,8 @@ function CustomersPage() {
   const [activityDraft, setActivityDraft] = useState("");
   const [participantDraft, setParticipantDraft] = useState({
     participant_type: "primary_owner",
+    participant_user_id: "",
+    participant_user_name: "",
     source: "manual",
     reason: "Coverage reviewed from customer screen",
     valid_from: new Date().toISOString(),
@@ -384,6 +387,8 @@ function CustomersPage() {
     setActivityDraft("");
     setParticipantDraft({
       participant_type: "primary_owner",
+      participant_user_id: "",
+      participant_user_name: "",
       source: "manual",
       reason: `Coverage reviewed for ${selectedCustomer.company_name}`,
       valid_from: new Date().toISOString(),
@@ -464,6 +469,10 @@ function CustomersPage() {
 
   const saveParticipant = async () => {
     if (!selectedCustomer) return;
+    if (!participantDraft.participant_user_id) {
+      toast.error("Select who you're tagging");
+      return;
+    }
     if (!participantDraft.reason.trim()) {
       toast.error("Add a participant reason before saving");
       return;
@@ -471,29 +480,22 @@ function CustomersPage() {
 
     setSavingParticipant(true);
     try {
-      const payload = buildParticipantPayload({
-        subjectType: "customer",
-        subjectId: selectedCustomer.id,
-        partnerId: selectedCustomer.partner_id ?? profile?.partner_id ?? null,
+      const res = await tagCustomerParticipant({
+        customerId: selectedCustomer.id,
+        participantUserId: participantDraft.participant_user_id,
+        participantUserName: participantDraft.participant_user_name || null,
         participantType: participantDraft.participant_type,
-        source: participantDraft.source,
-        actorId: profile?.id ?? null,
-        reason: participantDraft.reason,
-        validFrom: participantDraft.valid_from,
-        validTo: participantDraft.valid_to.trim() || null,
-        provenance: {
-          source: "customers.route",
-          customerId: selectedCustomer.id,
-          customerName: selectedCustomer.company_name,
-        },
+        reason: participantDraft.reason.trim(),
       });
+      if (!res.ok) throw new Error(res.failure.message);
 
-      const { error } = await supabase.from("customer_participants").insert(payload);
-      if (error) throw error;
-
-      toast.success("Customer participant saved");
+      toast.success(
+        `Tagged ${participantDraft.participant_user_name || "participant"} — a task was added to their queue`,
+      );
       setParticipantDraft((current) => ({
         ...current,
+        participant_user_id: "",
+        participant_user_name: "",
         reason: `Coverage reviewed for ${selectedCustomer.company_name}`,
         valid_to: "",
       }));
@@ -1222,16 +1224,28 @@ function CustomersPage() {
                         ]}
                       />
                     </Field>
-                    <Field label="Source">
+                    <Field label="Person">
                       <LookupCombobox
-                        fieldName={LOOKUP_FIELDS.tagType}
-                        label="Source"
-                        value={participantDraft.source}
+                        fieldName={LOOKUP_FIELDS.dealOwner}
+                        source="poc"
+                        label="Person"
+                        value={participantDraft.participant_user_name}
                         onValueChange={(value) =>
-                          setParticipantDraft((current) => ({ ...current, source: value }))
+                          setParticipantDraft((current) => ({
+                            ...current,
+                            participant_user_name: value,
+                          }))
                         }
-                        placeholder="manual"
-                        options={["manual", "automatic", "import", "migration"]}
+                        onSelectionChange={(selection: DropdownOption | null) =>
+                          setParticipantDraft((current) => ({
+                            ...current,
+                            participant_user_id: selection?.id ?? "",
+                            participant_user_name:
+                              selection?.label ?? current.participant_user_name,
+                          }))
+                        }
+                        placeholder="Search for a colleague"
+                        allowCreate={false}
                       />
                     </Field>
                     <Field label="Reason">
@@ -1239,30 +1253,6 @@ function CustomersPage() {
                         value={participantDraft.reason}
                         onChange={(e) =>
                           setParticipantDraft((current) => ({ ...current, reason: e.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Valid from">
-                      <Input
-                        type="datetime-local"
-                        value={participantDraft.valid_from.slice(0, 16)}
-                        onChange={(e) =>
-                          setParticipantDraft((current) => ({
-                            ...current,
-                            valid_from: new Date(e.target.value).toISOString(),
-                          }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Valid to">
-                      <Input
-                        type="datetime-local"
-                        value={participantDraft.valid_to.slice(0, 16)}
-                        onChange={(e) =>
-                          setParticipantDraft((current) => ({
-                            ...current,
-                            valid_to: e.target.value ? new Date(e.target.value).toISOString() : "",
-                          }))
                         }
                       />
                     </Field>
@@ -1285,7 +1275,7 @@ function CustomersPage() {
                       disabled={savingParticipant}
                     >
                       {savingParticipant ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save participant
+                      Tag participant
                     </Button>
                     <div className="space-y-2">
                       {selectedParticipants.length === 0 ? (
@@ -1293,26 +1283,40 @@ function CustomersPage() {
                           No customer participants have been recorded yet.
                         </div>
                       ) : (
-                        selectedParticipants.map((participant) => (
-                          <div
-                            key={participant.id}
-                            className="rounded-lg border bg-background p-3 text-sm"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-medium">{participant.participant_type}</span>
-                              <Badge variant="outline">{participant.source}</Badge>
+                        selectedParticipants.map((participant) => {
+                          const taggedName =
+                            participant.provenance &&
+                            typeof participant.provenance === "object" &&
+                            "participantUserName" in participant.provenance
+                              ? (participant.provenance as { participantUserName?: unknown })
+                                  .participantUserName
+                              : null;
+                          return (
+                            <div
+                              key={participant.id}
+                              className="rounded-lg border bg-background p-3 text-sm"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium">
+                                  {participant.participant_type}
+                                  {typeof taggedName === "string" && taggedName
+                                    ? ` · ${taggedName}`
+                                    : ""}
+                                </span>
+                                <Badge variant="outline">{participant.source}</Badge>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {participant.reason}
+                              </div>
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                {formatDateTimeLabel(participant.valid_from)}{" "}
+                                {participant.valid_to
+                                  ? `→ ${formatDateTimeLabel(participant.valid_to)}`
+                                  : "→ open"}
+                              </div>
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {participant.reason}
-                            </div>
-                            <div className="mt-2 text-xs text-muted-foreground">
-                              {formatDateTimeLabel(participant.valid_from)}{" "}
-                              {participant.valid_to
-                                ? `→ ${formatDateTimeLabel(participant.valid_to)}`
-                                : "→ open"}
-                            </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground">

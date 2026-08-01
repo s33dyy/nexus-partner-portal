@@ -141,6 +141,7 @@ const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
   portal_news_posts: "news",
   learning_enrollments: "learning",
   learning_assessment_attempts: "learning",
+  learning_lesson_progress: "learning",
 };
 
 // Tables with a resolvable geography column, restricted to a role's region
@@ -440,6 +441,7 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
       return { kind: "linked-ticket" };
     case "learning_enrollments":
     case "learning_assessment_attempts":
+    case "learning_lesson_progress":
       return { kind: "column", column: "user_id", value: auth.userId };
     case "customer_participants":
     case "deal_participants":
@@ -1047,6 +1049,35 @@ function appendGeographyFilter(
   };
 }
 
+// transitionTask (task-commands.server.ts) is the only path allowed to move
+// a Task through its state machine — it locks the row, checks the allowed
+// transition table, and appends task_transitions/Activity/outbox evidence
+// atomically. A generic `tasks` update reaching these columns would let any
+// scoped caller (including Super Admin) forge a status/version change with
+// none of that evidence, so it's rejected here, before every other branch
+// including the super_admin bypasses below.
+const TASK_LIFECYCLE_UPDATE_FIELDS = new Set([
+  "status",
+  "blocked_reason",
+  "completed_at",
+  "cancelled_at",
+  "version",
+]);
+
+function assertNoProtectedLifecycleUpdate(query: TableQueryLike): void {
+  if (query.table !== "tasks" || query.operation !== "update") return;
+  if (typeof query.values !== "object" || query.values === null || Array.isArray(query.values)) {
+    return;
+  }
+
+  const attempted = Object.keys(query.values).filter((field) =>
+    TASK_LIFECYCLE_UPDATE_FIELDS.has(field),
+  );
+  if (attempted.length > 0) {
+    throw new Error("Task lifecycle fields require the named transition command");
+  }
+}
+
 /** Applies the existing ownership/scope policy, then layers the role
  * permission matrix (CRUD gate) and, for the handful of geography-bearing
  * tables, a region-access filter on top. Both new checks are no-ops for
@@ -1057,6 +1088,7 @@ export async function applyTablePolicy(
   query: TableQueryLike,
   auth: TablePolicyAuthContext,
 ): Promise<TableQueryLike> {
+  assertNoProtectedLifecycleUpdate(query);
   await assertGovernedFeatureCapability(query, auth);
   const result = await applyTablePolicyInner(query, auth);
   return appendGeographyFilter(result, auth);

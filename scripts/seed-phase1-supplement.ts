@@ -613,75 +613,150 @@ async function seedLearning(client: PoolClient, profiles: Profile[]) {
     });
   }
 
+  // All lessons ship as inline text (content_body) rather than content_url —
+  // dummy content with a working "video" URL would either be dead or point
+  // off-site; text keeps the whole demo self-contained and viewable end to
+  // end through insight-hub.$trackId's lesson viewer.
   const lessons = [
     {
       key: "sales:brand:1",
       subject: "sales:brand",
       title: "LIVEY & Brand Positioning",
-      type: "text",
       order: 0,
       required: true,
+      body: 'LIVEY brings together a portfolio of specialist brands — Audixa, Realsight, Aurix, and Savvi — under one partner program rather than one undifferentiated label. Each brand owns a distinct problem space and a distinct buyer, and your job as a partner is to know which brand to lead with in a given conversation, not to sell "LIVEY" as a monolith. This lesson covers the brand architecture: what LIVEY stands for as the parent program (partner enablement, unified pricing, unified support and rewards), and how each product brand fits underneath it. You should leave this lesson able to explain, in one sentence each, what Audixa, Realsight, Aurix, and Savvi are for, and be able to route an unqualified prospect to the right brand within the first few minutes of discovery.',
     },
     {
       key: "sales:brand:2",
       subject: "sales:brand",
       title: "Audixa Product Overview",
       order: 1,
-      type: "video",
       required: true,
+      body: "Audixa is LIVEY's audio and communications product line, built for organisations that need reliable voice and conferencing infrastructure without operating it themselves. The core buyer is an IT or operations leader replacing an aging on-premise PBX or a patchwork of point solutions. Audixa's differentiators are (1) deployment flexibility — cloud, hybrid, or on-prem from the same product line, (2) a transparent per-seat pricing model partners can quote confidently without a custom proposal cycle, and (3) enterprise-grade compliance certifications that matter to regulated buyers. Typical deal triggers: a lease renewal on legacy phone hardware, a merger requiring two systems to be unified, or a compliance audit finding gaps in call recording and retention. Know these triggers — they are the fastest way to find a live Audixa opportunity inside an existing account.",
+    },
+    {
+      key: "sales:brand:3",
+      subject: "sales:brand",
+      title: "Realsight Product Overview",
+      order: 2,
+      required: true,
+      body: "Realsight is LIVEY's analytics and business-intelligence product line — dashboards, reporting, and predictive modelling built on top of a customer's existing operational data rather than requiring a separate data warehouse migration. The buyer is usually a functional leader (finance, ops, or revenue) who is currently exporting to spreadsheets and wants a governed, always-current view instead. Realsight's core pitch is time-to-value: a working dashboard in the first implementation sprint, not a six-month data project. When qualifying a Realsight opportunity, listen for phrases like \"we don't have visibility into...\" or \"nobody trusts the numbers in that report\" — both are strong signals the prospect has an active pain Realsight solves directly. Realsight pairs naturally with Aurix in accounts that also need workflow automation on top of the same data.",
     },
     {
       key: "sales:process:1",
       subject: "sales:process",
       title: "Discovery & Qualification",
       order: 0,
-      type: "video",
       required: true,
+      body: "A LIVEY deal earns the right to move past Sourced only once discovery has established three things: a real business trigger (why now, not six months ago or six months from now), a named economic buyer, and a rough budget range the prospect has actually acknowledged. Discovery is not a product demo with questions sprinkled in — it is a structured conversation aimed at disqualifying deals early rather than carrying them through the whole pipeline before finding out they were never real. Use open questions to surface the trigger (\"what changed that put this on your roadmap this quarter?\"), and always confirm budget with a range rather than a single number — prospects will correct a wrong range far more readily than they'll volunteer a number unprompted. A deal that can't clear this bar should stay in Sourced, not advance on optimism.",
+    },
+    {
+      key: "sales:process:2",
+      subject: "sales:process",
+      title: "Building a Winning Proposal",
+      order: 1,
+      required: true,
+      body: "By the time a deal reaches Proposal, the discovery work should already have answered what the customer needs — the proposal's job is to make the value of solving it undeniable, in the customer's own language, not yours. Structure every proposal around the customer's stated trigger first, your recommended product line and configuration second, and commercial terms last. Avoid generic feature lists; tie each capability back to the specific pain surfaced in discovery. Pricing should always be presented with a clear anchor (list price) and a clear reason for any discount offered (volume, multi-year term, or strategic account status) — an unexplained discount reads as negotiable padding and invites further negotiation instead of closing it. A proposal that can't be summarised in three sentences to someone who wasn't in the room is too long.",
+    },
+    {
+      key: "sales:process:3",
+      subject: "sales:process",
+      title: "Negotiation Fundamentals",
+      order: 2,
+      required: false,
+      body: "Negotiation on a LIVEY deal is about protecting margin while removing genuine blockers to signature — not about avoiding every discount on principle. Before any concession, separate the buyer's stated objection from their actual constraint: a procurement team asking for 15% off may really be trying to hit an internal budget line, which a payment-term change can solve just as well as a price cut. Always trade, never simply give — every concession you make should be paired with something back (a faster decision date, a longer term, a reference call). And know your own authority: LIVEY's discount-approval workflow exists precisely so a partner rep never has to bluff about what they can approve — escalate real requests through it rather than promising a number you can't yet honour.",
     },
     {
       key: "technical:cloud:1",
       subject: "technical:cloud",
       title: "Cloud Suite — Installation",
       order: 0,
-      type: "video",
       required: true,
+      body: "This lesson walks through a standard LIVEY Cloud Suite installation from provisioning to first successful login. Prerequisites: a target tenant region selected in line with the customer's data-residency requirements, an admin account with the correct scopes, and network egress rules confirmed for the LIVEY API endpoints. The installation itself is largely automated once prerequisites are met — the two most common failure points in the field are (1) DNS propagation delays after the custom domain step, which typically resolve within an hour and should not be treated as a failed install, and (2) SSO configuration mismatches when the customer's identity provider metadata is pasted rather than uploaded as a file. Always validate a test login with a non-admin account before considering the installation complete — an admin-only smoke test misses the most common real-world failure class.",
     },
     {
       key: "technical:cloud:2",
       subject: "technical:cloud",
       title: "Cloud Suite — Troubleshooting",
       order: 1,
-      type: "text",
       required: false,
+      body: 'Most Cloud Suite support escalations fall into one of three buckets: authentication (SSO/SAML misconfiguration), connectivity (customer-side firewall or proxy blocking required endpoints), and performance (usually traced to an under-provisioned tier for the customer\'s actual concurrent-user load). Before escalating to LIVEY technical support, gather the tenant ID, a timestamp of the issue, and — for performance complaints — the approximate number of concurrent users at the time. This alone resolves the triage time for most tickets. A frequent false alarm worth knowing: a customer reporting the product is "down" is very often experiencing a browser-cached stale session after a password rotation — a hard refresh and re-authentication resolves it in the majority of cases before any deeper investigation is needed.',
+    },
+    {
+      key: "technical:cloud:3",
+      subject: "technical:cloud",
+      title: "Cloud Suite — Security & Compliance",
+      order: 2,
+      required: true,
+      body: 'Cloud Suite is built to meet the compliance bar of regulated buyers, but a partner presenting it needs to know which certifications actually apply and where the shared-responsibility line sits. LIVEY holds the platform-level certifications (data encryption at rest and in transit, access logging, and independently audited controls); the customer remains responsible for their own identity governance (who they grant access to, and at what privilege level) and their own data-retention policy configuration. When a compliance-sensitive prospect asks "are you SOC 2 compliant" or similar, always confirm the current certification status through official LIVEY collateral rather than from memory — certifications are renewed on a cycle and a stale claim in a proposal is a credibility risk with exactly the buyers who care most about it.',
     },
     {
       key: "technical:data:1",
       subject: "technical:data",
       title: "Data Platform — Architecture",
       order: 0,
-      type: "video",
       required: true,
+      body: "The LIVEY Data Platform is organised around three layers: ingestion (connectors that pull from a customer's operational systems on a schedule or via webhook), the governed model layer (where raw data is transformed into the canonical entities Realsight and Aurix both build on), and the serving layer (the APIs and dashboards a customer's own team interacts with). Understanding this separation matters for scoping conversations: a customer asking for a \"custom report\" is usually a serving-layer request that can be handled quickly, while a customer asking to bring in a new operational data source is an ingestion-layer request with a longer lead time and its own connector-availability constraints. Always identify which layer a requirement lives in before committing to a timeline.",
+    },
+    {
+      key: "technical:data:2",
+      subject: "technical:data",
+      title: "Data Platform — Integration Patterns",
+      order: 1,
+      required: true,
+      body: "Most Data Platform implementations use one of three integration patterns: scheduled batch sync (simplest, appropriate when near-real-time freshness isn't required), webhook-driven incremental sync (for operational dashboards that need to reflect changes within minutes), and a direct API pull for one-off historical backfills. Choosing the wrong pattern is the most common cause of implementation delay — batch sync configured for a use case that actually needed webhooks produces a dashboard that looks broken (stale data) rather than one that looks slow. When scoping an integration, always ask the customer how quickly a change in their source system needs to be reflected downstream, and pick the pattern from that answer rather than defaulting to whichever is easiest to configure.",
+    },
+    {
+      key: "technical:data:3",
+      subject: "technical:data",
+      title: "Data Platform — Performance Tuning",
+      order: 2,
+      required: false,
+      body: "Performance issues on the Data Platform are almost always a modelling problem, not a platform capacity problem — the platform scales well beyond what most customer deployments ever need. The typical root cause is an overly broad dashboard query pulling more granularity than the use case requires, or a model layer that hasn't been indexed against the fields the customer actually filters on most. Before recommending a tier upgrade to solve a performance complaint, review the slowest queries first; in the large majority of field cases, a model-layer adjustment resolves the issue at no additional cost to the customer and is both a faster fix and a better outcome for the relationship than an upsell that doesn't address the real cause.",
     },
     {
       key: "solution:design:1",
       subject: "solution:design",
       title: "Multi-Product Sizing & Validation",
       order: 0,
-      type: "text",
       required: true,
+      body: "A multi-product LIVEY deployment — for example Audixa plus Realsight in the same account — needs to be sized as one coherent solution, not as two independent product quotes stapled together. Start from the customer's actual usage projections (seats, data volume, concurrent sessions) rather than their current-state numbers, since most multi-product engagements follow a period of consolidation that increases load on the surviving systems. Validate sizing against the documented reference tiers before proposing, and always build in explicit headroom for growth over the contract term rather than sizing to exact day-one usage — a customer that outgrows their tier within the first quarter creates a support and renewal-risk problem that is far more expensive to fix than slightly conservative initial sizing.",
+    },
+    {
+      key: "solution:design:2",
+      subject: "solution:design",
+      title: "Reference Architectures for Enterprise Deployments",
+      order: 1,
+      required: true,
+      body: "LIVEY maintains a set of governed reference architectures for the most common enterprise deployment shapes — single-region consolidated, multi-region with data-residency segregation, and hybrid cloud/on-prem for regulated industries. Starting a solution design from the nearest matching reference architecture, rather than designing from a blank page, dramatically reduces both design time and implementation risk, since these patterns have already been validated against real deployments. Deviating from a reference architecture is sometimes necessary, but every deviation should be explicitly justified in the solution document — an unexplained deviation is the single most common source of implementation surprises discovered late, well after the customer has already signed.",
+    },
+    {
+      key: "solution:design:3",
+      subject: "solution:design",
+      title: "ROI Modeling & Business Case Development",
+      order: 2,
+      required: false,
+      body: "An enterprise multi-product deal rarely closes on product capability alone — it closes when the economic buyer has a business case they can defend internally. Build the ROI model around the customer's own numbers wherever possible (their current tooling spend, their current headcount hours spent on manual work being automated) rather than generic industry benchmarks, since a self-referential business case is far harder for an internal skeptic to dismiss. Always separate hard savings (direct cost reduction, quantifiable) from soft benefits (better visibility, improved morale) and lead with the hard numbers — soft benefits support a business case, but they rarely carry one on their own with a finance-led buying committee.",
     },
   ];
 
+  const lessonIds: Record<string, string> = {};
+  const lessonIdsByTrack: Record<string, Array<{ id: string; required: boolean }>> = {};
   for (const lesson of lessons) {
     const id = deterministicUuid(LEARNING_NS, `lesson:${lesson.key}`);
+    lessonIds[lesson.key] = id;
+    const trackKey = subjects.find((s) => s.key === lesson.subject)?.track ?? lesson.subject;
+    (lessonIdsByTrack[trackKey] ??= []).push({ id, required: lesson.required });
+
     await upsert(client, "learning_lessons", {
       id,
       course_id: null,
       subject_id: subjectIds[lesson.subject],
       title: lesson.title,
       content_url: null,
-      content_type: lesson.type,
-      duration_minutes: lesson.type === "video" ? 12 : 6,
+      content_body: lesson.body,
+      content_type: "text",
+      duration_minutes: Math.max(4, Math.round(lesson.body.split(/\s+/).length / 180)),
       status: "published",
       sort_order: lesson.order,
       order_index: lesson.order,
@@ -704,14 +779,47 @@ async function seedLearning(client: PoolClient, profiles: Profile[]) {
   }
 
   // Enroll partner users: cycle through enrolled/completed/not-enrolled so
-  // the Insight Hub page shows every visible state.
+  // the Insight Hub page shows every visible state. Derived from the user's
+  // own id (stable) rather than their array index (unstable — shifts on
+  // every run as the partner-user set grows), so a re-run always assigns
+  // the same user to the same track/completion state instead of abandoning
+  // the previous run's enrollment row and quietly accumulating a stale,
+  // never-updated duplicate for a track they're no longer "assigned" to.
   const partnerUsers = profiles.filter((p) => p.partner_id);
   let enrollCount = 0;
   let certCount = 0;
-  for (const [index, user] of partnerUsers.entries()) {
-    const trackKey = ["sales", "technical", "solution"][index % 3];
+  let progressRowCount = 0;
+  for (const user of partnerUsers) {
+    const seedByte = createHash("sha256").update(user.id).digest()[0];
+    const trackKey = ["sales", "technical", "solution"][seedByte % 3];
     const trackId = trackIds[trackKey];
-    const completed = index % 2 === 0;
+    const completed = seedByte % 2 === 0;
+    const trackLessons = lessonIdsByTrack[trackKey] ?? [];
+    const requiredLessons = trackLessons.filter((l) => l.required);
+
+    // Seed learning_lesson_progress consistent with the completion state
+    // below, so the lesson viewer (insight-hub.$trackId) shows exactly the
+    // lessons a "completed"/"in_progress" demo user's percentage implies,
+    // rather than a progress_percent with no matching lesson checkmarks.
+    const lessonsToMarkDone = completed
+      ? trackLessons
+      : requiredLessons.slice(0, Math.ceil(requiredLessons.length / 2));
+    for (const lesson of lessonsToMarkDone) {
+      await upsert(client, "learning_lesson_progress", {
+        id: deterministicUuid(LEARNING_NS, `progress:${user.id}:${lesson.id}`),
+        user_id: user.id,
+        lesson_id: lesson.id,
+        completed_at: new Date().toISOString(),
+      });
+      progressRowCount += 1;
+    }
+    const progressPercent =
+      requiredLessons.length > 0
+        ? Math.round(
+            (lessonsToMarkDone.filter((l) => l.required).length / requiredLessons.length) * 100,
+          )
+        : 100;
+
     const enrollmentId = deterministicUuid(LEARNING_NS, `enrollment:${user.id}:${trackKey}`);
     const certificateToken = completed
       ? deterministicUuid(LEARNING_NS, `cert:${user.id}:${trackKey}`)
@@ -725,7 +833,7 @@ async function seedLearning(client: PoolClient, profiles: Profile[]) {
         track_id: trackId,
         status: completed ? "completed" : "in_progress",
         score_percent: completed ? 92 : null,
-        progress_percent: completed ? 100 : 45,
+        progress_percent: completed ? 100 : progressPercent,
         completed_at: completed ? new Date().toISOString() : null,
         certificate_token: certificateToken,
         is_certified: completed,
@@ -755,7 +863,7 @@ async function seedLearning(client: PoolClient, profiles: Profile[]) {
     }
   }
   console.log(
-    `Seeded ${tracks.length} tracks, ${subjects.length} subjects, ${lessons.length} lessons, ${enrollCount} enrollments (${certCount} certified)`,
+    `Seeded ${tracks.length} tracks, ${subjects.length} subjects, ${lessons.length} lessons, ${enrollCount} enrollments (${certCount} certified), ${progressRowCount} lesson-progress rows`,
   );
 }
 

@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
-import type { TagDealParticipantInput, UntagDealParticipantInput } from "@/server/participant-commands.server";
+import type {
+  TagCustomerParticipantInput,
+  TagDealParticipantInput,
+  UntagCustomerParticipantInput,
+  UntagDealParticipantInput,
+} from "@/server/participant-commands.server";
 
 async function resolveActorOrDenial() {
   const { getAuthContext } = await import("@/server/livey-service.server");
@@ -38,9 +43,42 @@ const untagDealParticipantFn = createServerFn({ method: "POST" })
     return untagDealParticipant({ actor: actorResult.actor, data });
   });
 
-export async function tagDealParticipant(input: TagDealParticipantInput): Promise<CommandExecutionResult> {
+export async function tagDealParticipant(
+  input: TagDealParticipantInput,
+): Promise<CommandExecutionResult> {
   return tagDealParticipantFn({ data: input });
 }
-export async function untagDealParticipant(input: UntagDealParticipantInput): Promise<CommandExecutionResult> {
+export async function untagDealParticipant(
+  input: UntagDealParticipantInput,
+): Promise<CommandExecutionResult> {
   return untagDealParticipantFn({ data: input });
+}
+
+const tagCustomerParticipantFn = createServerFn({ method: "POST" })
+  .validator((input: TagCustomerParticipantInput) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { tagCustomerParticipant } = await import("@/server/participant-commands.server");
+    return tagCustomerParticipant({ actor: actorResult.actor, data });
+  });
+
+const untagCustomerParticipantFn = createServerFn({ method: "POST" })
+  .validator((input: UntagCustomerParticipantInput) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { untagCustomerParticipant } = await import("@/server/participant-commands.server");
+    return untagCustomerParticipant({ actor: actorResult.actor, data });
+  });
+
+export async function tagCustomerParticipant(
+  input: TagCustomerParticipantInput,
+): Promise<CommandExecutionResult> {
+  return tagCustomerParticipantFn({ data: input });
+}
+export async function untagCustomerParticipant(
+  input: UntagCustomerParticipantInput,
+): Promise<CommandExecutionResult> {
+  return untagCustomerParticipantFn({ data: input });
 }

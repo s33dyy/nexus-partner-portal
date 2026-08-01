@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export const CUSTOMER_DUPLICATE_FIELDS = [
   "company_name",
   "domain",
@@ -670,39 +668,6 @@ export function buildDealParticipantTagHistoryRecord(input: {
     before_state: input.before_state ?? null,
     after_state: input.after_state ?? null,
   };
-}
-
-export function buildParticipantPayload(input: {
-  subjectType: "customer" | "deal";
-  subjectId: string;
-  partnerId?: string | null;
-  participantType: string;
-  source: string;
-  actorId?: string | null;
-  reason: string;
-  validFrom?: string;
-  validTo?: string | null;
-  provenance?: Record<string, unknown>;
-}) {
-  const now = new Date().toISOString();
-  const base = {
-    id: randomUUID(),
-    partner_id: input.partnerId ?? null,
-    participant_type: normalizeWhitespace(input.participantType),
-    source: normalizeWhitespace(input.source),
-    actor_id: input.actorId ?? null,
-    reason: normalizeWhitespace(input.reason),
-    valid_from: input.validFrom ?? now,
-    valid_to: input.validTo ?? null,
-    provenance: input.provenance ?? {},
-    is_seed: false,
-    created_at: now,
-    updated_at: now,
-  };
-
-  return input.subjectType === "customer"
-    ? { ...base, customer_id: input.subjectId }
-    : { ...base, deal_id: input.subjectId };
 }
 
 export function participantVisibilitySummary(input: {

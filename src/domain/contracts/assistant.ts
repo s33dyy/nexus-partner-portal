@@ -1,9 +1,12 @@
-// Contracts for the in-app Assistant (chatbot). Scope is deliberately narrow:
-// it may draft a new Deal for explicit confirmation, or answer questions
-// about/list the caller's own authorised Deals — nothing else. The model is
-// used only for intent classification and field extraction from free text;
-// every business-relevant answer (deal lists, draft previews) is built by
-// server code from real database rows, never invented by the model.
+// Contracts for the in-app Assistant (chatbot). It may draft a new Deal for
+// explicit confirmation, or search/list the caller's own authorised records
+// across Deals, Partners, Customers, Tasks, Tickets, team members, and
+// Learning tracks — nothing else (no other writes, no approvals/deletions/
+// role changes/exports). The model is used only for intent classification
+// and field extraction from free text; every business-relevant answer (list
+// results, draft previews) is built by server code from real database rows
+// scoped through the same RBAC the caller's own UI uses, never invented by
+// the model.
 
 export type AssistantMessageRole = "user" | "assistant";
 
@@ -21,6 +24,12 @@ export type AssistantDealDraft = {
   currencyCode: string | null;
   country: string | null;
   notes: string | null;
+  // Resolved server-side (see assistant.server.ts's account/client matching
+  // against the same listDropdownSourceValues search the manual "create
+  // deal" form's own account/client pickers use) once accountName/
+  // contactName match an existing Partner/Customer — never set by the model.
+  partnerId: string | null;
+  customerId: string | null;
 };
 
 export const EMPTY_ASSISTANT_DEAL_DRAFT: AssistantDealDraft = {
@@ -32,6 +41,8 @@ export const EMPTY_ASSISTANT_DEAL_DRAFT: AssistantDealDraft = {
   currencyCode: null,
   country: null,
   notes: null,
+  partnerId: null,
+  customerId: null,
 };
 
 export const REQUIRED_ASSISTANT_DEAL_FIELDS = [
@@ -44,6 +55,12 @@ export const REQUIRED_ASSISTANT_DEAL_FIELDS = [
 export type AssistantIntent =
   | { type: "list_deals"; reply: string; stage: string | null; status: string | null }
   | { type: "create_deal_draft"; reply: string; draft: AssistantDealDraft }
+  | { type: "list_partners"; reply: string; query: string | null }
+  | { type: "list_customers"; reply: string; query: string | null }
+  | { type: "list_tasks"; reply: string; query: string | null }
+  | { type: "list_tickets"; reply: string; query: string | null }
+  | { type: "list_users"; reply: string; query: string | null }
+  | { type: "list_learning"; reply: string; query: string | null }
   | { type: "none"; reply: string };
 
 export type AssistantDealSummary = {
@@ -57,11 +74,61 @@ export type AssistantDealSummary = {
   updatedAt: string;
 };
 
+export type AssistantPartnerSummary = {
+  id: string;
+  companyName: string;
+  tier: string;
+  status: string;
+  country: string;
+};
+
+export type AssistantCustomerSummary = {
+  id: string;
+  companyName: string;
+  segment: string;
+  status: string;
+  region: string;
+};
+
+export type AssistantTaskSummary = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  dueAt: string | null;
+};
+
+export type AssistantTicketSummary = {
+  id: string;
+  subject: string;
+  status: string;
+  priority: string;
+};
+
+export type AssistantUserSummary = {
+  id: string;
+  fullName: string;
+  email: string;
+};
+
+export type AssistantLearningSummary = {
+  trackId: string;
+  title: string;
+  status: string;
+  progressPercent: number;
+};
+
 export type AssistantTurnResult = {
   conversationId: string;
   reply: string;
   requiresConfirmation: boolean;
   draft: AssistantDealDraft | null;
   deals: AssistantDealSummary[];
+  partners: AssistantPartnerSummary[];
+  customers: AssistantCustomerSummary[];
+  tasks: AssistantTaskSummary[];
+  tickets: AssistantTicketSummary[];
+  users: AssistantUserSummary[];
+  learning: AssistantLearningSummary[];
   correlationId: string;
 };
