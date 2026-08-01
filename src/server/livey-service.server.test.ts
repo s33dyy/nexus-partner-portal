@@ -35,6 +35,65 @@ test("sessionExpiresAt defaults to the stricter 12h lifetime when no role is kno
   expect(hours).toBeLessThan(12.1);
 });
 
+test("bootstrapPartnerAssignment inserts a real, active governed assignment plus an active_context", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { bootstrapPartnerAssignment } = await import("@/server/livey-service.server");
+
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const fakeClient = {
+    query: async (sql: string, params?: unknown[]) => {
+      calls.push({ sql: String(sql), params: params ?? [] });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  await bootstrapPartnerAssignment(fakeClient as never, {
+    userId: "user-1",
+    roleKey: "partner_admin",
+    source: "self_registration",
+    approverUserId: "user-1",
+  });
+
+  const assignmentInsert = calls.find((c) => c.sql.includes("INSERT INTO assignments"));
+  expect(assignmentInsert).toBeDefined();
+  expect(assignmentInsert?.sql).toContain("'active'");
+  expect(assignmentInsert?.params).toContain("user-1");
+  expect(assignmentInsert?.params).toContain("partner_admin");
+
+  const contextInsert = calls.find((c) => c.sql.includes("INSERT INTO active_contexts"));
+  expect(contextInsert).toBeDefined();
+  expect(contextInsert?.params).toContain("user-1");
+
+  // Governed capability resolution keys off assignment.role_key, never a
+  // partner_id — a bare "no assignment row at all" is exactly what left
+  // self-registered/invited accounts permanently denied everywhere.
+  expect(assignmentInsert?.sql).not.toContain("partner_id");
+});
+
+test("bootstrapPartnerAssignment supports partner_user for invited teammates too", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const { bootstrapPartnerAssignment } = await import("@/server/livey-service.server");
+
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const fakeClient = {
+    query: async (sql: string, params?: unknown[]) => {
+      calls.push({ sql: String(sql), params: params ?? [] });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  await bootstrapPartnerAssignment(fakeClient as never, {
+    userId: "user-2",
+    roleKey: "partner_user",
+    source: "partner_invite",
+    approverUserId: "inviter-1",
+  });
+
+  const assignmentInsert = calls.find((c) => c.sql.includes("INSERT INTO assignments"));
+  expect(assignmentInsert?.params).toContain("partner_user");
+  expect(assignmentInsert?.params).toContain("inviter-1");
+});
+
 test("createDocumentDataUrl fetches raw Cloudinary PDFs from their stored secure URL", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
 

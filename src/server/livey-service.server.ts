@@ -6,7 +6,13 @@ import bcrypt from "bcryptjs";
 import { deleteCookie, getCookie, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 import type { PoolClient } from "pg";
 
-import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/governance";
+import {
+  GOVERNANCE_GEOGRAPHY_NODE_IDS,
+  GOVERNANCE_TENANT_IDS,
+  issueActiveContextFromAssignment,
+  type ActiveContextRecord,
+  type AssignmentRecord,
+} from "@/domain/contracts/governance";
 import { pool } from "@/server/postgres.server";
 import { applyTablePolicy, type TablePolicyAuthContext } from "@/server/table-policy.server";
 import type { PartnerStatus } from "@/lib/partner-status";
@@ -1596,6 +1602,110 @@ export async function signInWithPassword(email: string, password: string) {
   };
 }
 
+// §5.2: "A user identity... does not directly grant business access. Access
+// is granted through one or more assignments" — every account-creation path
+// must leave the user with a real governed Assignment, or every generic
+// table read/write denies them everywhere (governedRoleKey resolves to
+// null -> loadRoleCapabilities returns emptyCapabilities()). Only
+// admin.users.tsx's createUser flow did this, via a separate follow-up call
+// to assignGovernedRole after the fact — self-registration (signUpLocal)
+// and partner-invited teammates (createPartnerTeamMembersBulk) never did.
+// assignGovernedRole itself can't be reused directly here: it requires an
+// acting GovernedActor authorised via authorizeAssignRole (super_admin
+// only), which doesn't exist for a brand-new self-registering user and
+// wouldn't authorise an inviting partner_admin either. This is the minimal
+// bootstrap equivalent — no acting-on-behalf-of authorization needed, since
+// the assignment is a normal, expected side effect of account creation
+// itself, not a privileged admin action on someone else's behalf.
+//
+// Geography ceiling always defaults to Global: role_geography_access has no
+// rows for partner_admin/partner_user today (confirmed live), and
+// geography-based scope narrowing is a LIVEY-internal-role concept (see
+// appendGeographyFilter/GEOGRAPHY_SCOPED_TABLES) — a partner's own tenant
+// boundary comes from profiles.partner_id, not the geography ceiling.
+export async function bootstrapPartnerAssignment(
+  client: Pick<PoolClient, "query">,
+  input: {
+    userId: string;
+    roleKey: "partner_admin" | "partner_user";
+    source: string;
+    approverUserId: string;
+  },
+): Promise<void> {
+  const issuedAt = new Date().toISOString();
+  const assignmentId = randomUUID();
+
+  await client.query(
+    `INSERT INTO assignments (
+       assignment_id, user_id, tenant_id, organization_tenant_id, role_key, team_domain,
+       geography_ceiling_node_id, status, valid_from, source, approver_user_id, is_seed
+     ) VALUES ($1,$2,$3,$4,$5,'partner_success',$6,'active',$7,$8,$9,false)`,
+    [
+      assignmentId,
+      input.userId,
+      GOVERNANCE_TENANT_IDS.liveyOrganization,
+      GOVERNANCE_TENANT_IDS.liveyOrganization,
+      input.roleKey,
+      GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      issuedAt,
+      input.source,
+      input.approverUserId,
+    ],
+  );
+
+  const assignmentRecord: AssignmentRecord = {
+    assignmentId,
+    userId: input.userId,
+    tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+    organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+    roleKey: input.roleKey,
+    teamDomain: "partner_success",
+    geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    partnerId: null,
+    accountId: null,
+    portfolioId: null,
+    queueId: null,
+    status: "active",
+    validFrom: issuedAt,
+    validTo: null,
+    managerAssignmentId: null,
+    source: input.source,
+    approverUserId: input.approverUserId,
+    predecessorAssignmentId: null,
+    successorAssignmentId: null,
+    revokedAt: null,
+    revocationReason: null,
+    createdAt: issuedAt,
+    updatedAt: issuedAt,
+    version: 1,
+    isSeed: false,
+  };
+
+  const activeContext = issueActiveContextFromAssignment({
+    assignment: assignmentRecord,
+    issuedAt,
+  });
+
+  await client.query(
+    `INSERT INTO active_contexts (
+       context_id, user_id, assignment_id, tenant_id, organization_tenant_id,
+       working_scope, issued_at, expires_at, version, correlation_id, is_seed
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false)`,
+    [
+      activeContext.contextId,
+      activeContext.userId,
+      activeContext.assignmentId,
+      activeContext.tenantId,
+      activeContext.organizationTenantId,
+      activeContext.workingScope,
+      activeContext.issuedAt,
+      activeContext.expiresAt,
+      activeContext.version,
+      activeContext.correlationId,
+    ],
+  );
+}
+
 export async function signUpLocal(input: {
   full_name: string;
   email: string;
@@ -1618,6 +1728,12 @@ export async function signUpLocal(input: {
     [id, input.email, passwordHash, input.full_name, input.phone || null, input.company_name],
   );
   await pool.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'partner_admin')`, [id]);
+  await bootstrapPartnerAssignment(pool, {
+    userId: id,
+    roleKey: "partner_admin",
+    source: "self_registration",
+    approverUserId: id,
+  });
 
   const token = createToken();
   const expiresAt = sessionExpiresAt(["partner_admin"]);
@@ -1880,6 +1996,12 @@ export async function createPartnerTeamMembersBulk(input: {
         // assertCanGrantWorkspaceUser above).
         { allowedRoles: ["partner_admin", "partner_user"] },
       );
+      await bootstrapPartnerAssignment(client, {
+        userId: createdUser.id,
+        roleKey: row.portal_role,
+        source: "partner_invite",
+        approverUserId: ctx.profile?.id ?? ctx.session?.user.id ?? createdUser.id,
+      });
       await client.query(
         `INSERT INTO portal_team_members (
            id, company_name, full_name, email, role_title, portal_role, responsibility,
