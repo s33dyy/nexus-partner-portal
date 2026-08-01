@@ -605,7 +605,7 @@ Started Phase 2 of the sequencing list: the `getScopeSpec` pattern that was alre
 - Applied the pending `is_internal` migration to the local dev DB along the way (it existed in `db/schema.sql` but had never been run locally) — local-only, not a production action.
 - Cleaned up all local-only test fixtures (profile/assignment/active_context rows, reverted the task reassignment) after verification.
 
-Deployed to production after the above.
+Deployed to production as commit `7870434` and confirmed live: `railway status` shows the matching deployment Online, `railway logs --deployment` shows a clean "Migrations applied" → "Listening on" sequence with no errors, `https://systemforgelabs.xyz` returns HTTP 200, and — since this batch's fixes specifically depend on it — directly queried the production database (`DATABASE_PUBLIC_URL`) and confirmed `support_ticket_comments.is_internal` exists there (`boolean, not null, default false`) with 9 existing comment rows that would have hit the "Unsupported filter column" bug pre-fix.
 
 ### Explicitly still open
 
