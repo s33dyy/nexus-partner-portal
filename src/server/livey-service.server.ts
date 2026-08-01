@@ -68,6 +68,12 @@ export type TableQuery = {
   values?: Record<string, unknown> | Array<Record<string, unknown>>;
   single?: "single" | "maybeSingle" | null;
   limit?: number;
+  // A caller-supplied ".select(...)" comma-separated column list. "*" (the
+  // default) is unchanged — SELECT *. Anything narrower is honored exactly:
+  // the caller who deliberately left a column out (e.g. profiles callers
+  // omitting password_hash) actually gets it left out now, instead of the
+  // server always returning every column regardless of what was asked for.
+  select?: string;
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
@@ -941,6 +947,31 @@ function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOf
   };
 }
 
+// A caller's ".select(...)" is only honored when it's narrower than "*" —
+// the default stays exactly SELECT * (no risk of silently dropping a real
+// column that isn't in the curated TABLE_COLUMNS allowlist for some table).
+// But a caller that deliberately asked for a specific column list — e.g.
+// admin.users.tsx omitting password_hash — now actually gets only that list
+// back, instead of the server ignoring it and returning every column.
+export function buildSelectColumnsSql(select: string | undefined, columns: string[]): string {
+  if (!select || select.trim() === "*") {
+    return "*";
+  }
+  const requested = select
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
+  if (requested.length === 0) {
+    return "*";
+  }
+  for (const column of requested) {
+    if (!columns.includes(column)) {
+      throw new Error(`Unsupported select column: ${column}`);
+    }
+  }
+  return requested.map(quoteIdent).join(", ");
+}
+
 function serializeDbValue<T>(value: T): T {
   if (value instanceof Date) {
     return value.toISOString() as T;
@@ -1033,8 +1064,9 @@ export async function queryTableWithAuthContext(
 
   if (policyQuery.operation === "select") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
+    const selectSql = buildSelectColumnsSql(policyQuery.select, columns);
     const result = await pool.query(
-      `SELECT * FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}${limitSql}`,
+      `SELECT ${selectSql} FROM ${quoteIdent(policyQuery.table)}${whereSql}${orderSql}${limitSql}`,
       whereParams,
     );
     const data = result.rows.map((row) => serializeDbValue(row));
@@ -1417,9 +1449,13 @@ export async function getAuthContext(token?: string) {
     };
   }
 
+  // getAuthContext() is called by every authenticated page load and its
+  // result is sent straight to the browser (see the client-facing
+  // getAuthContext RPC in integrations/local/client.ts) — this SELECT must
+  // never include password_hash or any other credential/secret column.
   const [{ rows: profileRows }, { rows: roleRows }, governedState] = await Promise.all([
     pool.query(
-      `SELECT id, email, password_hash, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
+      `SELECT id, email, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
        FROM profiles WHERE id = $1 LIMIT 1`,
       [session.user.id],
     ),
@@ -1438,7 +1474,6 @@ export async function getAuthContext(token?: string) {
       } as {
         id: string;
         email: string;
-        password_hash: string;
         full_name: string;
         phone: string | null;
         company_name: string | null;

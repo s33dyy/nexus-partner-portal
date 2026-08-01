@@ -240,6 +240,67 @@ test("getAuthContext resolves an active governed assignment's status correctly",
   }
 });
 
+test("getAuthContext never asks the database for password_hash — its result is sent straight to the browser", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { getAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  const futureExpiry = new Date(Date.now() + 60 * 60 * 1000);
+  let profileQuerySql: string | null = null;
+
+  pool.query = (async (sql: string) => {
+    const text = String(sql);
+    if (text.includes("FROM sessions s")) {
+      return {
+        rows: [
+          {
+            token_hash: "hash",
+            expires_at: futureExpiry,
+            revoked_at: null,
+            id: "user-1",
+            email: "user@example.com",
+            full_name: "Test User",
+            phone: null,
+            company_name: null,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (text.includes("FROM profiles WHERE id = $1")) {
+      profileQuerySql = text;
+      return {
+        rows: [
+          {
+            id: "user-1",
+            email: "user@example.com",
+            full_name: "Test User",
+            phone: null,
+            company_name: null,
+            avatar_url: null,
+            partner_id: null,
+            partner_status: "approved",
+            must_reset_password: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const authContext = await getAuthContext("any-token");
+    expect(profileQuerySql).not.toBeNull();
+    expect(profileQuerySql).not.toContain("password_hash");
+    expect(authContext.profile && "password_hash" in authContext.profile).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
 test("every table queried by the client UI is registered in the generic query path", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
 

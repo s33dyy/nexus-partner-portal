@@ -135,6 +135,92 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
   }
 });
 
+test("queryTableWithAuthContext honors an explicit select() column list instead of always running SELECT *", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  const originalQuery = pool.query.bind(pool);
+  const observed: Array<{ sql: string; params: unknown[] }> = [];
+
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    observed.push({ sql: String(sql), params });
+    if (String(sql).includes('FROM "profiles"')) {
+      return {
+        rows: [{ id: "user-1", email: "user@example.com", full_name: "User One" }],
+        rowCount: 1,
+      } as never;
+    }
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    // A caller that deliberately narrows its select — e.g. admin.users.tsx
+    // omitting password_hash — must actually get only those columns back,
+    // not every column the table has regardless of what was asked for.
+    const scoped = await queryTableWithAuthContext(
+      {
+        table: "profiles",
+        operation: "select",
+        select: "id, email, full_name",
+      },
+      {
+        userId: "super-admin-user",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+      },
+    );
+    expect(scoped.error).toBeNull();
+    const scopedSql = observed.find((entry) => entry.sql.includes('FROM "profiles"'))?.sql;
+    expect(scopedSql).toContain('SELECT "id", "email", "full_name" FROM "profiles"');
+    expect(scopedSql).not.toContain("password_hash");
+
+    observed.length = 0;
+
+    // The default (no select(), or select("*")) is unchanged: SELECT *.
+    const unscoped = await queryTableWithAuthContext(
+      { table: "profiles", operation: "select" },
+      {
+        userId: "super-admin-user",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+      },
+    );
+    expect(unscoped.error).toBeNull();
+    const unscopedSql = observed.find((entry) => entry.sql.includes('FROM "profiles"'))?.sql;
+    expect(unscopedSql).toContain('SELECT * FROM "profiles"');
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("queryTableWithAuthContext rejects a select() column that isn't in the table's allowlist", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+
+  await expect(
+    queryTableWithAuthContext(
+      { table: "profiles", operation: "select", select: "id, not_a_real_column" },
+      {
+        userId: "super-admin-user",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+      },
+    ),
+  ).rejects.toThrow("Unsupported select column: not_a_real_column");
+});
+
 const SUPER_ADMIN_AUTH = {
   userId: "super-admin-user",
   roles: ["super_admin"],
