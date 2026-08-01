@@ -17,7 +17,7 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
-docs/superpowers/plans/
+/docs/
 .superpowers/
 
 # Wrangler / Cloudflare
@@ -38,3 +38,8 @@ docs/superpowers/plans/
 # Generated scratch/output artifacts
 /tmp/
 /output/
+/graphify-out/
+
+# Local tool config/state — environment-specific, not shared
+/.claude/
+/.lovable/
