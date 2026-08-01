@@ -1,4 +1,51 @@
+import { createHmac } from "node:crypto";
+
 import { expect, test } from "bun:test";
+
+const SUPER_ADMIN_SESSION_COOKIE = "livey_session=super-admin-session-token";
+
+function mockSuperAdminAuthQueries(sql: string): { rows: unknown[]; rowCount: number } | null {
+  const text = String(sql);
+  if (text.includes("FROM sessions s") && text.includes("JOIN profiles p ON p.id = s.user_id")) {
+    return {
+      rows: [
+        {
+          token_hash: "hash",
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          revoked_at: null,
+          id: "super-admin-1",
+          email: "admin@example.com",
+          full_name: "Super Admin",
+          phone: null,
+          company_name: null,
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+  if (text.includes("FROM profiles WHERE id = $1")) {
+    return {
+      rows: [
+        {
+          id: "super-admin-1",
+          email: "admin@example.com",
+          full_name: "Super Admin",
+          phone: null,
+          company_name: null,
+          avatar_url: null,
+          partner_id: null,
+          partner_status: "approved",
+          must_reset_password: false,
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+  if (text.includes("SELECT role FROM user_roles WHERE user_id = $1")) {
+    return { rows: [{ role: "super_admin" }], rowCount: 1 };
+  }
+  return null;
+}
 
 test("Zoho send-agreement form parsing requires a PDF upload", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
@@ -45,6 +92,9 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
   let requestBody: unknown = null;
 
   pool.query = (async (sql: string, params?: unknown[]) => {
+    const authRows = mockSuperAdminAuthQueries(sql);
+    if (authRows) return authRows as never;
+
     if (String(sql).includes("FROM public.partners p") && String(sql).includes("owner_email")) {
       return {
         rows: [
@@ -66,7 +116,10 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
       return { rows: [], rowCount: 1 } as never;
     }
 
-    if (String(sql).includes("UPDATE public.partners") && String(sql).includes("agreement_envelope_id")) {
+    if (
+      String(sql).includes("UPDATE public.partners") &&
+      String(sql).includes("agreement_envelope_id")
+    ) {
       return { rows: [], rowCount: 1 } as never;
     }
 
@@ -74,7 +127,10 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
       return { rows: [], rowCount: 1 } as never;
     }
 
-    if (String(sql).includes("UPDATE public.partners") && String(sql).includes("agreement_source_doc_path")) {
+    if (
+      String(sql).includes("UPDATE public.partners") &&
+      String(sql).includes("agreement_source_doc_path")
+    ) {
       return { rows: [], rowCount: 1 } as never;
     }
 
@@ -104,7 +160,8 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
       return new Response(
         JSON.stringify({
           public_id: "partners/partner-123/agreement-source",
-          secure_url: "https://res.cloudinary.com/example/raw/upload/partners/partner-123/agreement-source",
+          secure_url:
+            "https://res.cloudinary.com/example/raw/upload/partners/partner-123/agreement-source",
           resource_type: "raw",
           bytes: 4,
         }),
@@ -171,29 +228,182 @@ test("Zoho send-agreement resolves the recipient email from the partner owner pr
     form.append("partnerId", "partner-123");
     form.append("partnerName", "Partner Name");
     form.append("partnerCompany", "Acme & Co");
-    form.append("agreementFile", new File([new Uint8Array([37, 80, 68, 70])], "agreement.pdf", {
-      type: "application/pdf",
-    }));
+    form.append(
+      "agreementFile",
+      new File([new Uint8Array([37, 80, 68, 70])], "agreement.pdf", {
+        type: "application/pdf",
+      }),
+    );
 
     const request = new Request("http://localhost/api/integrations/zoho-sign/send-agreement", {
       method: "POST",
+      headers: { cookie: SUPER_ADMIN_SESSION_COOKIE },
       body: form,
     });
 
     const response = await handleZohoSendAgreement(request);
 
     expect(response.status).toBe(200);
-    expect((requestBody as { requests?: { actions?: Array<{ recipient_email?: string }> } })?.requests?.actions?.[0]?.recipient_email).toBe(
-      "owner@example.com",
-    );
+    expect(
+      (requestBody as { requests?: { actions?: Array<{ recipient_email?: string }> } })?.requests
+        ?.actions?.[0]?.recipient_email,
+    ).toBe("owner@example.com");
   } finally {
     pool.query = originalQuery as typeof pool.query;
     globalThis.fetch = originalFetch;
   }
 });
 
+test("Zoho send-agreement and resync-agreement reject an invalid/expired session token", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { handleZohoSendAgreement, handleZohoResyncAgreement } =
+    await import("@/server/zoho-api.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  let dbWasQueriedForPartner = false;
+
+  pool.query = (async (sql: string) => {
+    const text = String(sql);
+    // A session lookup for an unknown/expired token hash finds no row.
+    if (text.includes("FROM sessions s") && text.includes("JOIN profiles p ON p.id = s.user_id")) {
+      return { rows: [], rowCount: 0 } as never;
+    }
+    if (text.includes("FROM public.partners")) dbWasQueriedForPartner = true;
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const form = new FormData();
+    form.append("partnerId", "partner-123");
+    form.append("partnerName", "Partner Name");
+    form.append("partnerCompany", "Acme & Co");
+    form.append(
+      "agreementFile",
+      new File([new Uint8Array([37, 80, 68, 70])], "agreement.pdf", { type: "application/pdf" }),
+    );
+    const sendResponse = await handleZohoSendAgreement(
+      new Request("http://localhost/api/integrations/zoho-sign/send-agreement", {
+        method: "POST",
+        headers: { cookie: "livey_session=garbage-or-expired-token" },
+        body: form,
+      }),
+    );
+    expect(sendResponse.status).toBe(401);
+
+    const resyncResponse = await handleZohoResyncAgreement(
+      new Request("http://localhost/api/integrations/zoho-sign/resync-agreement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "livey_session=garbage-or-expired-token",
+        },
+        body: JSON.stringify({ partnerId: "partner-123" }),
+      }),
+    );
+    expect(resyncResponse.status).toBe(401);
+    expect(dbWasQueriedForPartner).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("Zoho send-agreement and resync-agreement reject a non-super_admin session (e.g. partner_admin)", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+  const { handleZohoSendAgreement, handleZohoResyncAgreement } =
+    await import("@/server/zoho-api.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  let dbWasQueriedForPartner = false;
+
+  pool.query = (async (sql: string) => {
+    const text = String(sql);
+    if (text.includes("FROM sessions s") && text.includes("JOIN profiles p ON p.id = s.user_id")) {
+      return {
+        rows: [
+          {
+            token_hash: "hash",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            revoked_at: null,
+            id: "partner-admin-1",
+            email: "pa@example.com",
+            full_name: "Partner Admin",
+            phone: null,
+            company_name: "Acme & Co",
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (text.includes("FROM profiles WHERE id = $1")) {
+      return {
+        rows: [
+          {
+            id: "partner-admin-1",
+            email: "pa@example.com",
+            full_name: "Partner Admin",
+            phone: null,
+            company_name: "Acme & Co",
+            avatar_url: null,
+            partner_id: "partner-123",
+            partner_status: "approved",
+            must_reset_password: false,
+          },
+        ],
+        rowCount: 1,
+      } as never;
+    }
+    if (text.includes("SELECT role FROM user_roles WHERE user_id = $1")) {
+      return { rows: [{ role: "partner_admin" }], rowCount: 1 } as never;
+    }
+    if (text.includes("FROM public.partners")) dbWasQueriedForPartner = true;
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const form = new FormData();
+    form.append("partnerId", "partner-123");
+    form.append("partnerName", "Partner Name");
+    form.append("partnerCompany", "Acme & Co");
+    form.append(
+      "agreementFile",
+      new File([new Uint8Array([37, 80, 68, 70])], "agreement.pdf", { type: "application/pdf" }),
+    );
+    const sendResponse = await handleZohoSendAgreement(
+      new Request("http://localhost/api/integrations/zoho-sign/send-agreement", {
+        method: "POST",
+        headers: { cookie: "livey_session=partner-admin-session-token" },
+        body: form,
+      }),
+    );
+    expect(sendResponse.status).toBe(401);
+
+    const resyncResponse = await handleZohoResyncAgreement(
+      new Request("http://localhost/api/integrations/zoho-sign/resync-agreement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "livey_session=partner-admin-session-token",
+        },
+        body: JSON.stringify({ partnerId: "partner-123" }),
+      }),
+    );
+    expect(resyncResponse.status).toBe(401);
+    expect(dbWasQueriedForPartner).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+function signZohoWebhookPayload(secret: string, payload: string): string {
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
+
 test("Zoho webhook completion moves the partner into signed_pending_review", async () => {
   process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const originalSecret = process.env.ZOHO_SIGN_WEBHOOK_SECRET;
+  process.env.ZOHO_SIGN_WEBHOOK_SECRET = "test-webhook-secret";
 
   const { handleZohoWebhook } = await import("@/server/zoho-api.server");
   const { pool } = await import("@/server/postgres.server");
@@ -215,17 +425,19 @@ test("Zoho webhook completion moves the partner into signed_pending_review", asy
   }) as typeof pool.query;
 
   try {
+    const body = JSON.stringify({
+      requests: {
+        request_id: "req-123",
+        request_status: "completed",
+      },
+    });
     const request = new Request("http://localhost/api/integrations/zoho-sign/webhook", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-zoho-sign-signature": signZohoWebhookPayload("test-webhook-secret", body),
       },
-      body: JSON.stringify({
-        requests: {
-          request_id: "req-123",
-          request_status: "completed",
-        },
-      }),
+      body,
     });
 
     const response = await handleZohoWebhook(request);
@@ -239,11 +451,83 @@ test("Zoho webhook completion moves the partner into signed_pending_review", asy
         String(entry.sql).includes("SET partner_status = 'signed_pending_review'"),
       ),
     ).toBe(true);
-    expect(
-      queries.some((entry) => String(entry.sql).includes("SET status = 'approved'")),
-    ).toBe(false);
+    expect(queries.some((entry) => String(entry.sql).includes("SET status = 'approved'"))).toBe(
+      false,
+    );
   } finally {
     pool.query = originalQuery as typeof pool.query;
+    process.env.ZOHO_SIGN_WEBHOOK_SECRET = originalSecret;
+  }
+});
+
+test("Zoho webhook rejects every request when no webhook secret is configured (fails closed, not open)", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const originalSecret = process.env.ZOHO_SIGN_WEBHOOK_SECRET;
+  delete process.env.ZOHO_SIGN_WEBHOOK_SECRET;
+
+  const { handleZohoWebhook } = await import("@/server/zoho-api.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  let dbWasQueried = false;
+  pool.query = (async () => {
+    dbWasQueried = true;
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const body = JSON.stringify({
+      requests: { request_id: "req-123", request_status: "completed" },
+    });
+    const request = new Request("http://localhost/api/integrations/zoho-sign/webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-zoho-sign-signature": "anything" },
+      body,
+    });
+
+    const response = await handleZohoWebhook(request);
+
+    expect(response.status).toBe(401);
+    expect(dbWasQueried).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+    process.env.ZOHO_SIGN_WEBHOOK_SECRET = originalSecret;
+  }
+});
+
+test("Zoho webhook rejects a request with the wrong signature even when a secret is configured", async () => {
+  process.env.DATABASE_URL ??= "postgres://localhost/test";
+  const originalSecret = process.env.ZOHO_SIGN_WEBHOOK_SECRET;
+  process.env.ZOHO_SIGN_WEBHOOK_SECRET = "test-webhook-secret";
+
+  const { handleZohoWebhook } = await import("@/server/zoho-api.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  let dbWasQueried = false;
+  pool.query = (async () => {
+    dbWasQueried = true;
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const body = JSON.stringify({
+      requests: { request_id: "req-123", request_status: "completed" },
+    });
+    const request = new Request("http://localhost/api/integrations/zoho-sign/webhook", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-zoho-sign-signature": signZohoWebhookPayload("wrong-secret", body),
+      },
+      body,
+    });
+
+    const response = await handleZohoWebhook(request);
+
+    expect(response.status).toBe(401);
+    expect(dbWasQueried).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+    process.env.ZOHO_SIGN_WEBHOOK_SECRET = originalSecret;
   }
 });
 

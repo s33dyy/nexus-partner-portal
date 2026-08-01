@@ -222,19 +222,23 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.19 Ch.17 17a (§17.3, §17.4.1, §17.1 rule 9) — Zoho Sign send-agreement/resync-agreement endpoints have zero server-side auth check
+### 2.19 Ch.17 17a (§17.3, §17.4.1, §17.1 rule 9) — Zoho Sign send-agreement/resync-agreement endpoints have zero server-side auth check — **fixed 2026-08-01**
 
 **Spec (§17.3, §17.4.1, §17.1 rule 9):** Only Super Admin may select/upload an agreement and send it, and every integration action requires 'explicit integration action permission' scoped to a capability — the interface is capability-scoped and every provider-triggering action is authorised.
 
 **Shipped:** handleZohoSendAgreement and handleZohoResyncAgreement in src/server/zoho-api.server.ts (lines 250-351 and 353-429) perform zero session/role check anywhere in the function body — they trust `partnerId` straight from the request body and proceed to call the real Zoho Sign API (sendAgreement) or mutate the partner's status. The only gating is client-side: admin.partners.tsx:544 does `if (!hasRole("super_admin"))` before rendering the page, and calls these routes from fetch("/api/integrations/zoho-sign/send-agreement", ...) at admin.partners.tsx:411 and 436. The routes are wired with no wrapper in src/server.ts:72-77. By contrast, handleZohoSignUrl in the same file (lines 431-491) does call getAuthContext(sessionToken) and returns 401 without a valid session — proving the auth path exists in this file but was simply omitted for send-agreement/resync-agreement. Any caller who knows or guesses a partnerId can POST directly to these endpoints (bypassing the UI) to send a real signing request to a partner's owner email or flip partner status via resync, with no credential at all.
 
+**Fix:** added a shared `requireSuperAdminSession(request)` check (same cookie-extraction + `getAuthContext` pattern `handleZohoSignUrl` already used) to both handlers, returning 401 for no session, an invalid/expired session, or a session that isn't `super_admin`.
+
 ---
 
-### 2.20 Ch.17 17b (§17.1 rules 4 & 6, §17.2 (Webhook receipt), §17.10 bullet 3) — Webhook signature verification is skipped by default, and no durable receipt is ever persisted
+### 2.20 Ch.17 17b (§17.1 rules 4 & 6, §17.2 (Webhook receipt), §17.10 bullet 3) — Webhook signature verification is skipped by default, and no durable receipt is ever persisted — **partially fixed 2026-08-01**
 
 **Spec (§17.1 rules 4 & 6, §17.2 (Webhook receipt), §17.10 bullet 3):** Every inbound webhook must be signature/timestamp/account/replay verified before processing, and a durable Webhook receipt must be persisted before domain processing begins; an invalid signature must produce no domain action.
 
 **Shipped:** verifyZohoWebhookSignature in src/lib/zoho-sign.ts:409-420 contains `if (!webhookSecret) return true; // skip verification if not configured` — if ZOHO_SIGN_WEBHOOK_SECRET is unset the signature check is bypassed entirely and every payload is treated as valid. That env var is documented as `# Optional: HMAC secret for webhook signature validation` in .env.example:15, i.e. the app is designed to run with verification disabled by default. Even when the secret is set, only an HMAC-equality check runs (src/lib/zoho-sign.ts:415-419) — there is no timestamp, replay-window, or provider-account check. handleZohoWebhook (src/server/zoho-api.server.ts:97-145) also never writes a durable receipt: the `command_inbox` table exists in db/schema.sql:785-799 with a UNIQUE(source, source_message_id) constraint built exactly for this, but grep across src/ shows zero references to command_inbox from any webhook handler — the Zoho webhook goes straight from signature check to domain mutation (markPartnerSignedPendingReview) with no receipt record at all. This is the item flagged in the audit as 'bypasses policy — still true' and is confirmed unchanged this session.
+
+**Fix (partial):** `verifyZohoWebhookSignature` now fails closed (returns `false`, not `true`) when no secret is configured, and uses a timing-safe buffer comparison instead of `===`. A random secret was generated and set as `ZOHO_SIGN_WEBHOOK_SECRET` in Railway. **This does not make the integration fully secure yet** — Zoho Sign's own webhook configuration (an external dashboard this session has no credentials for) must be updated to sign outgoing webhooks with the *same* secret value, or every real webhook call will now be correctly-but-uselessly rejected with 401. Until that one manual step happens on the Zoho side, the "Resync" button in `admin.partners.tsx` (which polls Zoho directly via `handleZohoResyncAgreement`, now also fixed to require super_admin) is the working fallback for pulling a signed agreement's status. Timestamp/replay-window/provider-account verification and the durable `command_inbox` receipt are still unbuilt — not attempted in this pass.
 
 ---
 

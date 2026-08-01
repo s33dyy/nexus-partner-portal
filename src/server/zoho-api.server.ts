@@ -9,18 +9,46 @@ import {
   verifyZohoWebhookSignature,
   REDIRECT_URI,
 } from "@/lib/zoho-sign";
-import { getAuthContext, removeDocumentBlobs, uploadDocumentBlob } from "@/server/livey-service.server";
+import {
+  getAuthContext,
+  removeDocumentBlobs,
+  uploadDocumentBlob,
+} from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
 
 const CLIENT_ID = process.env.ZOHO_SIGN_CLIENT_ID ?? "";
 const ACCOUNTS_URL = process.env.ZOHO_ACCOUNTS_URL ?? "https://accounts.zoho.in";
 
+// §17.3/§17.4.1: only Super Admin may select/upload an agreement and send
+// it, and every integration action requires an authorised session — these
+// two HTTP routes previously trusted partnerId straight from the request
+// body with no session check at all (unlike handleZohoSignUrl in the same
+// file, which already does this correctly).
+async function requireSuperAdminSession(request: Request): Promise<Response | null> {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookies = Object.fromEntries(
+    cookieHeader.split(";").map((c) => {
+      const [k, ...v] = c.trim().split("=");
+      return [k.trim(), v.join("=")];
+    }),
+  );
+  const sessionToken = cookies["livey_session"];
+  const { profile, roles } = await getAuthContext(sessionToken);
+  if (!profile?.id || !roles.includes("super_admin")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return null;
+}
+
 export async function handleZohoConnect(request: Request) {
   if (!CLIENT_ID) {
-    return new Response(
-      JSON.stringify({ error: "Zoho Sign Client ID is not configured" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ error: "Zoho Sign Client ID is not configured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const state = randomBytes(32).toString("hex");
@@ -248,6 +276,9 @@ async function storeSourceAgreementUpload(input: {
 }
 
 export async function handleZohoSendAgreement(request: Request) {
+  const denied = await requireSuperAdminSession(request);
+  if (denied) return denied;
+
   let body: ReturnType<typeof parseZohoSendAgreementFormData>;
   try {
     body = parseZohoSendAgreementFormData(await request.formData());
@@ -282,13 +313,10 @@ export async function handleZohoSendAgreement(request: Request) {
       });
     }
     if (!partner.owner_email) {
-      return new Response(
-        JSON.stringify({ error: "Partner owner email could not be resolved" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "Partner owner email could not be resolved" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const sourceFilePath = await storeSourceAgreementUpload({
@@ -351,6 +379,9 @@ export async function handleZohoSendAgreement(request: Request) {
 }
 
 export async function handleZohoResyncAgreement(request: Request) {
+  const denied = await requireSuperAdminSession(request);
+  if (denied) return denied;
+
   let body: { partnerId?: string };
   try {
     body = (await request.json()) as { partnerId?: string };

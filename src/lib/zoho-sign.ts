@@ -8,6 +8,8 @@
  */
 import "dotenv/config";
 
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 import { pool } from "@/server/postgres.server";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -255,7 +257,7 @@ export async function sendAgreement(opts: {
   const apiDomain = process.env.ZOHO_SIGN_API_URL ?? "https://sign.zoho.in";
 
   let requestId: string;
-  let signingUrl: string | null = null;
+  const signingUrl: string | null = null;
 
   const uploadRes = await fetch(`${apiDomain}/api/v1/documents`, {
     method: "POST",
@@ -406,15 +408,17 @@ export async function getRequestStatus(requestId: string): Promise<string> {
 }
 
 /** Verify Zoho Sign webhook HMAC signature. */
-export function verifyZohoWebhookSignature(
-  payload: string,
-  receivedSignature: string,
-): boolean {
+export function verifyZohoWebhookSignature(payload: string, receivedSignature: string): boolean {
   const webhookSecret = process.env.ZOHO_SIGN_WEBHOOK_SECRET;
-  if (!webhookSecret) return true; // skip verification if not configured
-  const { createHmac } = require("node:crypto") as typeof import("node:crypto");
-  const expected = createHmac("sha256", webhookSecret)
-    .update(payload)
-    .digest("hex");
-  return expected === receivedSignature;
+  // §17.1 rule 4/6: an invalid (or unverifiable) signature must produce no
+  // domain action. Previously returned true — treating every payload as
+  // valid — whenever the secret env var was unset, which is documented as
+  // the default in .env.example. Fail closed instead: no secret means no
+  // request can ever be verified, so none should be trusted.
+  if (!webhookSecret) return false;
+  const expected = createHmac("sha256", webhookSecret).update(payload).digest("hex");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const receivedBuffer = Buffer.from(receivedSignature, "hex");
+  if (expectedBuffer.length !== receivedBuffer.length) return false;
+  return timingSafeEqual(expectedBuffer, receivedBuffer);
 }
