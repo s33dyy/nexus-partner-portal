@@ -38,6 +38,7 @@ const LIST_INTENT_CASES = [
   { type: "list_tickets", query: null },
   { type: "list_users", query: "Priya" },
   { type: "list_learning", query: null },
+  { type: "list_news", query: "Northstar" },
 ] as const;
 
 for (const testCase of LIST_INTENT_CASES) {

@@ -1,8 +1,8 @@
 // Contracts for the in-app Assistant (chatbot). It may draft a new Deal for
 // explicit confirmation, or search/list the caller's own authorised records
-// across Deals, Partners, Customers, Tasks, Tickets, team members, and
-// Learning tracks — nothing else (no other writes, no approvals/deletions/
-// role changes/exports). The model is used only for intent classification
+// across Deals, Partners, Customers, Tasks, Tickets, team members, Learning
+// tracks, and the News feed — nothing else (no other writes, no approvals/
+// deletions/role changes/exports). The model is used only for intent classification
 // and field extraction from free text; every business-relevant answer (list
 // results, draft previews) is built by server code from real database rows
 // scoped through the same RBAC the caller's own UI uses, never invented by
@@ -61,6 +61,7 @@ export type AssistantIntent =
   | { type: "list_tickets"; reply: string; query: string | null }
   | { type: "list_users"; reply: string; query: string | null }
   | { type: "list_learning"; reply: string; query: string | null }
+  | { type: "list_news"; reply: string; query: string | null }
   | { type: "none"; reply: string };
 
 export type AssistantDealSummary = {
@@ -118,6 +119,15 @@ export type AssistantLearningSummary = {
   progressPercent: number;
 };
 
+export type AssistantNewsSummary = {
+  id: string;
+  title: string;
+  caption: string;
+  postedByName: string;
+  postedByRole: string;
+  updatedAt: string;
+};
+
 export type AssistantTurnResult = {
   conversationId: string;
   reply: string;
@@ -130,5 +140,6 @@ export type AssistantTurnResult = {
   tickets: AssistantTicketSummary[];
   users: AssistantUserSummary[];
   learning: AssistantLearningSummary[];
+  news: AssistantNewsSummary[];
   correlationId: string;
 };

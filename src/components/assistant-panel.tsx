@@ -19,6 +19,7 @@ import type {
   AssistantDealDraft,
   AssistantDealSummary,
   AssistantLearningSummary,
+  AssistantNewsSummary,
   AssistantPartnerSummary,
   AssistantTaskSummary,
   AssistantTicketSummary,
@@ -37,6 +38,7 @@ type PanelMessage = {
   tickets?: AssistantTicketSummary[];
   users?: AssistantUserSummary[];
   learning?: AssistantLearningSummary[];
+  news?: AssistantNewsSummary[];
 };
 
 type ListItem = { id: string; primary: string; secondary: string; badge?: string };
@@ -93,19 +95,34 @@ function toListItems(entry: PanelMessage): ListItem[] {
       badge: l.status.replace(/_/g, " "),
     }));
   }
+  if (entry.news?.length) {
+    return entry.news.map((n) => ({
+      id: n.id,
+      primary: n.title,
+      secondary: n.caption,
+      badge: n.postedByName,
+    }));
+  }
   return [];
 }
 
 const WELCOME_MESSAGE: PanelMessage = {
   role: "assistant",
   content:
-    "Hi, I'm the LIVEY Assistant. I can create a new deal from what you tell me, or help you find things — Deals, Partners, Customers, Tasks, Tickets, Learning tracks, or a colleague.",
+    "Hi, I'm the LIVEY Assistant. I can create a new deal from what you tell me, or help you find things — Deals, Partners, Customers, Tasks, Tickets, Learning tracks, News, or a colleague.",
 };
 
-export function AssistantPanel() {
+type AssistantPanelProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+};
+
+export function AssistantPanel({ open: openProp, onOpenChange }: AssistantPanelProps = {}) {
   const { can } = useAuth();
   const canCreateDeals = can("deals", "create");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PanelMessage[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
@@ -142,6 +159,7 @@ export function AssistantPanel() {
           tickets: result.tickets,
           users: result.users,
           learning: result.learning,
+          news: result.news,
         },
       ]);
       if (result.requiresConfirmation && result.draft) {
@@ -205,8 +223,8 @@ export function AssistantPanel() {
           </SheetTitle>
           <SheetDescription>
             {canCreateDeals
-              ? "Create a deal, or search Deals, Partners, Customers, Tasks, Tickets, Learning, and your team."
-              : "Search Deals, Partners, Customers, Tasks, Tickets, Learning, and your team — your role can't create deals here."}
+              ? "Create a deal, or search Deals, Partners, Customers, Tasks, Tickets, Learning, News, and your team."
+              : "Search Deals, Partners, Customers, Tasks, Tickets, Learning, News, and your team — your role can't create deals here."}
           </SheetDescription>
         </SheetHeader>
 

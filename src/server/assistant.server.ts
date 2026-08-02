@@ -9,6 +9,7 @@ import {
   type AssistantDealSummary,
   type AssistantIntent,
   type AssistantLearningSummary,
+  type AssistantNewsSummary,
   type AssistantPartnerSummary,
   type AssistantTaskSummary,
   type AssistantTicketSummary,
@@ -40,21 +41,22 @@ const LIST_INTENT_TYPES = [
   "list_tickets",
   "list_users",
   "list_learning",
+  "list_news",
 ] as const;
 type ListIntentType = (typeof LIST_INTENT_TYPES)[number];
 
 const SYSTEM_PROMPT = `You are the LIVEY PAM CRM Assistant. You help with:
 (1) drafting a brand-new sales Deal from what the user tells you, for their explicit confirmation before anything is saved;
-(2) searching or listing the user's own authorised Deals, Partners, Customers, Tasks, Support tickets, team members, and Insight Hub / Learning tracks.
+(2) searching or listing the user's own authorised Deals, Partners, Customers, Tasks, Support tickets, team members, Insight Hub / Learning tracks, and the LIVEY News feed.
 Refuse anything else (any write other than drafting a Deal, approvals, role or permission changes, exports, deletions, unrelated chit-chat) by explaining this limitation in "reply".
 
 Respond with ONLY a single minified JSON object, no markdown fences, no commentary outside the JSON, matching exactly this shape:
-{"type":"list_deals"|"create_deal_draft"|"list_partners"|"list_customers"|"list_tasks"|"list_tickets"|"list_users"|"list_learning"|"none","reply":"short natural-language message for the user","stage":string|null,"status":string|null,"query":string|null,"draft":{"accountName":string|null,"contactName":string|null,"product":string|null,"quantity":number|null,"amount":string|null,"currencyCode":string|null,"country":string|null,"notes":string|null}|null}
+{"type":"list_deals"|"create_deal_draft"|"list_partners"|"list_customers"|"list_tasks"|"list_tickets"|"list_users"|"list_learning"|"list_news"|"none","reply":"short natural-language message for the user","stage":string|null,"status":string|null,"query":string|null,"draft":{"accountName":string|null,"contactName":string|null,"product":string|null,"quantity":number|null,"amount":string|null,"currencyCode":string|null,"country":string|null,"notes":string|null}|null}
 
 Rules:
 - Use "list_deals" when the user wants to see, count, or ask about their existing deals. Set "stage" to a pipeline stage keyword if mentioned (sourced, demo, testing, qualified, proposal, negotiation, approved, won, lost), else null. Set "status" similarly (e.g. "submitted", "approved"), else null.
 - Use "create_deal_draft" when the user wants to create/register/log a new deal. Extract only fields the user actually gave into "draft" — leave anything unknown as null, never invent values. "reply" asks a short, specific question about the next missing required field (account/company name, contact/client name, product, and amount are all required), or says "Ready to create this deal — please confirm." once every required field has been given across the conversation.
-- Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Any request to see, list, count, search, or ask about records of one of these kinds ALWAYS uses the matching list_* type, never "none" or "list_deals". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
+- Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Use "list_news" for the LIVEY News feed / editorial updates / announcements (e.g. "what's new", "any updates from LIVEY", "show me the news"). Any request to see, list, count, search, or ask about records of one of these kinds ALWAYS uses the matching list_* type, never "none" or "list_deals". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
 - Use "none" for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, small talk, or a question about the current user's own identity (name, role, email, company/account — answer these directly and accurately from the "You are currently assisting" block below, never from memory or a guess). Other than that identity block, this path has no database access — "reply" must NEVER include a specific record name, company, person, count, date, or any other business fact you were not directly given. If a request sounds like it wants specific records of any kind, classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
 - Never claim to have created, changed, or deleted anything yourself — only the system creates a deal, and only after the user explicitly confirms a shown preview.`;
 
@@ -367,6 +369,32 @@ async function fetchScopedLearning(
     });
 }
 
+async function fetchScopedNews(searchTerm: string | null): Promise<AssistantNewsSummary[]> {
+  const { data, error } = await queryTable({
+    table: "portal_news_posts",
+    operation: "select",
+    filters: [],
+    order: { column: "created_at", ascending: false },
+  });
+  if (error || !Array.isArray(data)) return [];
+
+  return data
+    .filter(
+      (row: Record<string, unknown>) =>
+        matchesQuery(String(row.title ?? ""), searchTerm) ||
+        matchesQuery(String(row.caption ?? ""), searchTerm),
+    )
+    .slice(0, 20)
+    .map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      title: String(row.title ?? ""),
+      caption: String(row.caption ?? ""),
+      postedByName: String(row.posted_by_name ?? ""),
+      postedByRole: String(row.posted_by_role ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+    }));
+}
+
 function formatDealsSummary(deals: AssistantDealSummary[]): string {
   if (deals.length === 0) return "No matching deals found in your current scope.";
   return deals
@@ -416,6 +444,11 @@ function formatLearningSummary(tracks: AssistantLearningSummary[]): string {
   return tracks
     .map((t) => `• ${t.title} — ${t.status.replace(/_/g, " ")} (${t.progressPercent}%)`)
     .join("\n");
+}
+
+function formatNewsSummary(news: AssistantNewsSummary[]): string {
+  if (news.length === 0) return "No news posts found.";
+  return news.map((n) => `• ${n.title} — ${n.caption} (${n.postedByName})`).join("\n");
 }
 
 function formatDraftPreview(draft: AssistantDealDraft): string {
@@ -501,6 +534,7 @@ const EMPTY_LIST_RESULTS = {
   tickets: [] as AssistantTicketSummary[],
   users: [] as AssistantUserSummary[],
   learning: [] as AssistantLearningSummary[],
+  news: [] as AssistantNewsSummary[],
 };
 
 export async function sendAssistantMessage(input: {
@@ -669,7 +703,8 @@ export async function sendAssistantMessage(input: {
     intent.type === "list_customers" ||
     intent.type === "list_tasks" ||
     intent.type === "list_tickets" ||
-    intent.type === "list_learning"
+    intent.type === "list_learning" ||
+    intent.type === "list_news"
   ) {
     const featureKey =
       intent.type === "list_partners"
@@ -680,7 +715,9 @@ export async function sendAssistantMessage(input: {
             ? "tasks"
             : intent.type === "list_tickets"
               ? "tickets"
-              : "learning";
+              : intent.type === "list_learning"
+                ? "learning"
+                : "news";
     if (!hasCapability(capabilities, featureKey, "read")) {
       const reply = `Your role doesn't have permission to view ${featureKey} through the Assistant.`;
       await logAssistantMessage({
@@ -839,6 +876,26 @@ export async function sendAssistantMessage(input: {
       correlationId,
     });
     return { ...empty, reply, learning };
+  }
+
+  if (intent.type === "list_news") {
+    const news = await fetchScopedNews(intent.query);
+    const reply = [intent.reply, formatNewsSummary(news)].filter(Boolean).join("\n\n");
+    await logAssistantMessage({
+      conversationId,
+      userId,
+      assignmentId,
+      role: "assistant",
+      content: reply,
+      proposedAction: "list_news",
+      actionPayload: { query: intent.query },
+      retrievedDealIds: [],
+      confirmed: null,
+      outcome: "answered",
+      model: completion.model,
+      correlationId,
+    });
+    return { ...empty, reply, news };
   }
 
   if (intent.type === "create_deal_draft") {

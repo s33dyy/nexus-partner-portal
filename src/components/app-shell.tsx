@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Bell, LogOut, RefreshCcw, User } from "lucide-react";
+import { AudioLines, Bell, LogOut, RefreshCcw, User } from "lucide-react";
 
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AssistantPanel } from "@/components/assistant-panel";
+import { DailyDigestDialog } from "@/components/daily-digest-dialog";
 import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { RegionFilterSelect } from "@/components/region-filter-select";
 import { supabase } from "@/integrations/local/client";
@@ -52,6 +53,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const access = usePartnerAccess();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
   const initials =
     profile?.full_name
       ?.split(" ")
@@ -153,7 +156,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
               {statusLabel[status]}
             </Badge>
-            <AssistantPanel />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-2"
+              onClick={() => setDigestOpen(true)}
+            >
+              <AudioLines className="h-4 w-4" />
+              Briefing
+            </Button>
+            <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
             <Button asChild variant="ghost" size="icon" aria-label="Notifications">
               <Link to="/notifications" className="relative">
                 <Bell className="h-4 w-4" />
@@ -203,6 +216,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">{children}</main>
       </SidebarInset>
+      <DailyDigestDialog
+        open={digestOpen}
+        onOpenChange={setDigestOpen}
+        onOpenAssistant={() => setAssistantOpen(true)}
+      />
     </SidebarProvider>
   );
 }
