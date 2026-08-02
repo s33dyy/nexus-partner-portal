@@ -29,6 +29,17 @@ export type TableQueryLike = {
   // client-supplied. Used where a single ownership column can't express the
   // grant (e.g. tasks: visible if you created OR were assigned it).
   scopeAnyColumnEquals?: { columns: [string, string]; value: string };
+  // Same idea, for "I own it OR I'm tagged as an active participant on it" —
+  // the ownership check is a plain column, but the tag check needs a
+  // correlated EXISTS against deal_participants/customer_participants, which
+  // scopeAnyColumnEquals's two-plain-columns shape can't express. See
+  // isRestrictedPartnerRole.
+  scopeOwnerOrParticipantTag?: {
+    ownerColumn: string;
+    ownerValue: string;
+    participantTable: "deal_participants" | "customer_participants";
+    fkColumn: "deal_id" | "customer_id";
+  };
 };
 
 export type TablePolicyAuthContext = {
@@ -208,6 +219,20 @@ function isLiveyInternalRole(auth: TablePolicyAuthContext): boolean {
   if (auth.partnerId) return false;
   const role = auth.governedRoleKey;
   return !!role && LIVEY_INTERNAL_ROLES.has(role);
+}
+
+/** Product decision: an ordinary Partner User sees only Deals/Customers
+ * they created or were explicitly tagged as a participant on (via
+ * tagDealParticipant/tagCustomerParticipant) — not their whole company's
+ * book of business. Partner Admin is deliberately excluded — it keeps the
+ * existing flat partner_id-wide visibility, since an admin needs to
+ * oversee the whole team. restricted_distributor's own §8.7a gap (it
+ * currently gets that same flat whole-tenant access, though product.md
+ * §8.7/§8.8 says it should be tag-gated even more strictly than this) is
+ * intentionally left untouched here — a separate decision, not bundled
+ * into this one. */
+function isRestrictedPartnerRole(auth: TablePolicyAuthContext): boolean {
+  return auth.governedRoleKey === "partner_user" && !!auth.partnerId;
 }
 
 function isGenericSuperAdmin(auth: GenericTableAuthContext) {
@@ -760,6 +785,31 @@ async function applyTablePolicyInner(
       return { ...query, filters };
     }
 
+    // Product decision (partner_user only — see isRestrictedPartnerRole):
+    // narrow visibility from "everyone at partner_id X" to "partner_id X
+    // AND (I created it OR I'm an active tagged participant on it)". The
+    // partner_id filter still applies underneath via appendScopeFilter —
+    // this only ever narrows within the caller's own tenant, it can never
+    // widen across tenants.
+    if (
+      (query.table === "portal_deals" || query.table === "portal_customers") &&
+      (query.operation === "select" || query.operation === "count") &&
+      isRestrictedPartnerRole(auth) &&
+      auth.userId
+    ) {
+      return {
+        ...query,
+        filters: appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
+        scopeOwnerOrParticipantTag: {
+          ownerColumn: "user_id",
+          ownerValue: auth.userId,
+          participantTable:
+            query.table === "portal_deals" ? "deal_participants" : "customer_participants",
+          fkColumn: query.table === "portal_deals" ? "deal_id" : "customer_id",
+        },
+      };
+    }
+
     // §10.3: "My Tasks" must show tasks assigned to the current user, not
     // only ones they created — the two are tracked in separate columns.
     // A single ownership column can't express "creator OR assignee", so
@@ -1078,6 +1128,27 @@ function assertNoProtectedLifecycleUpdate(query: TableQueryLike): void {
   }
 }
 
+// reward-commands.server.ts owns every points/stock/redemption-state effect
+// inside a single locked transaction (reservation, review, release,
+// retirement). The generic path previously let ANY authenticated caller
+// insert arbitrary reward_point_events rows (crediting themselves points)
+// and update their own reward_redemptions.status directly — both silently
+// bypassed the reservation/idempotency/version invariants those commands
+// enforce. Catalogue create/update stay generic (ordinary descriptive/
+// inventory fields); only catalogue delete is blocked, since retirement
+// (not deletion) is the only way to remove a reward from new requests.
+function assertNoProtectedRewardMutation(query: TableQueryLike): void {
+  const isWrite = query.operation !== "select" && query.operation !== "count";
+  if (!isWrite) return;
+
+  if (query.table === "reward_point_events" || query.table === "reward_redemptions") {
+    throw new Error("Reward lifecycle mutations require a named command");
+  }
+  if (query.table === "reward_catalog_items" && query.operation === "delete") {
+    throw new Error("Reward lifecycle mutations require a named command");
+  }
+}
+
 /** Applies the existing ownership/scope policy, then layers the role
  * permission matrix (CRUD gate) and, for the handful of geography-bearing
  * tables, a region-access filter on top. Both new checks are no-ops for
@@ -1089,6 +1160,7 @@ export async function applyTablePolicy(
   auth: TablePolicyAuthContext,
 ): Promise<TableQueryLike> {
   assertNoProtectedLifecycleUpdate(query);
+  assertNoProtectedRewardMutation(query);
   await assertGovernedFeatureCapability(query, auth);
   const result = await applyTablePolicyInner(query, auth);
   return appendGeographyFilter(result, auth);

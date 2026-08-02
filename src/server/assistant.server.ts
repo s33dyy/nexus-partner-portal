@@ -16,6 +16,7 @@ import {
   type AssistantUserSummary,
 } from "@/domain/contracts/assistant";
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
+import { ROLE_KEY_LABELS } from "@/domain/contracts/features";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { createDeal, resolveDealCommandActor } from "@/server/deal-commands.server";
 import { listDropdownSourceValues } from "@/server/dropdown-sources.server";
@@ -54,8 +55,33 @@ Rules:
 - Use "list_deals" when the user wants to see, count, or ask about their existing deals. Set "stage" to a pipeline stage keyword if mentioned (sourced, demo, testing, qualified, proposal, negotiation, approved, won, lost), else null. Set "status" similarly (e.g. "submitted", "approved"), else null.
 - Use "create_deal_draft" when the user wants to create/register/log a new deal. Extract only fields the user actually gave into "draft" — leave anything unknown as null, never invent values. "reply" asks a short, specific question about the next missing required field (account/company name, contact/client name, product, and amount are all required), or says "Ready to create this deal — please confirm." once every required field has been given across the conversation.
 - Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Any request to see, list, count, search, or ask about records of one of these kinds ALWAYS uses the matching list_* type, never "none" or "list_deals". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
-- Use "none" only for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, or small talk. "reply" is your full natural-language answer, but — because this path has no database access — it must NEVER include a specific record name, company, person, count, date, or any other business fact; you do not have that information here. If a request sounds like it wants specific records of any kind, classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
+- Use "none" for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, small talk, or a question about the current user's own identity (name, role, email, company/account — answer these directly and accurately from the "You are currently assisting" block below, never from memory or a guess). Other than that identity block, this path has no database access — "reply" must NEVER include a specific record name, company, person, count, date, or any other business fact you were not directly given. If a request sounds like it wants specific records of any kind, classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
 - Never claim to have created, changed, or deleted anything yourself — only the system creates a deal, and only after the user explicitly confirms a shown preview.`;
+
+/** Every conversation is scoped to exactly one signed-in caller — sendAssistantMessage
+ * resolves authContext fresh from the request's own session on every turn, never a
+ * shared/global context — so this always reflects "the user's own instance," matching
+ * the same identity every read/write in this file is already scoped by. Without this,
+ * the model had no way to answer even "who am I" accurately and would either deflect
+ * or (worse) guess. Kept deliberately minimal — just enough to answer identity
+ * questions, not a dump of the full profile/assignment row. */
+function buildIdentityContext(input: {
+  fullName: string | null;
+  email: string | null;
+  roleKey: string | null;
+  companyName: string | null;
+}): string {
+  const roleLabel = input.roleKey
+    ? (ROLE_KEY_LABELS[input.roleKey as keyof typeof ROLE_KEY_LABELS] ?? input.roleKey)
+    : "Unknown";
+  const lines = [
+    `You are currently assisting: ${input.fullName ?? "Unknown"}`,
+    `Email: ${input.email ?? "Unknown"}`,
+    `Role: ${roleLabel}`,
+  ];
+  if (input.companyName) lines.push(`Company/account: ${input.companyName}`);
+  return lines.join("\n");
+}
 
 function parseModelJson(content: string): Record<string, unknown> | null {
   const trimmed = content.trim();
@@ -557,11 +583,19 @@ export async function sendAssistantMessage(input: {
     return { ...empty, reply };
   }
 
+  const identityContext = buildIdentityContext({
+    fullName: authContext.profile?.full_name ?? null,
+    email: authContext.profile?.email ?? null,
+    roleKey: authContext.assignment?.roleKey ?? null,
+    companyName: authContext.profile?.company_name ?? null,
+  });
+
   let completion: ChatCompletionResult;
   try {
     completion = await runChatCompletion({
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: identityContext },
         ...input.history.slice(-12),
         { role: "user", content: message },
       ],

@@ -1006,3 +1006,289 @@ test("document_blobs and password_reset_tokens are unreachable through the gener
     }
   }
 });
+
+test("generic Task updates reject every lifecycle-owned field even for super_admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "admin-1",
+    roles: ["super_admin"],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+    governedRoleKey: "super_admin" as const,
+  };
+
+  for (const field of ["status", "blocked_reason", "completed_at", "cancelled_at", "version"]) {
+    await expect(
+      applyTablePolicy(
+        {
+          table: "tasks",
+          operation: "update",
+          filters: [{ column: "id", value: "task-1", operator: "eq" }],
+          values: { [field]: field === "version" ? 4 : "forged" },
+        },
+        auth,
+      ),
+    ).rejects.toThrow("Task lifecycle fields require the named transition command");
+  }
+});
+
+test("generic Task update is wholly denied when ordinary and lifecycle fields are mixed", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  await expect(
+    applyTablePolicy(
+      {
+        table: "tasks",
+        operation: "update",
+        filters: [{ column: "id", value: "task-1", operator: "eq" }],
+        values: { priority: "high", status: "completed" },
+      },
+      {
+        userId: "admin-1",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+      },
+    ),
+  ).rejects.toThrow("Task lifecycle fields require the named transition command");
+});
+
+test("generic Task update still allows ordinary metadata through existing policy", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    {
+      table: "tasks",
+      operation: "update",
+      filters: [{ column: "id", value: "task-1", operator: "eq" }],
+      values: { priority: "high", due_at: "2026-08-02T12:00:00.000Z" },
+    },
+    {
+      userId: "admin-1",
+      roles: ["super_admin"],
+      partnerId: null,
+      companyName: null,
+      hasGovernedContext: true,
+      governedRoleKey: "super_admin",
+    },
+  );
+  expect(result.values).toEqual({
+    priority: "high",
+    due_at: "2026-08-02T12:00:00.000Z",
+  });
+});
+
+test("queryTableWithAuthContext does not emit SQL for a protected Task update", async () => {
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  const observed: Array<{ sql: string; params: unknown[] }> = [];
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    observed.push({ sql: String(sql), params });
+    return { rows: [], rowCount: 0 } as never;
+  }) as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      {
+        table: "tasks",
+        operation: "update",
+        filters: [{ column: "id", value: "task-1", operator: "eq" }],
+        values: { status: "completed" },
+      },
+      {
+        userId: "admin-1",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+      },
+    );
+
+    expect(result.error?.message).toBe("Access denied");
+    expect(observed.some((entry) => entry.sql.startsWith("UPDATE"))).toBe(false);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
+test("generic reward ledger and redemption writes are denied for every role", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "admin-1",
+    roles: ["super_admin"],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+    governedRoleKey: "super_admin" as const,
+  };
+
+  for (const query of [
+    { table: "reward_point_events", operation: "insert" as const, values: { points_delta: 500 } },
+    { table: "reward_point_events", operation: "update" as const, values: { points_delta: 500 } },
+    { table: "reward_redemptions", operation: "insert" as const, values: { status: "requested" } },
+    { table: "reward_redemptions", operation: "update" as const, values: { status: "processing" } },
+    { table: "reward_catalog_items", operation: "delete" as const },
+  ]) {
+    await expect(applyTablePolicy({ ...query, filters: [] }, auth)).rejects.toThrow(
+      "Reward lifecycle mutations require a named command",
+    );
+  }
+});
+
+test("reward ledger/redemption reads and ordinary catalogue create/update remain allowed", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "admin-1",
+    roles: ["super_admin"],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+    governedRoleKey: "super_admin" as const,
+  };
+
+  const read = await applyTablePolicy(
+    { table: "reward_redemptions", operation: "select", filters: [] },
+    auth,
+  );
+  expect(read.table).toBe("reward_redemptions");
+
+  const created = await applyTablePolicy(
+    {
+      table: "reward_catalog_items",
+      operation: "insert",
+      values: { title: "LIVEY Hoodie", points_cost: 500 },
+    },
+    auth,
+  );
+  expect(created.values).toEqual({ title: "LIVEY Hoodie", points_cost: 500 });
+
+  const updated = await applyTablePolicy(
+    {
+      table: "reward_catalog_items",
+      operation: "update",
+      filters: [{ column: "id", value: "reward-1", operator: "eq" }],
+      values: { stock: 10 },
+    },
+    auth,
+  );
+  expect(updated.values).toEqual({ stock: 10 });
+});
+
+// ─── isRestrictedPartnerRole: partner_user sees only own/tagged deals+customers ───
+
+function partnerUserAuth(overrides: Record<string, unknown> = {}) {
+  return {
+    userId: "user-1",
+    roles: ["partner_user"],
+    partnerId: "partner-1",
+    companyName: "Acme Co",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_user" as const,
+    ...overrides,
+  };
+}
+
+test("partner_user reading portal_deals is scoped to partner_id AND (own OR tagged)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    partnerUserAuth(),
+  );
+  expect(result.filters).toContainEqual({
+    column: "partner_id",
+    value: "partner-1",
+    operator: "eq",
+  });
+  expect(result.scopeOwnerOrParticipantTag).toEqual({
+    ownerColumn: "user_id",
+    ownerValue: "user-1",
+    participantTable: "deal_participants",
+    fkColumn: "deal_id",
+  });
+});
+
+test("partner_user reading portal_customers is scoped to partner_id AND (own OR tagged)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_customers", operation: "select", filters: [] },
+    partnerUserAuth(),
+  );
+  expect(result.filters).toContainEqual({
+    column: "partner_id",
+    value: "partner-1",
+    operator: "eq",
+  });
+  expect(result.scopeOwnerOrParticipantTag).toEqual({
+    ownerColumn: "user_id",
+    ownerValue: "user-1",
+    participantTable: "customer_participants",
+    fkColumn: "customer_id",
+  });
+});
+
+test("partner_user counting portal_deals also gets the owner-or-tag scope", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_deals", operation: "count", filters: [] },
+    partnerUserAuth(),
+  );
+  expect(result.scopeOwnerOrParticipantTag?.participantTable).toBe("deal_participants");
+});
+
+test("partner_admin keeps full company-wide visibility — no owner-or-tag restriction", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    partnerUserAuth({ roles: ["partner_admin"], governedRoleKey: "partner_admin" as const }),
+  );
+  expect(result.filters).toContainEqual({
+    column: "partner_id",
+    value: "partner-1",
+    operator: "eq",
+  });
+  expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
+});
+
+test("restricted_distributor is unaffected by this change (still flat partner_id scope)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    partnerUserAuth({
+      roles: ["restricted_distributor"],
+      governedRoleKey: "restricted_distributor" as const,
+    }),
+  );
+  expect(result.filters).toContainEqual({
+    column: "partner_id",
+    value: "partner-1",
+    operator: "eq",
+  });
+  expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
+});
+
+test("super_admin stays fully unscoped, even for partner_user-restricted tables", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_deals", operation: "select", filters: [] },
+    partnerUserAuth({ roles: ["super_admin"], governedRoleKey: "super_admin" as const }),
+  );
+  expect(result.filters).toEqual([]);
+  expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
+});
+
+test("creating a deal is unaffected by the owner-or-tag restriction (insert still just stamps partner_id)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    {
+      table: "portal_deals",
+      operation: "insert",
+      values: { account_name: "New Co", product: "WC350", amount: "1000" },
+    },
+    partnerUserAuth(),
+  );
+  expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
+  expect((result.values as Record<string, unknown>).partner_id).toBe("partner-1");
+});

@@ -84,6 +84,14 @@ export type TableQuery = {
   // ownership column can't express a read scope — e.g. tasks visible to
   // whoever created OR was assigned them.
   scopeAnyColumnEquals?: { columns: [string, string]; value: string };
+  // Same idea, for "I own it OR I'm an active tagged participant on it" —
+  // see table-policy.server.ts's isRestrictedPartnerRole.
+  scopeOwnerOrParticipantTag?: {
+    ownerColumn: string;
+    ownerValue: string;
+    participantTable: "deal_participants" | "customer_participants";
+    fkColumn: "deal_id" | "customer_id";
+  };
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
@@ -1015,6 +1023,53 @@ function appendAnyColumnScope(
   };
 }
 
+// deal_participants/customer_participants are the only two valid
+// scopeOwnerOrParticipantTag.participantTable values (see the type), but
+// re-checked here at runtime as defense in depth since the value is
+// interpolated directly into raw SQL — matching appendAnyColumnScope's own
+// column-allowlist check just above.
+const PARTICIPANT_SCOPE_TABLES = new Set(["deal_participants", "customer_participants"]);
+const PARTICIPANT_SCOPE_FK_COLUMNS = new Set(["deal_id", "customer_id"]);
+
+// Appends the policy layer's "I own it OR I'm an active tagged
+// participant on it" read scope (see TableQuery.scopeOwnerOrParticipantTag)
+// on top of whatever regular filters were already built. Never
+// client-supplied, only ever set by applyTablePolicyInner. The EXISTS
+// subquery correlates against the outer query's own FROM table (queried
+// unaliased as `${quoteIdent(table)}` — see the SELECT/COUNT SQL below),
+// which is exactly the table this function's caller is already scoping.
+function appendOwnerOrParticipantTagScope(
+  whereSql: string,
+  whereParams: unknown[],
+  scope: TableQuery["scopeOwnerOrParticipantTag"],
+  table: string,
+  columns: string[],
+): { sql: string; params: unknown[] } {
+  if (!scope) {
+    return { sql: whereSql, params: whereParams };
+  }
+  if (!columns.includes(scope.ownerColumn)) {
+    throw new Error(`Unsupported scope column: ${scope.ownerColumn}`);
+  }
+  if (!PARTICIPANT_SCOPE_TABLES.has(scope.participantTable)) {
+    throw new Error(`Unsupported participant scope table: ${scope.participantTable}`);
+  }
+  if (!PARTICIPANT_SCOPE_FK_COLUMNS.has(scope.fkColumn)) {
+    throw new Error(`Unsupported participant scope fk column: ${scope.fkColumn}`);
+  }
+  const paramIndex = whereParams.length + 1;
+  const condition = `(${quoteIdent(scope.ownerColumn)} = $${paramIndex} OR EXISTS (
+    SELECT 1 FROM ${quoteIdent(scope.participantTable)} AS pt
+    WHERE pt.${quoteIdent(scope.fkColumn)} = ${quoteIdent(table)}.${quoteIdent("id")}
+      AND pt.${quoteIdent("participant_user_id")} = $${paramIndex}
+      AND pt.${quoteIdent("valid_to")} IS NULL
+  ))`;
+  return {
+    sql: whereSql ? `${whereSql} AND ${condition}` : ` WHERE ${condition}`,
+    params: [...whereParams, scope.ownerValue],
+  };
+}
+
 function serializeDbValue<T>(value: T): T {
   if (value instanceof Date) {
     return value.toISOString() as T;
@@ -1107,10 +1162,17 @@ export async function queryTableWithAuthContext(
 
   if (policyQuery.operation === "select") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
-    const { sql: scopedWhereSql, params: scopedParams } = appendAnyColumnScope(
+    const anyColumnScoped = appendAnyColumnScope(
       whereSql,
       whereParams,
       policyQuery.scopeAnyColumnEquals,
+      columns,
+    );
+    const { sql: scopedWhereSql, params: scopedParams } = appendOwnerOrParticipantTagScope(
+      anyColumnScoped.sql,
+      anyColumnScoped.params,
+      policyQuery.scopeOwnerOrParticipantTag,
+      policyQuery.table,
       columns,
     );
     const selectSql = buildSelectColumnsSql(policyQuery.select, columns);
@@ -1132,10 +1194,17 @@ export async function queryTableWithAuthContext(
 
   if (policyQuery.operation === "count") {
     const { whereSql, whereParams } = buildWhereClause(filters, columns);
-    const { sql: scopedWhereSql, params: scopedParams } = appendAnyColumnScope(
+    const anyColumnScoped = appendAnyColumnScope(
       whereSql,
       whereParams,
       policyQuery.scopeAnyColumnEquals,
+      columns,
+    );
+    const { sql: scopedWhereSql, params: scopedParams } = appendOwnerOrParticipantTagScope(
+      anyColumnScoped.sql,
+      anyColumnScoped.params,
+      policyQuery.scopeOwnerOrParticipantTag,
+      policyQuery.table,
       columns,
     );
     const result = await pool.query(
