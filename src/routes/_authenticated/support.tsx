@@ -25,6 +25,7 @@ import {
 import { formatDateTimeLabel } from "@/lib/date-utils";
 import { applyPartnerScope, hasSupportScopeBypass } from "@/lib/partner-scope";
 import { type SupportTicketCommentRecord, type SupportTicketRecord } from "@/lib/portal-records";
+import { canManageTicket } from "@/lib/ticket-permissions";
 
 export const Route = createFileRoute("/_authenticated/support")({
   component: SupportPage,
@@ -33,6 +34,8 @@ export const Route = createFileRoute("/_authenticated/support")({
 function SupportPage() {
   const { profile, hasRole, roleKey, assignment } = useAuth();
   useRequireAccess("partial");
+
+  const canManageSelectedTicket = canManageTicket(roleKey);
 
   const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
   const [comments, setComments] = useState<SupportTicketCommentRecord[]>([]);
@@ -522,7 +525,7 @@ function SupportPage() {
                   )}
                 </div>
 
-                {hasRole("super_admin") ? (
+                {canManageSelectedTicket ? (
                   <div className="space-y-3 rounded-xl border p-4">
                     <div className="flex flex-wrap gap-2">
                       {selectedTicket.status === "open" && (
