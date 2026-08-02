@@ -39,7 +39,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { getStatusLabel, getStatusProgress } from "@/lib/partner-status";
-import { parseDealAmount } from "@/lib/portal-records";
+import { loadDashboardPipeline } from "@/integrations/local/dashboard-metrics";
 
 type PartnerSpotlight = {
   id: string;
@@ -76,14 +76,6 @@ type DashboardMetric = {
   tone: "default" | "primary" | "success" | "warning" | "info";
 };
 
-function resolveUsdAmount(input: { amount: string; amount_usd?: number | null }) {
-  const usdAmount = Number(input.amount_usd);
-  if (Number.isFinite(usdAmount) && usdAmount > 0) {
-    return usdAmount;
-  }
-  return parseDealAmount(input.amount);
-}
-
 export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
 });
@@ -118,7 +110,7 @@ function DashboardPage() {
       let dealQuery = hasDealAccess
         ? supabase
             .from("portal_deals")
-            .select("id, amount, amount_usd, stage, status, country")
+            .select("id, stage, status, country")
             .order("updated_at", { ascending: false })
         : null;
       let customerQuery = hasDealAccess
@@ -169,6 +161,13 @@ function DashboardPage() {
         partnerQuery = partnerQuery.eq("owner_user_id", profile.id);
       }
 
+      const pipelinePromise = hasDealAccess
+        ? loadDashboardPipeline(selectedRegion)
+        : Promise.resolve({
+            ok: true as const,
+            metrics: { pipelineValueUsd: 0, openDealCount: 0, missingDtpCount: 0 },
+          });
+
       const [
         dealsRes,
         customersRes,
@@ -178,6 +177,7 @@ function DashboardPage() {
         rewardRes,
         collaboratorRes,
         activityRes,
+        pipelineRes,
       ] = await Promise.allSettled([
         dealQuery ?? Promise.resolve({ data: [], error: null }),
         customerQuery ?? Promise.resolve({ data: [], error: null }),
@@ -191,6 +191,7 @@ function DashboardPage() {
           .select("id, subject_type, subject_id, event_name, payload, created_at")
           .order("created_at", { ascending: false })
           .limit(30),
+        pipelinePromise,
       ]);
 
       const dealResult =
@@ -217,6 +218,14 @@ function DashboardPage() {
         activityRes.status === "fulfilled"
           ? activityRes.value
           : { data: [], error: activityRes.reason };
+      const pipelineResult =
+        pipelineRes.status === "fulfilled"
+          ? pipelineRes.value
+          : {
+              ok: false as const,
+              code: "QUERY_FAILED" as const,
+              message: "Pipeline metrics could not be loaded",
+            };
 
       const partialFailures = [
         dealResult.error,
@@ -226,6 +235,7 @@ function DashboardPage() {
         notifResult.error,
         rewardResult.error,
         collaboratorResult.error,
+        pipelineResult.ok ? null : pipelineResult.message,
       ].filter(Boolean);
       if (partialFailures.length > 0) {
         console.error("Dashboard load encountered partial failures", partialFailures);
@@ -303,9 +313,7 @@ function DashboardPage() {
         })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      const pipeline = regionFilteredDealRows.reduce((sum, deal) => {
-        return sum + resolveUsdAmount(deal);
-      }, 0);
+      const pipelineMetric = pipelineResult.ok ? pipelineResult.metrics : null;
       const openDeals = regionFilteredDealRows.filter(
         (deal) => !["won", "lost"].includes(deal.stage),
       ).length;
@@ -318,15 +326,23 @@ function DashboardPage() {
         0,
       );
 
+      const pipelineDashboardMetric: DashboardMetric = {
+        id: "pipeline",
+        label: "Pipeline value",
+        value: pipelineMetric
+          ? `$${pipelineMetric.pipelineValueUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+          : "Unavailable",
+        hint: pipelineMetric
+          ? pipelineMetric.missingDtpCount > 0
+            ? `Open opportunities at current DTP · ${pipelineMetric.missingDtpCount} missing DTP`
+            : "Open opportunities at current DTP"
+          : "Unable to load scoped Pipeline",
+        tone: pipelineMetric ? "primary" : "warning",
+      };
+
       // Build metrics based on access level
       const fullMetrics: DashboardMetric[] = [
-        {
-          id: "pipeline",
-          label: "Pipeline value",
-          value: `$${pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
-          hint: "Across all live opportunity rows",
-          tone: "primary",
-        },
+        pipelineDashboardMetric,
         {
           id: "deals",
           label: "Open deals",
