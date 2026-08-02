@@ -7,9 +7,11 @@
 // fact that isn't backed by one of the structured fields alongside it.
 
 import type {
+  AssistantDealSummary,
   AssistantLearningSummary,
   AssistantNewsSummary,
   AssistantTaskSummary,
+  AssistantTicketSummary,
 } from "@/domain/contracts/assistant";
 
 export type UserDigest = {
@@ -19,8 +21,12 @@ export type UserDigest = {
   generatedAt: string;
   news: AssistantNewsSummary[];
   pipeline: { openDealCount: number; pipelineValueUsd: number } | null;
+  // A few real open deals (by value), alongside the pipeline aggregate
+  // above — the aggregate carries the exact totals, this carries names for
+  // the narrative to reference specifically rather than only counting.
+  deals: AssistantDealSummary[];
   tasks: AssistantTaskSummary[];
-  openTicketCount: number | null;
+  tickets: AssistantTicketSummary[];
   unreadNotificationCount: number;
   learning: AssistantLearningSummary[];
 };
@@ -32,8 +38,9 @@ export const EMPTY_USER_DIGEST: UserDigest = {
   generatedAt: "",
   news: [],
   pipeline: null,
+  deals: [],
   tasks: [],
-  openTicketCount: null,
+  tickets: [],
   unreadNotificationCount: 0,
   learning: [],
 };

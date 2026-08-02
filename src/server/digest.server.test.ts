@@ -351,7 +351,7 @@ test("getUserDigest gates each section independently by its own feature capabili
     // news/read=false and tickets/read=false for restricted_distributor —
     // both sections come back empty even though rows exist in the DB.
     expect(digest.news).toEqual([]);
-    expect(digest.openTicketCount).toBeNull();
+    expect(digest.tickets).toEqual([]);
     // tasks/read=true and learning/read=true — these sections DO populate.
     expect(digest.tasks).toHaveLength(1);
     expect(digest.learning).toHaveLength(1);
@@ -443,13 +443,17 @@ test("getUserDigest narrative covers every populated section and skips the fabri
       {
         id: "deal-1",
         stage: "negotiation",
+        account_name: "Northstar Cloud Suite",
+        product: "Cloud Suite",
+        amount: "1500",
+        currency_code: "USD",
         user_id: "user-1",
         partner_id: "partner-1",
         is_hidden_to_team: false,
         country: "United States",
         amount_usd: null,
         amount_value: null,
-        currency_code: "USD",
+        updated_at: "2026-08-01T00:00:00.000Z",
       },
     ],
     pricingRows: [{ deal_id: "deal-1", total_dtp_usd: 1500 }],
@@ -460,17 +464,24 @@ test("getUserDigest narrative covers every populated section and skips the fabri
 
     expect(digest.available).toBe(true);
     expect(digest.pipeline).toEqual({ openDealCount: 1, pipelineValueUsd: 1500 });
+    expect(digest.deals).toHaveLength(1);
+    expect(digest.deals[0].accountName).toBe("Northstar Cloud Suite");
     expect(digest.tasks).toHaveLength(1);
-    expect(digest.openTicketCount).toBe(1); // only the "open" one, not "resolved"
+    expect(digest.tickets).toHaveLength(1); // only the "open" one, not "resolved"
     expect(digest.learning).toHaveLength(1); // only the 40%-progress one
     expect(digest.unreadNotificationCount).toBe(2);
 
-    expect(digest.narrative).toContain("1 open deal worth $1,500");
-    expect(digest.narrative).toContain("1 task is due soon");
-    expect(digest.narrative).toContain("1 open support ticket");
-    expect(digest.narrative).toContain("2 unread notifications");
-    expect(digest.narrative).toContain("1 learning track in progress");
+    expect(digest.narrative).toContain(
+      "You have 1 open deal worth $1,500 in your pipeline — including Northstar Cloud Suite.",
+    );
+    expect(digest.narrative).toContain('1 task needs your attention soon: "Follow up".');
+    expect(digest.narrative).toContain('You have 1 open support ticket: "Password reset".');
+    expect(digest.narrative).toContain("2 unread notifications waiting for you.");
+    expect(digest.narrative).toContain('You\'re partway through "Sales Fundamentals" (40%).');
     expect(digest.narrative).toContain('Latest from LIVEY: "Northstar Cloud Suite closed won".');
+    // Every narrative always ends with a concrete next-step question —
+    // tasks is the highest-priority non-empty section in this fixture.
+    expect(digest.narrative).toContain("Want me to walk you through your tasks due soon?");
 
     // The mock can't apply a real WHERE clause, so the meaningful check here
     // is that the query itself asks for the right status list — excluding
@@ -496,6 +507,11 @@ test("getUserDigest narrative is a plain fallback sentence when every section is
     expect(digest.narrative).toContain("Nothing urgent needs your attention right now.");
     expect(digest.narrative).not.toContain("open deal");
     expect(digest.narrative).not.toContain("due soon");
+    // Even with nothing to report, the narrative still ends by offering to
+    // help — never just trails off after the fallback sentence.
+    expect(digest.narrative).toContain(
+      "Is there anything I can help you with — deals, tasks, tickets, or learning?",
+    );
   } finally {
     harness.restore();
   }

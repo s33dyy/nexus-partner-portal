@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { AssistantChatMessage } from "@/domain/contracts/assistant";
 import type { UserDigest } from "@/domain/contracts/digest";
 import { useAuth } from "@/hooks/use-auth";
 import { useVoice } from "@/hooks/use-voice";
@@ -91,6 +92,7 @@ export function DailyDigestDialog({
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       stopSpeaking();
+      setExchanges([]);
       if (profile?.id) markSeenToday(profile.id);
     }
     onOpenChange(next);
@@ -110,7 +112,14 @@ export function DailyDigestDialog({
         toast.error("Didn't catch that — try again.");
         return;
       }
-      const result = await sendAssistantMessage({ message: transcript, history: [] });
+      // Threads the running exchange as real conversation history, so a
+      // follow-up like "and my tickets?" resolves against what was just
+      // asked instead of being treated as a brand-new, context-free turn.
+      const history: AssistantChatMessage[] = exchanges.flatMap((exchange) => [
+        { role: "user", content: exchange.question },
+        { role: "assistant", content: exchange.answer },
+      ]);
+      const result = await sendAssistantMessage({ message: transcript, history });
       setExchanges((prev) => [...prev, { question: transcript, answer: result.reply }]);
       speak(result.reply);
     } catch (error) {
@@ -163,12 +172,11 @@ export function DailyDigestDialog({
                   {digest.tasks.length} {digest.tasks.length === 1 ? "task" : "tasks"} due soon
                 </Badge>
               )}
-              {digest.openTicketCount ? (
+              {digest.tickets.length > 0 && (
                 <Badge variant="outline">
-                  {digest.openTicketCount} open{" "}
-                  {digest.openTicketCount === 1 ? "ticket" : "tickets"}
+                  {digest.tickets.length} open {digest.tickets.length === 1 ? "ticket" : "tickets"}
                 </Badge>
-              ) : null}
+              )}
               {digest.unreadNotificationCount > 0 && (
                 <Badge variant="outline">
                   {digest.unreadNotificationCount} unread{" "}
@@ -183,10 +191,14 @@ export function DailyDigestDialog({
               )}
             </div>
 
-            {digest.news[0] && (
-              <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
-                <div className="font-medium">{digest.news[0].title}</div>
-                <div className="mt-0.5 text-muted-foreground">{digest.news[0].caption}</div>
+            {digest.news.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {digest.news.slice(0, 2).map((post) => (
+                  <div key={post.id} className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                    <div className="font-medium">{post.title}</div>
+                    <div className="mt-0.5 text-muted-foreground">{post.caption}</div>
+                  </div>
+                ))}
               </div>
             )}
 

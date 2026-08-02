@@ -54,11 +54,12 @@ Respond with ONLY a single minified JSON object, no markdown fences, no commenta
 {"type":"list_deals"|"create_deal_draft"|"list_partners"|"list_customers"|"list_tasks"|"list_tickets"|"list_users"|"list_learning"|"list_news"|"none","reply":"short natural-language message for the user","stage":string|null,"status":string|null,"query":string|null,"draft":{"accountName":string|null,"contactName":string|null,"product":string|null,"quantity":number|null,"amount":string|null,"currencyCode":string|null,"country":string|null,"notes":string|null}|null}
 
 Rules:
-- Use "list_deals" when the user wants to see, count, or ask about their existing deals. Set "stage" to a pipeline stage keyword if mentioned (sourced, demo, testing, qualified, proposal, negotiation, approved, won, lost), else null. Set "status" similarly (e.g. "submitted", "approved"), else null.
+- Use "list_deals" when the user wants to see, count, list, or ask about their existing deals or pipeline — including phrasings like "show me my deals", "list my deals", "what deals do I have", "my pipeline", "my open deals", "how many deals". Set "stage" to a pipeline stage keyword if mentioned (sourced, demo, testing, qualified, proposal, negotiation, approved, won, lost), else null. Set "status" similarly (e.g. "submitted", "approved"), else null. "reply" is a short one-sentence intro only ("Here are your deals.") — never put deal names, accounts, counts, or stages in "reply"; the actual list is attached separately by the system from real data.
 - Use "create_deal_draft" when the user wants to create/register/log a new deal. Extract only fields the user actually gave into "draft" — leave anything unknown as null, never invent values. "reply" asks a short, specific question about the next missing required field (account/company name, contact/client name, product, and amount are all required), or says "Ready to create this deal — please confirm." once every required field has been given across the conversation.
-- Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Use "list_news" for the LIVEY News feed / editorial updates / announcements (e.g. "what's new", "any updates from LIVEY", "show me the news"). Any request to see, list, count, search, or ask about records of one of these kinds ALWAYS uses the matching list_* type, never "none" or "list_deals". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
-- Use "none" for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, small talk, or a question about the current user's own identity (name, role, email, company/account — answer these directly and accurately from the "You are currently assisting" block below, never from memory or a guess). Other than that identity block, this path has no database access — "reply" must NEVER include a specific record name, company, person, count, date, or any other business fact you were not directly given. If a request sounds like it wants specific records of any kind, classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
-- Never claim to have created, changed, or deleted anything yourself — only the system creates a deal, and only after the user explicitly confirms a shown preview.`;
+- Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Use "list_news" for the LIVEY News feed / editorial updates / announcements (e.g. "what's new", "any updates from LIVEY", "show me the news"). Any request to see, list, count, search, or ask about records of one of these kinds — including deals — ALWAYS uses the matching list_* type, never "none". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
+- Use "none" for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, small talk, or a question about the current user's own identity (name, role, email, company/account — answer these directly and accurately from the "You are currently assisting" block below, never from memory or a guess). Other than that identity block, this path has no database access — "reply" must NEVER include a specific record name, company, person, count, date, or any other business fact you were not directly given, and must NEVER be formatted as a bulleted or numbered list (a list-shaped "none" reply is itself a sign you should have picked a list_* type instead). If a request sounds like it wants specific records of ANY kind — deals very much included — classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
+- Never claim to have created, changed, or deleted anything yourself — only the system creates a deal, and only after the user explicitly confirms a shown preview.
+- This is a conversation, not a one-shot answer: for "none" replies specifically, end "reply" with a short, natural closing question offering to help further (e.g. "Want me to check your tasks?", "Should I look into anything else?") — vary the wording naturally, keep it brief, and never let it reference a specific fact, name, or count you weren't given, or promise anything outside searching Deals/Partners/Customers/Tasks/Tickets/Learning/News and drafting a new Deal. Every list_* type already gets its own closing question appended automatically after its real results — do not add one yourself for those types, and keep "reply" for those types to just the short intro the rule above already describes.`;
 
 /** Every conversation is scoped to exactly one signed-in caller — sendAssistantMessage
  * resolves authContext fresh from the request's own session on every turn, never a
@@ -451,6 +452,22 @@ function formatNewsSummary(news: AssistantNewsSummary[]): string {
   return news.map((n) => `• ${n.title} — ${n.caption} (${n.postedByName})`).join("\n");
 }
 
+// Appended in code, after the real formatted list, rather than left to the
+// model to remember inside "reply" (which is composed *before* the list —
+// asking the model for a trailing question there would put it in the wrong
+// place in the message). Deterministic and varied enough per type to still
+// read as a natural next step, not a repeated script.
+const CLOSING_QUESTION_BY_LIST_TYPE: Record<Exclude<ListIntentType, "list_deals">, string> = {
+  list_partners: "Want me to look into anything else — customers, deals, or tasks?",
+  list_customers: "Want me to check their deals or tasks too?",
+  list_tasks: "Should I check your tickets or deals too?",
+  list_tickets: "Want me to check your tasks too?",
+  list_users: "Want me to search for someone else?",
+  list_learning: "Want a nudge on finishing one of these?",
+  list_news: "Want me to check anything else — deals, tasks, or tickets?",
+};
+const CLOSING_QUESTION_FOR_DEALS = "Want me to check your tasks or tickets too?";
+
 function formatDraftPreview(draft: AssistantDealDraft): string {
   return [
     `Account: ${draft.accountName}${draft.partnerId ? " (existing account)" : ""}`,
@@ -740,7 +757,9 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_deals") {
     const deals = await fetchScopedDeals({ stage: intent.stage, status: intent.status });
-    const reply = [intent.reply, formatDealsSummary(deals)].filter(Boolean).join("\n\n");
+    const reply = [intent.reply, formatDealsSummary(deals), CLOSING_QUESTION_FOR_DEALS]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -760,7 +779,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_partners") {
     const partners = await fetchScopedPartners(intent.query);
-    const reply = [intent.reply, formatPartnersSummary(partners)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatPartnersSummary(partners),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_partners,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -780,7 +805,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_customers") {
     const customers = await fetchScopedCustomers(intent.query);
-    const reply = [intent.reply, formatCustomersSummary(customers)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatCustomersSummary(customers),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_customers,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -800,7 +831,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_tasks") {
     const tasks = await fetchScopedTasks(intent.query);
-    const reply = [intent.reply, formatTasksSummary(tasks)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatTasksSummary(tasks),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_tasks,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -820,7 +857,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_tickets") {
     const tickets = await fetchScopedTickets(intent.query);
-    const reply = [intent.reply, formatTicketsSummary(tickets)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatTicketsSummary(tickets),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_tickets,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -840,7 +883,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_users") {
     const users = await fetchScopedUsers(intent.query);
-    const reply = [intent.reply, formatUsersSummary(users)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatUsersSummary(users),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_users,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -860,7 +909,13 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_learning") {
     const learning = await fetchScopedLearning(intent.query, userId);
-    const reply = [intent.reply, formatLearningSummary(learning)].filter(Boolean).join("\n\n");
+    const reply = [
+      intent.reply,
+      formatLearningSummary(learning),
+      CLOSING_QUESTION_BY_LIST_TYPE.list_learning,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,
@@ -880,7 +935,9 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_news") {
     const news = await fetchScopedNews(intent.query);
-    const reply = [intent.reply, formatNewsSummary(news)].filter(Boolean).join("\n\n");
+    const reply = [intent.reply, formatNewsSummary(news), CLOSING_QUESTION_BY_LIST_TYPE.list_news]
+      .filter(Boolean)
+      .join("\n\n");
     await logAssistantMessage({
       conversationId,
       userId,

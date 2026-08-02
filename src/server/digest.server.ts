@@ -1,9 +1,12 @@
 import {
+  type AssistantDealSummary,
   type AssistantLearningSummary,
   type AssistantNewsSummary,
   type AssistantTaskSummary,
+  type AssistantTicketSummary,
 } from "@/domain/contracts/assistant";
 import { EMPTY_USER_DIGEST, type UserDigest } from "@/domain/contracts/digest";
+import { isOpenPipelineStage } from "@/lib/pipeline-metrics";
 import { loadDashboardPipelineMetrics } from "@/server/dashboard-metrics.server";
 import { getAuthContext, queryTableWithAuthContext } from "@/server/livey-service.server";
 import {
@@ -46,7 +49,7 @@ async function fetchNewsSection(
     auth,
   );
   if (error || !Array.isArray(data)) return [];
-  return data.slice(0, 2).map((row: Record<string, unknown>) => ({
+  return data.slice(0, 3).map((row: Record<string, unknown>) => ({
     id: String(row.id),
     title: String(row.title ?? ""),
     caption: String(row.caption ?? ""),
@@ -67,6 +70,44 @@ async function fetchPipelineSection(
     openDealCount: result.metrics.openDealCount,
     pipelineValueUsd: result.metrics.pipelineValueUsd,
   };
+}
+
+// A few real open deals, alongside fetchPipelineSection's exact aggregate —
+// this is what lets the narrative name actual accounts instead of only
+// counting them. Reuses isOpenPipelineStage (the same predicate
+// loadDashboardPipelineMetrics itself uses via summarizeOpenPipeline) so
+// this list can never disagree with the aggregate on what counts as "open."
+// No query-level stage filter exists for "not won/lost" (QueryFilter only
+// supports eq/in), so — same as fetchTasksDueSoonSection below — this
+// fetches and filters in JS, matching the existing pattern in this file.
+async function fetchTopOpenDealsSection(
+  auth: TablePolicyAuthContext,
+  capabilities: FeatureCapabilities,
+): Promise<AssistantDealSummary[]> {
+  if (!hasCapability(capabilities, "deals", "read")) return [];
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "portal_deals",
+      operation: "select",
+      filters: [],
+      order: { column: "updated_at", ascending: false },
+    },
+    auth,
+  );
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .filter((row: Record<string, unknown>) => isOpenPipelineStage(String(row.stage ?? "")))
+    .slice(0, 3)
+    .map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      accountName: String(row.account_name ?? ""),
+      product: String(row.product ?? ""),
+      stage: String(row.stage ?? ""),
+      status: String(row.status ?? ""),
+      amount: String(row.amount ?? ""),
+      currencyCode: String(row.currency_code ?? "USD"),
+      updatedAt: String(row.updated_at ?? ""),
+    }));
 }
 
 async function fetchTasksDueSoonSection(
@@ -105,11 +146,11 @@ async function fetchTasksDueSoonSection(
     }));
 }
 
-async function fetchOpenTicketCount(
+async function fetchOpenTicketsSection(
   auth: TablePolicyAuthContext,
   capabilities: FeatureCapabilities,
-): Promise<number | null> {
-  if (!hasCapability(capabilities, "tickets", "read")) return null;
+): Promise<AssistantTicketSummary[]> {
+  if (!hasCapability(capabilities, "tickets", "read")) return [];
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "support_tickets",
@@ -118,8 +159,13 @@ async function fetchOpenTicketCount(
     },
     auth,
   );
-  if (error || !Array.isArray(data)) return null;
-  return data.length;
+  if (error || !Array.isArray(data)) return [];
+  return data.slice(0, 20).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    subject: String(row.subject ?? ""),
+    status: String(row.status ?? ""),
+    priority: String(row.priority ?? ""),
+  }));
 }
 
 async function fetchLearningInProgressSection(
@@ -193,56 +239,92 @@ function timeOfDayGreeting(date: Date): string {
   return "Good evening";
 }
 
+// "Acme Corp", "Acme Corp and Beta Inc", or "Acme Corp, Beta Inc, and Gamma
+// LLC" — standard prose list joining, used everywhere the narrative names
+// more than one real record in a single sentence.
+function joinNames(names: string[]): string {
+  const filtered = names.filter(Boolean);
+  if (filtered.length === 0) return "";
+  if (filtered.length === 1) return filtered[0];
+  if (filtered.length === 2) return `${filtered[0]} and ${filtered[1]}`;
+  return `${filtered.slice(0, -1).join(", ")}, and ${filtered[filtered.length - 1]}`;
+}
+
+// A single closing question, always present, so every briefing ends by
+// offering a concrete next step instead of just trailing off — mirrors the
+// same standing "always end with a CTA" behavior added to the chat
+// Assistant's own SYSTEM_PROMPT. Picks the most urgent non-empty section
+// deterministically (never model-generated, so it can never promise
+// something outside the Assistant's real capabilities).
+function pickClosingQuestion(input: {
+  tasks: AssistantTaskSummary[];
+  tickets: AssistantTicketSummary[];
+  deals: AssistantDealSummary[];
+  learning: AssistantLearningSummary[];
+}): string {
+  if (input.tasks.length > 0) return "Want me to walk you through your tasks due soon?";
+  if (input.tickets.length > 0) return "Should I pull up your open support tickets?";
+  if (input.deals.length > 0) return "Want me to open your pipeline?";
+  if (input.learning.length > 0) return "Want a nudge on finishing your learning track?";
+  return "Is there anything I can help you with — deals, tasks, tickets, or learning?";
+}
+
 function buildNarrative(input: {
   greeting: string;
   pipeline: { openDealCount: number; pipelineValueUsd: number } | null;
+  deals: AssistantDealSummary[];
   tasks: AssistantTaskSummary[];
-  openTicketCount: number | null;
+  tickets: AssistantTicketSummary[];
   unreadNotificationCount: number;
   news: AssistantNewsSummary[];
   learning: AssistantLearningSummary[];
 }): string {
-  const clauses: string[] = [`${input.greeting}.`];
+  const content: string[] = [];
 
   if (input.pipeline && input.pipeline.openDealCount > 0) {
     const amount = input.pipeline.pipelineValueUsd.toLocaleString("en-US", {
       maximumFractionDigits: 0,
     });
     const dealWord = input.pipeline.openDealCount === 1 ? "deal" : "deals";
-    clauses.push(
-      `You have ${input.pipeline.openDealCount} open ${dealWord} worth $${amount} in your pipeline.`,
+    const names = joinNames(input.deals.slice(0, 2).map((deal) => deal.accountName));
+    const namesClause = names ? ` — including ${names}` : "";
+    content.push(
+      `You have ${input.pipeline.openDealCount} open ${dealWord} worth $${amount} in your pipeline${namesClause}.`,
     );
   }
 
   if (input.tasks.length > 0) {
-    const verb = input.tasks.length === 1 ? "task is" : "tasks are";
-    clauses.push(`${input.tasks.length} ${verb} due soon.`);
+    const verb = input.tasks.length === 1 ? "task needs" : "tasks need";
+    const names = joinNames(input.tasks.slice(0, 2).map((task) => `"${task.title}"`));
+    content.push(`${input.tasks.length} ${verb} your attention soon: ${names}.`);
   }
 
-  if (input.openTicketCount && input.openTicketCount > 0) {
-    const ticketWord = input.openTicketCount === 1 ? "ticket" : "tickets";
-    clauses.push(`${input.openTicketCount} open support ${ticketWord}.`);
+  if (input.tickets.length > 0) {
+    const ticketWord = input.tickets.length === 1 ? "ticket" : "tickets";
+    const names = joinNames(input.tickets.slice(0, 2).map((ticket) => `"${ticket.subject}"`));
+    content.push(`You have ${input.tickets.length} open support ${ticketWord}: ${names}.`);
   }
 
   if (input.unreadNotificationCount > 0) {
     const notifWord = input.unreadNotificationCount === 1 ? "notification" : "notifications";
-    clauses.push(`${input.unreadNotificationCount} unread ${notifWord}.`);
+    content.push(`${input.unreadNotificationCount} unread ${notifWord} waiting for you.`);
   }
 
   if (input.learning.length > 0) {
-    const trackWord = input.learning.length === 1 ? "track" : "tracks";
-    clauses.push(`${input.learning.length} learning ${trackWord} in progress.`);
+    const names = joinNames(
+      input.learning.slice(0, 2).map((track) => `"${track.title}" (${track.progressPercent}%)`),
+    );
+    content.push(`You're partway through ${names}.`);
   }
 
-  if (input.news[0]) {
-    clauses.push(`Latest from LIVEY: "${input.news[0].title}".`);
+  if (input.news.length > 0) {
+    const headlines = joinNames(input.news.slice(0, 2).map((post) => `"${post.title}"`));
+    content.push(`Latest from LIVEY: ${headlines}.`);
   }
 
-  if (clauses.length === 1) {
-    clauses.push("Nothing urgent needs your attention right now.");
-  }
-
-  return clauses.join(" ");
+  const body =
+    content.length > 0 ? content.join(" ") : "Nothing urgent needs your attention right now.";
+  return `${input.greeting}. ${body} ${pickClosingQuestion(input)}`;
 }
 
 // Optional `token` mirrors getAuthContext()'s own signature — the real
@@ -274,12 +356,13 @@ export async function getUserDigest(token?: string): Promise<UserDigest> {
     geographyCeilingNodeId: authContext.assignment?.geographyCeilingNodeId ?? null,
   };
 
-  const [news, pipeline, tasks, openTicketCount, learning, unreadNotificationCount] =
+  const [news, pipeline, deals, tasks, tickets, learning, unreadNotificationCount] =
     await Promise.all([
       fetchNewsSection(policyAuth, capabilities),
       fetchPipelineSection(policyAuth, capabilities),
+      fetchTopOpenDealsSection(policyAuth, capabilities),
       fetchTasksDueSoonSection(policyAuth, capabilities),
-      fetchOpenTicketCount(policyAuth, capabilities),
+      fetchOpenTicketsSection(policyAuth, capabilities),
       fetchLearningInProgressSection(policyAuth, capabilities, userId),
       fetchUnreadNotificationCount(policyAuth),
     ]);
@@ -290,8 +373,9 @@ export async function getUserDigest(token?: string): Promise<UserDigest> {
   const narrative = buildNarrative({
     greeting,
     pipeline,
+    deals,
     tasks,
-    openTicketCount,
+    tickets,
     unreadNotificationCount,
     news,
     learning,
@@ -304,8 +388,9 @@ export async function getUserDigest(token?: string): Promise<UserDigest> {
     generatedAt: now.toISOString(),
     news,
     pipeline,
+    deals,
     tasks,
-    openTicketCount,
+    tickets,
     unreadNotificationCount,
     learning,
   };
