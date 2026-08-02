@@ -203,39 +203,25 @@ function AdminDealsPage() {
     [deals, reviewDraft?.country],
   );
 
-  const publishDealActivity = async (
+  const publishDealNotification = async (
     deal: DealRecord,
     type: string,
     notificationTitle: string,
     notificationMessage: string,
-    feedTitle: string,
-    feedCaption: string,
   ) => {
-    const now = new Date().toISOString();
-    await Promise.allSettled([
-      supabase.from("notifications").insert({
-        id: globalThis.crypto.randomUUID(),
-        user_id: deal.user_id ?? null,
-        partner_id: deal.partner_id ?? null,
-        title: notificationTitle,
-        message: notificationMessage,
-        type,
-        read: false,
-        created_at: now,
-      }),
-      supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: feedTitle,
-        caption: feedCaption,
-        image_path: "",
-        image_alt: "",
-        posted_by_name: "LIVEY Admin",
-        posted_by_role: "super_admin",
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
-      }),
-    ]);
+    const { error } = await supabase.from("notifications").insert({
+      id: globalThis.crypto.randomUUID(),
+      user_id: deal.user_id ?? null,
+      partner_id: deal.partner_id ?? null,
+      title: notificationTitle,
+      message: notificationMessage,
+      type,
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error("Deal notification could not be recorded", error);
+    }
   };
 
   const replaceCollaborators = async (dealId: string, collaborators: DealCollaboratorDraft[]) => {
@@ -317,13 +303,11 @@ function AdminDealsPage() {
         await persistCollaboratorsSafely(selectedDeal.id, reviewCollaborators);
       }
       if (status) {
-        await publishDealActivity(
+        await publishDealNotification(
           selectedDeal,
           `deal_${status}`,
           `Deal ${status.replace("_", " ")}`,
           `${selectedDeal.account_name} was marked ${status.replace("_", " ")} by admin.`,
-          `${selectedDeal.account_name} ${status.replace("_", " ")}`,
-          `Super admin reviewed ${selectedDeal.product} and set the deal to ${status.replace("_", " ")}.`,
         );
         const reviewer = (await supabase.auth.getUser()).data.user;
         await recordAuditEvent(supabase, {

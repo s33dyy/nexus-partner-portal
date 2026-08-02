@@ -139,44 +139,24 @@ function PipelinePage() {
     void load();
   }, [load]);
 
-  const publishDealActivity = async (
+  const publishDealNotification = async (
     type: string,
     notificationTitle: string,
     notificationMessage: string,
-    feedTitle: string,
-    feedCaption: string,
   ) => {
-    const now = new Date().toISOString();
-    const postedByName = profile?.company_name || profile?.full_name || "LIVEY";
-    const postedByRole = hasRole("super_admin")
-      ? "super_admin"
-      : hasRole("partner_admin")
-        ? "partner_admin"
-        : "partner_user";
-    await Promise.allSettled([
-      supabase.from("notifications").insert({
-        id: globalThis.crypto.randomUUID(),
-        user_id: profile?.id ?? null,
-        partner_id: profile?.partner_id ?? null,
-        title: notificationTitle,
-        message: notificationMessage,
-        type,
-        read: false,
-        created_at: now,
-      }),
-      supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: feedTitle,
-        caption: feedCaption,
-        image_path: "",
-        image_alt: "",
-        posted_by_name: postedByName,
-        posted_by_role: postedByRole,
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
-      }),
-    ]);
+    const { error } = await supabase.from("notifications").insert({
+      id: globalThis.crypto.randomUUID(),
+      user_id: profile?.id ?? null,
+      partner_id: profile?.partner_id ?? null,
+      title: notificationTitle,
+      message: notificationMessage,
+      type,
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error("Deal notification could not be recorded", error);
+    }
   };
 
   const regionScopedDeals = useMemo(
@@ -239,12 +219,10 @@ function PipelinePage() {
         return;
       }
       toast.success(`${deal.account_name} moved to ${stage}`);
-      await publishDealActivity(
+      await publishDealNotification(
         "deal_stage_change",
         `${deal.account_name} moved to ${stage}`,
         `${deal.account_name} advanced to ${stage}.`,
-        `${deal.account_name} moved to ${stage}`,
-        `The deal for ${deal.product} progressed to ${stage}.`,
       );
       await recordAuditEvent(supabase, {
         actorName: "LIVEY",
@@ -287,12 +265,10 @@ function PipelinePage() {
         })
         .eq("id", noteDeal.id);
       if (error) throw error;
-      await publishDealActivity(
+      await publishDealNotification(
         "deal_note",
         `Note updated for ${noteDeal.account_name}`,
         noteDraft.trim() || `A note was updated for ${noteDeal.account_name}.`,
-        `${noteDeal.account_name} note updated`,
-        noteDraft.trim() || `A new note was added for ${noteDeal.product}.`,
       );
       await recordAuditEvent(supabase, {
         actorName: "LIVEY",

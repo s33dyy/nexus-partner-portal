@@ -350,31 +350,6 @@ function AdminPartners() {
             `Partner application status updated to ${decision.replace("_", " ")}`,
           severity: decision === "approved" ? "medium" : "low",
         });
-
-        // Add to news feed
-        const newsTitle =
-          decision === "partial_approval"
-            ? `Partner ${selected.company_name} partially approved (agreement pending)`
-            : `Partner ${selected.company_name} is now ${decision.replace("_", " ")}`;
-        const newsCaption =
-          decision === "partial_approval"
-            ? noteDraft.trim() ||
-              `The partner application for ${selected.company_name} was partially approved. Agreement will be prepared next.`
-            : noteDraft.trim() ||
-              `The partner application for ${selected.company_name} was updated to ${decision.replace("_", " ")}.`;
-
-        await supabase.from("portal_news_posts").insert({
-          id: globalThis.crypto.randomUUID(),
-          title: newsTitle,
-          caption: newsCaption,
-          image_path: "",
-          image_alt: "",
-          posted_by_name: "Super Admin",
-          posted_by_role: "System",
-          is_seed: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
       }
       toast.success(`Partner ${decision.replace("_", " ")}`);
       setNoteDraft("");
@@ -510,20 +485,6 @@ function AdminPartners() {
         outcome: "approved",
         details: "Partner approved and temporary credentials issued",
         severity: "medium",
-      });
-      await supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: `Partner ${selected.company_name} is now approved`,
-        caption:
-          noteDraft.trim() ||
-          `The partner application for ${selected.company_name} completed approval and temporary credentials were issued.`,
-        image_path: "",
-        image_alt: "",
-        posted_by_name: "Super Admin",
-        posted_by_role: "System",
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
       });
 
       setCredentialPreview({

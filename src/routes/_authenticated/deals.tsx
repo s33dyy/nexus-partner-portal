@@ -870,50 +870,28 @@ function DealsPage() {
     [deals, draft.country],
   );
 
-  const publishDealActivity = async ({
+  const publishDealNotification = async ({
     notificationTitle,
     notificationMessage,
-    feedTitle,
-    feedCaption,
     type,
   }: {
     notificationTitle: string;
     notificationMessage: string;
-    feedTitle: string;
-    feedCaption: string;
     type: string;
   }) => {
-    const now = new Date().toISOString();
-    const postedByName = profile?.company_name || profile?.full_name || "LIVEY";
-    const postedByRole = hasRole("super_admin")
-      ? "super_admin"
-      : hasRole("partner_admin")
-        ? "partner_admin"
-        : "partner_user";
-    await Promise.allSettled([
-      supabase.from("notifications").insert({
-        id: globalThis.crypto.randomUUID(),
-        user_id: profile?.id ?? null,
-        partner_id: profile?.partner_id ?? null,
-        title: notificationTitle,
-        message: notificationMessage,
-        type,
-        read: false,
-        created_at: now,
-      }),
-      supabase.from("portal_news_posts").insert({
-        id: globalThis.crypto.randomUUID(),
-        title: feedTitle,
-        caption: feedCaption,
-        image_path: "",
-        image_alt: "",
-        posted_by_name: postedByName,
-        posted_by_role: postedByRole,
-        is_seed: false,
-        created_at: now,
-        updated_at: now,
-      }),
-    ]);
+    const { error } = await supabase.from("notifications").insert({
+      id: globalThis.crypto.randomUUID(),
+      user_id: profile?.id ?? null,
+      partner_id: profile?.partner_id ?? null,
+      title: notificationTitle,
+      message: notificationMessage,
+      type,
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error("Deal notification could not be recorded", error);
+    }
   };
 
   const replaceCollaborators = async (dealId: string, collaborators: DealCollaboratorDraft[]) => {
@@ -1341,17 +1319,11 @@ function DealsPage() {
         draftCollaborators,
       );
 
-      await publishDealActivity({
+      await publishDealNotification({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
         notificationMessage: autoApproved
           ? `${accountName} was auto-approved because the deal amount is $5,000 or below.`
           : `${accountName} is waiting for super admin approval.`,
-        feedTitle: autoApproved
-          ? `${accountName} was auto-approved`
-          : `${accountName} submitted for review`,
-        feedCaption: autoApproved
-          ? `Deal value ${draft.amount} stayed within the auto-approval threshold and is now active.`
-          : `Deal value ${draft.amount} needs super admin approval before it can move forward.`,
         type: "deal_created",
       });
 
@@ -1500,11 +1472,9 @@ function DealsPage() {
 
     await load();
 
-    await publishDealActivity({
+    await publishDealNotification({
       notificationTitle: `${selectedDeal.account_name} moved to ${stage}`,
       notificationMessage: `${selectedDeal.account_name} advanced to ${stage}.`,
-      feedTitle: `${selectedDeal.account_name} moved to ${stage}`,
-      feedCaption: `The deal for ${selectedDeal.product} progressed to ${stage}.`,
       type: "deal_stage_change",
     });
     await recordAuditEvent(supabase, {
@@ -1546,20 +1516,12 @@ function DealsPage() {
 
     await load();
 
-    await publishDealActivity({
+    await publishDealNotification({
       notificationTitle: status === "won" ? "Deal won" : "Deal lost",
       notificationMessage:
         status === "won"
           ? `${selectedDeal.account_name} closed won and is ready for PO submission.`
           : `${selectedDeal.account_name} was closed as lost.`,
-      feedTitle:
-        status === "won"
-          ? `${selectedDeal.account_name} closed won`
-          : `${selectedDeal.account_name} closed lost`,
-      feedCaption:
-        status === "won"
-          ? `A deal for ${selectedDeal.product} was successfully closed won.`
-          : `The opportunity for ${selectedDeal.product} was marked as lost.`,
       type: `deal_${status}`,
     });
     await recordAuditEvent(supabase, {
