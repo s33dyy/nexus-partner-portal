@@ -33,13 +33,14 @@ import { type CsvColumn } from "@/lib/csv-export";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { calculateOutstandingRewardPoints } from "@/lib/reward-admin";
 import {
+  rewardBalanceSummary,
   rewardProgress,
   rewardTierForPoints,
-  sumRewardPoints,
   type RewardCatalogRecord,
   type RewardPointEventRecord,
   type RewardRedemptionRecord,
 } from "@/lib/rewards";
+import { requestRewardRedemption } from "@/integrations/local/reward-commands";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
@@ -69,9 +70,9 @@ const REWARD_REDEMPTION_EXPORT_COLUMNS: CsvColumn[] = [
 function RewardsPage() {
   const { profile, hasRole } = useAuth();
   const navigate = useNavigate();
-  const access = useRequireAccess('partial');
+  const access = useRequireAccess("partial");
   const isSuperAdmin = hasRole("super_admin");
-  
+
   const [catalog, setCatalog] = useState<RewardCatalogRecord[]>([]);
   const [events, setEvents] = useState<RewardPointEventRecord[]>([]);
   const [redemptions, setRedemptions] = useState<RewardRedemptionRecord[]>([]);
@@ -82,6 +83,7 @@ function RewardsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [requestOpen, setRequestOpen] = useState(false);
   const [selectedReward, setSelectedReward] = useState<RewardCatalogRecord | null>(null);
+  const [requestIdempotencyKey, setRequestIdempotencyKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [requestDraft, setRequestDraft] = useState({
     shipping_name: "",
@@ -165,16 +167,24 @@ function RewardsPage() {
     }));
   }, [profile?.full_name]);
 
-  const points = useMemo(() => sumRewardPoints(events), [events]);
+  const balanceSummary = useMemo(
+    () => rewardBalanceSummary({ events, redemptions }),
+    [events, redemptions],
+  );
+  const points = balanceSummary.availablePoints;
+  const reservedPoints = balanceSummary.reservedPoints;
   const tier = useMemo(() => rewardTierForPoints(points), [points]);
   const progress = useMemo(() => rewardProgress(points), [points]);
   const isAdminView = isSuperAdmin;
   const pendingRedemptions = useMemo(
-    () => redemptions.filter((redemption) => redemption.status === "requested").length,
+    () =>
+      redemptions.filter((redemption) =>
+        ["points_reserved", "pending_review"].includes(redemption.status),
+      ).length,
     [redemptions],
   );
   const approvedRedemptions = useMemo(
-    () => redemptions.filter((redemption) => redemption.status === "approved").length,
+    () => redemptions.filter((redemption) => redemption.status === "processing").length,
     [redemptions],
   );
   const outstandingPoints = useMemo(() => calculateOutstandingRewardPoints(events), [events]);
@@ -200,10 +210,7 @@ function RewardsPage() {
   }, [categoryFilter, catalog, query]);
 
   const recentEvents = useMemo(() => events.slice(0, 6), [events]);
-  const rewardById = useMemo(
-    () => new Map(catalog.map((item) => [item.id, item])),
-    [catalog],
-  );
+  const rewardById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
 
   if (isSuperAdmin) {
     return (
@@ -215,6 +222,7 @@ function RewardsPage() {
 
   const openRequestDialog = (reward: RewardCatalogRecord) => {
     setSelectedReward(reward);
+    setRequestIdempotencyKey(globalThis.crypto.randomUUID());
     setRequestDraft({
       shipping_name: profile?.full_name ?? "",
       shipping_address: "",
@@ -231,21 +239,14 @@ function RewardsPage() {
     }
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("reward_redemptions").insert({
-        id: crypto.randomUUID(),
-        reward_id: selectedReward.id,
-        user_id: profile.id,
-        partner_id: profile.partner_id,
-        points_cost: selectedReward.points_cost,
-        status: "requested",
-        shipping_name: requestDraft.shipping_name.trim() || profile.full_name,
-        shipping_address: requestDraft.shipping_address.trim(),
-        notes: requestDraft.notes.trim(),
-        is_seed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      const result = await requestRewardRedemption({
+        rewardId: selectedReward.id,
+        shippingName: requestDraft.shipping_name.trim() || profile.full_name,
+        shippingAddress: requestDraft.shipping_address.trim(),
+        notes: requestDraft.notes.trim() || null,
+        idempotencyKey: requestIdempotencyKey,
       });
-      if (error) throw error;
+      if (!result.ok) throw new Error(result.failure.message);
       await recordAuditEvent(supabase, {
         actorName: profile?.full_name ?? "LIVEY User",
         actorRole: hasRole("super_admin")
@@ -339,9 +340,21 @@ function RewardsPage() {
         {isAdminView ? (
           <>
             <Metric label="Catalog items" value={String(catalog.length)} hint="Published rewards" />
-            <Metric label="Pending redemptions" value={String(pendingRedemptions)} hint="Awaiting approval" />
-            <Metric label="Approved redemptions" value={String(approvedRedemptions)} hint="Completed requests" />
-            <Metric label="Outstanding points" value={String(outstandingPoints)} hint="Current ledger balance" />
+            <Metric
+              label="Pending redemptions"
+              value={String(pendingRedemptions)}
+              hint="Awaiting approval"
+            />
+            <Metric
+              label="Approved redemptions"
+              value={String(approvedRedemptions)}
+              hint="Completed requests"
+            />
+            <Metric
+              label="Outstanding points"
+              value={String(outstandingPoints)}
+              hint="Current ledger balance"
+            />
           </>
         ) : (
           <>
@@ -349,7 +362,9 @@ function RewardsPage() {
             <Metric
               label="Next tier"
               value={progress.nextTier ?? "Max"}
-              hint={progress.pointsToNext > 0 ? `${progress.pointsToNext} points to go` : "Top tier"}
+              hint={
+                progress.pointsToNext > 0 ? `${progress.pointsToNext} points to go` : "Top tier"
+              }
             />
             <Metric label="Rewards" value={String(catalog.length)} hint="Catalog items" />
             <Metric label="Requests" value={String(redemptions.length)} hint="Redemption history" />
@@ -485,7 +500,14 @@ function RewardsPage() {
                       <Trophy className="h-7 w-7 text-primary" />
                     </div>
                     <div className="mt-4 text-4xl font-semibold tracking-tight">{points}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">Available reward points</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      Available reward points
+                    </div>
+                    {reservedPoints > 0 && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {reservedPoints} points reserved by pending requests
+                      </div>
+                    )}
                   </div>
 
                   <div>

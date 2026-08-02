@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   Loader2,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
-  Trash2,
   Trophy,
   Upload,
 } from "lucide-react";
@@ -34,7 +34,6 @@ import { type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
-  buildManualRewardAdjustmentEvent,
   calculateOutstandingRewardPoints,
   readRewardCatalogImportRows,
   REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS,
@@ -45,6 +44,12 @@ import {
   type RewardPointEventRecord,
   type RewardRedemptionRecord,
 } from "@/lib/rewards";
+import {
+  adjustRewardPoints,
+  approveRewardRedemption,
+  rejectRewardRedemption,
+  retireRewardCatalogItem,
+} from "@/integrations/local/reward-commands";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent, recordNotification } from "@/lib/workflow-events";
 
@@ -118,8 +123,10 @@ function AdminRewardsPage() {
   const [draft, setDraft] = useState<RewardForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retiringId, setRetiringId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<RewardRedemptionRecord | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [importingCatalog, setImportingCatalog] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -304,23 +311,23 @@ function AdminRewardsPage() {
     }
   };
 
-  const deleteItem = async (item: RewardCatalogRecord) => {
-    setDeletingId(item.id);
+  const retireItem = async (item: RewardCatalogRecord) => {
+    setRetiringId(item.id);
     try {
-      const { error } = await supabase.from("reward_catalog_items").delete().eq("id", item.id);
-      if (error) throw error;
-      toast.success("Reward deleted");
+      const result = await retireRewardCatalogItem({ rewardId: item.id });
+      if (!result.ok) throw new Error(result.failure.message);
+      toast.success("Reward retired — redemption history is retained");
       if (selectedId === item.id) {
         setEditOpen(false);
       }
       await recordAuditEvent(supabase, {
         actorName: profile?.full_name ?? "LIVEY Admin",
         actorRole: "super_admin",
-        action: "reward_delete",
+        action: "reward_retire",
         targetType: "reward",
         targetName: item.title,
-        outcome: "deleted",
-        details: `Deleted reward catalog item ${item.title}`,
+        outcome: "retired",
+        details: `Retired reward catalog item ${item.title}`,
         severity: "medium",
       });
       if (selectedId === item.id) {
@@ -329,9 +336,9 @@ function AdminRewardsPage() {
       }
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete reward");
+      toast.error(error instanceof Error ? error.message : "Failed to retire reward");
     } finally {
-      setDeletingId(null);
+      setRetiringId(null);
     }
   };
 
@@ -358,32 +365,12 @@ function AdminRewardsPage() {
     const reward = catalog.find((item) => item.id === redemption.reward_id) ?? null;
     setProcessingId(redemption.id);
     try {
-      const now = new Date().toISOString();
-      const updateRes = await supabase
-        .from("reward_redemptions")
-        .update({
-          status: "approved",
-          approved_by: profile?.id ?? null,
-          approved_at: now,
-          updated_at: now,
-        })
-        .eq("id", redemption.id);
-      if (updateRes.error) throw updateRes.error;
-
-      const pointsRes = await supabase.from("reward_point_events").insert({
-        id: crypto.randomUUID(),
-        user_id: redemption.user_id,
-        partner_id: redemption.partner_id,
-        source_type: "redemption",
-        source_id: redemption.id,
-        points_delta: -Math.abs(redemption.points_cost),
-        reason: `Redeemed ${reward?.title ?? "reward"}`,
-        approved_by: profile?.id ?? null,
-        approved_at: now,
-        is_seed: false,
-        created_at: now,
+      const result = await approveRewardRedemption({
+        redemptionId: redemption.id,
+        expectedVersion: redemption.version,
       });
-      if (pointsRes.error) throw pointsRes.error;
+      if (!result.ok) throw new Error(result.failure.message);
+
       await recordNotification(supabase, {
         userId: redemption.user_id,
         partnerId: redemption.partner_id,
@@ -411,25 +398,34 @@ function AdminRewardsPage() {
     }
   };
 
-  const rejectRedemption = async (redemption: RewardRedemptionRecord) => {
+  const openRejectDialog = (redemption: RewardRedemptionRecord) => {
+    setRejectTarget(redemption);
+    setRejectReason("");
+  };
+
+  const confirmRejectRedemption = async () => {
+    if (!rejectTarget) return;
+    const redemption = rejectTarget;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      toast.error("A reason is required to reject a redemption");
+      return;
+    }
     const reward = catalog.find((item) => item.id === redemption.reward_id) ?? null;
     setProcessingId(redemption.id);
     try {
-      const { error } = await supabase
-        .from("reward_redemptions")
-        .update({
-          status: "rejected",
-          approved_by: profile?.id ?? null,
-          approved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", redemption.id);
-      if (error) throw error;
+      const result = await rejectRewardRedemption({
+        redemptionId: redemption.id,
+        expectedVersion: redemption.version,
+        reason,
+      });
+      if (!result.ok) throw new Error(result.failure.message);
+
       await recordNotification(supabase, {
         userId: redemption.user_id,
         partnerId: redemption.partner_id,
         title: "Reward redemption rejected",
-        message: `Your redemption request for ${reward?.title ?? "a reward"} was rejected.`,
+        message: `Your redemption request for ${reward?.title ?? "a reward"} was rejected: ${reason}`,
         type: "reward_redemption",
       });
       await recordAuditEvent(supabase, {
@@ -439,10 +435,12 @@ function AdminRewardsPage() {
         targetType: "redemption",
         targetName: reward?.title ?? redemption.id,
         outcome: "rejected",
-        details: `Rejected redemption request for ${reward?.title ?? "reward"}`,
+        details: `Rejected redemption request for ${reward?.title ?? "reward"}: ${reason}`,
         severity: "medium",
       });
       toast.success("Redemption rejected");
+      setRejectTarget(null);
+      setRejectReason("");
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to reject redemption");
@@ -513,15 +511,13 @@ function AdminRewardsPage() {
 
     setAdjustingPoints(true);
     try {
-      const payload = buildManualRewardAdjustmentEvent({
+      const result = await adjustRewardPoints({
         userId: user.id,
-        partnerId: user.partner_id,
         pointsDelta,
         reason: adjustmentDraft.reason,
-        actorId: profile?.id ?? null,
+        idempotencyKey: globalThis.crypto.randomUUID(),
       });
-      const { error } = await supabase.from("reward_point_events").insert(payload);
-      if (error) throw error;
+      if (!result.ok) throw new Error(result.failure.message);
 
       toast.success("Manual points adjustment saved");
       setAdjustmentDraft({ userId: "", pointsDelta: "", reason: "" });
@@ -574,14 +570,16 @@ function AdminRewardsPage() {
         <Metric
           label="Pending redemptions"
           value={String(
-            redemptions.filter((redemption) => redemption.status === "requested").length,
+            redemptions.filter((redemption) =>
+              ["points_reserved", "pending_review"].includes(redemption.status),
+            ).length,
           )}
           hint="Awaiting approval"
         />
         <Metric
           label="Approved redemptions"
           value={String(
-            redemptions.filter((redemption) => redemption.status === "approved").length,
+            redemptions.filter((redemption) => redemption.status === "processing").length,
           )}
           hint="Fulfilled requests"
         />
@@ -1121,19 +1119,67 @@ function AdminRewardsPage() {
                   <Button
                     type="button"
                     variant="destructive"
-                    onClick={() => selectedItem && void deleteItem(selectedItem)}
-                    disabled={deletingId === selectedItem?.id}
+                    onClick={() => selectedItem && void retireItem(selectedItem)}
+                    disabled={retiringId === selectedItem?.id}
                   >
-                    {deletingId === selectedItem?.id ? (
+                    {retiringId === selectedItem?.id ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <Trash2 className="mr-2 h-4 w-4" />
+                      <Archive className="mr-2 h-4 w-4" />
                     )}
-                    Delete reward
+                    Retire reward
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Retiring keeps this reward&apos;s redemption and ledger history intact — it just
+                  stops new requests. It cannot be deleted.
+                </p>
               </>
             ) : null}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={Boolean(rejectTarget)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setRejectTarget(null);
+              setRejectReason("");
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reject redemption</DialogTitle>
+              <DialogDescription>
+                Explain why this request is being rejected. The reservation is released and stock is
+                restored once you confirm.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2">
+              <Label htmlFor="reject-reason">Reason</Label>
+              <Textarea
+                id="reject-reason"
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+                placeholder="e.g. Item is out of stock at the fulfilment partner"
+              />
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" onClick={() => setRejectTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void confirmRejectRedemption()}
+                disabled={!rejectReason.trim() || processingId === rejectTarget?.id}
+              >
+                {processingId === rejectTarget?.id ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                Reject redemption
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 
@@ -1196,14 +1242,15 @@ function AdminRewardsPage() {
                       </div>
                       <Badge
                         variant={
-                          redemption.status === "approved"
+                          redemption.status === "processing"
                             ? "default"
-                            : redemption.status === "requested"
+                            : redemption.status === "points_reserved" ||
+                                redemption.status === "pending_review"
                               ? "secondary"
                               : "outline"
                         }
                       >
-                        {redemption.status}
+                        {redemption.status.replace(/_/g, " ")}
                       </Badge>
                     </div>
                     <div className="mt-3 text-xs text-muted-foreground">
@@ -1211,7 +1258,7 @@ function AdminRewardsPage() {
                       {redemption.shipping_address ?? "No address"}
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {redemption.status === "requested" && (
+                      {["points_reserved", "pending_review"].includes(redemption.status) && (
                         <>
                           <Button
                             size="sm"
@@ -1228,7 +1275,7 @@ function AdminRewardsPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => void rejectRedemption(redemption)}
+                            onClick={() => openRejectDialog(redemption)}
                             disabled={processingId === redemption.id}
                           >
                             Reject

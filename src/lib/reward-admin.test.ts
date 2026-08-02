@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 
 import {
-  buildManualRewardAdjustmentEvent,
   calculateOutstandingRewardPoints,
   readRewardCatalogImportRows,
   validateRewardCatalogImportRows,
@@ -72,34 +71,10 @@ test("calculateOutstandingRewardPoints sums the reward ledger", () => {
   expect(outstanding).toBe(450);
 });
 
-test("buildManualRewardAdjustmentEvent creates positive or negative point events", () => {
-  const credit = buildManualRewardAdjustmentEvent({
-    userId: "user-1",
-    partnerId: "partner-1",
-    pointsDelta: 250,
-    reason: "Bonus for Q3 launch",
-    actorId: "admin-1",
-    now: "2026-07-27T10:00:00.000Z",
-  });
-  const debit = buildManualRewardAdjustmentEvent({
-    userId: "user-1",
-    partnerId: "partner-1",
-    pointsDelta: -100,
-    reason: "Correction",
-    actorId: "admin-1",
-    now: "2026-07-27T10:00:00.000Z",
-  });
-
-  expect(credit.source_type).toBe("manual_adjustment");
-  expect(credit.points_delta).toBe(250);
-  expect(debit.points_delta).toBe(-100);
-  expect(credit.approved_by).toBe("admin-1");
-});
-
 test("readRewardCatalogImportRows parses csv files with the template headers", async () => {
   const csv = [
     "title,description,image_path,category,points_cost,stock,availability",
-    'LIVEY Mug,Branded mug,https://cdn.example.com/mug.png,Merchandise,250,5,available',
+    "LIVEY Mug,Branded mug,https://cdn.example.com/mug.png,Merchandise,250,5,available",
   ].join("\n");
 
   const rows = await readRewardCatalogImportRows(

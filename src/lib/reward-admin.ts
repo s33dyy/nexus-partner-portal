@@ -52,15 +52,6 @@ export type RewardCatalogImportValidationResult =
       errors: RewardCatalogImportError[];
     };
 
-export type ManualRewardAdjustmentInput = {
-  userId: string | null;
-  partnerId: string | null;
-  pointsDelta: number;
-  reason: string;
-  actorId: string | null;
-  now?: string;
-};
-
 function normalizeString(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -81,9 +72,8 @@ function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
     throw new Error("The selected file could not be read.");
   }
 
-  const rawRows = (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<
-    Record<string, unknown>
-  >) ?? [];
+  const rawRows =
+    (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
 
   return rawRows.map((row) =>
     Object.fromEntries(
@@ -131,7 +121,8 @@ export function validateRewardCatalogImportRows(
     if (!description) rowErrors.push("description is required");
     if (!category) rowErrors.push("category is required");
     if (!availability) rowErrors.push("availability is required");
-    if (!Number.isFinite(pointsCost) || pointsCost < 0) rowErrors.push("points_cost must be 0 or higher");
+    if (!Number.isFinite(pointsCost) || pointsCost < 0)
+      rowErrors.push("points_cost must be 0 or higher");
     if (!Number.isFinite(stock) || stock < 0) rowErrors.push("stock must be 0 or higher");
 
     if (rowErrors.length > 0) {
@@ -164,22 +155,4 @@ export function calculateOutstandingRewardPoints(
   events: Array<Pick<RewardPointEventRecord, "points_delta">>,
 ) {
   return sumRewardPoints(events);
-}
-
-export function buildManualRewardAdjustmentEvent(input: ManualRewardAdjustmentInput) {
-  const now = input.now ?? new Date().toISOString();
-
-  return {
-    id: crypto.randomUUID(),
-    user_id: input.userId,
-    partner_id: input.partnerId,
-    source_type: "manual_adjustment",
-    source_id: null,
-    points_delta: input.pointsDelta,
-    reason: input.reason.trim(),
-    approved_by: input.actorId,
-    approved_at: now,
-    is_seed: false,
-    created_at: now,
-  };
 }

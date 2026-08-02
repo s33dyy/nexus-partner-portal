@@ -1,5 +1,3 @@
-import { calculateDealRewardAllocations } from "@/lib/deal-collaboration";
-
 export const DEAL_WIN_REWARD_POINTS = 500;
 
 export const REWARD_TIERS = [
@@ -11,13 +9,6 @@ export const REWARD_TIERS = [
 
 export type RewardTier = (typeof REWARD_TIERS)[number]["tier"];
 
-function makeRewardId() {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `reward_${Date.now()}_${Math.random().toString(16).slice(2)}`
-  );
-}
-
 export type RewardCatalogRecord = {
   id: string;
   title: string;
@@ -27,6 +18,8 @@ export type RewardCatalogRecord = {
   points_cost: number;
   stock: number;
   availability: string;
+  retired_at: string | null;
+  retired_by: string | null;
   is_seed: boolean;
   created_at: string;
   updated_at: string;
@@ -42,6 +35,8 @@ export type RewardPointEventRecord = {
   reason: string;
   approved_by: string | null;
   approved_at: string | null;
+  idempotency_key: string | null;
+  reversal_of: string | null;
   is_seed: boolean;
   created_at: string;
 };
@@ -58,27 +53,11 @@ export type RewardRedemptionRecord = {
   notes: string | null;
   approved_by: string | null;
   approved_at: string | null;
+  idempotency_key: string | null;
+  version: number;
   is_seed: boolean;
   created_at: string;
   updated_at: string;
-};
-
-type RewardQuery = {
-  select(columns?: string): RewardQuery;
-  count(): RewardQuery;
-  eq(column: string, value: unknown): RewardQuery;
-  maybeSingle(): PromiseLike<{ data: unknown; error: unknown | null }>;
-  insert(payload: Record<string, unknown>): PromiseLike<{ error: unknown | null }>;
-};
-
-type RewardDbClient = {
-  from(table: string): RewardQuery;
-};
-
-type DealRewardCollaborator = {
-  userId: string;
-  splitPercent: number;
-  sortOrder: number;
 };
 
 export function rewardTierForPoints(points: number): RewardTier {
@@ -119,67 +98,18 @@ export function sumRewardPoints(events: Array<{ points_delta: number }>) {
   return events.reduce((sum, event) => sum + Number(event.points_delta ?? 0), 0);
 }
 
-export async function awardDealWinPoints(
-  db: RewardDbClient,
-  input: {
-    dealId: string;
-    accountName: string;
-    product: string;
-    dealAmount: string | number;
-    rewardRatePercent: number;
-    collaborators: DealRewardCollaborator[];
-    fallbackUserId?: string | null;
-    partnerId: string | null;
-    actorId: string | null;
-  },
-) {
-  const collaborators =
-    input.collaborators.length > 0
-      ? input.collaborators
-      : input.fallbackUserId
-        ? [{ userId: input.fallbackUserId, splitPercent: 100, sortOrder: 0 }]
-        : [];
-
-  const allocations = calculateDealRewardAllocations({
-    dealId: input.dealId,
-    dealAmount: input.dealAmount,
-    rewardRatePercent: input.rewardRatePercent,
-    collaborators,
-  });
-
-  let created = 0;
-  let points = 0;
-  const now = new Date().toISOString();
-
-  for (const allocation of allocations) {
-    const { data: existing, error: lookupError } = await db
-      .from("reward_point_events")
-      .select("id")
-      .eq("source_type", "deal_win")
-      .eq("source_id", input.dealId)
-      .eq("user_id", allocation.userId)
-      .maybeSingle();
-    if (lookupError) throw lookupError;
-    if (existing) continue;
-
-    const payload = {
-      id: makeRewardId(),
-      user_id: allocation.userId,
-      partner_id: input.partnerId,
-      source_type: "deal_win",
-      source_id: input.dealId,
-      points_delta: allocation.points,
-      reason: `${input.accountName} closed won for ${input.product}`,
-      approved_by: input.actorId,
-      approved_at: now,
-      is_seed: false,
-      created_at: now,
-    };
-    const { error: insertError } = await db.from("reward_point_events").insert(payload);
-    if (insertError) throw insertError;
-    created += 1;
-    points += allocation.points;
-  }
-
-  return { created, points };
+// Available points already reflect every reservation: requestRewardRedemption
+// posts a negative `redemption_reservation` event at request time, so the
+// ledger sum alone is the spendable balance. Reserved points are a separate,
+// purely informational figure — never added back into availablePoints, or a
+// pending request would look spendable twice.
+export function rewardBalanceSummary(input: {
+  events: Array<{ points_delta: number }>;
+  redemptions: Array<{ status: string; points_cost: number }>;
+}) {
+  const availablePoints = sumRewardPoints(input.events);
+  const reservedPoints = input.redemptions
+    .filter((redemption) => ["points_reserved", "pending_review"].includes(redemption.status))
+    .reduce((sum, redemption) => sum + Number(redemption.points_cost), 0);
+  return { availablePoints, reservedPoints };
 }
