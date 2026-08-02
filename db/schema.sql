@@ -712,6 +712,67 @@ CREATE TABLE IF NOT EXISTS reward_redemptions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Risk-first reward integrity (2026-08-01): reservation/replay keys,
+-- optimistic version, reversal linkage, and catalogue retirement. Additive
+-- ALTER statements (not inline CREATE TABLE columns) because db:migrate
+-- re-runs this whole file against the already-bootstrapped production
+-- database on every deploy — CREATE TABLE IF NOT EXISTS is a no-op there,
+-- so new columns only ever land through ADD COLUMN IF NOT EXISTS.
+ALTER TABLE reward_catalog_items ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+ALTER TABLE reward_catalog_items ADD COLUMN IF NOT EXISTS retired_by UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
+ALTER TABLE reward_point_events ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE reward_point_events ADD COLUMN IF NOT EXISTS reversal_of UUID REFERENCES reward_point_events(id) ON DELETE RESTRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS reward_point_events_idempotency_key_uidx
+  ON reward_point_events (idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS reward_redemptions_idempotency_key_uidx
+  ON reward_redemptions (idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- reward_redemptions.reward_id must never cascade-delete redemption history
+-- out from under a retired catalogue item. Discovers the existing FK by the
+-- column it constrains (not a hardcoded constraint name) so this is safe to
+-- re-run regardless of what a given environment's constraint happens to be
+-- named, and is a no-op once the constraint is already RESTRICT.
+DO $$
+DECLARE
+  reward_fk_name TEXT;
+  reward_fk_delete_action "char";
+BEGIN
+  SELECT c.conname, c.confdeltype
+    INTO reward_fk_name, reward_fk_delete_action
+  FROM pg_constraint c
+  JOIN pg_attribute a
+    ON a.attrelid = c.conrelid
+   AND a.attnum = ANY(c.conkey)
+  WHERE c.conrelid = 'public.reward_redemptions'::regclass
+    AND c.contype = 'f'
+    AND a.attname = 'reward_id'
+  LIMIT 1;
+
+  IF reward_fk_name IS NOT NULL AND reward_fk_delete_action <> 'r' THEN
+    EXECUTE format(
+      'ALTER TABLE public.reward_redemptions DROP CONSTRAINT %I',
+      reward_fk_name
+    );
+    reward_fk_name := NULL;
+  END IF;
+
+  IF reward_fk_name IS NULL THEN
+    ALTER TABLE public.reward_redemptions
+      ADD CONSTRAINT reward_redemptions_reward_id_fkey
+      FOREIGN KEY (reward_id)
+      REFERENCES public.reward_catalog_items(id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS lookup_values (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   field_name TEXT NOT NULL,
@@ -1143,14 +1204,18 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   status TEXT NOT NULL DEFAULT 'open',
   priority TEXT NOT NULL DEFAULT 'medium',
   assignee_name TEXT,
-  product_sku TEXT,
-  serial_number TEXT,
   response_due_at TIMESTAMPTZ,
   resolve_due_at TIMESTAMPTZ,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Risk-first ticket contract (2026-08-01): additive, see the reward-table
+-- comment above for why these are ALTER statements rather than inline
+-- CREATE TABLE columns.
+ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS product_sku TEXT;
+ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS serial_number TEXT;
 
 CREATE TABLE IF NOT EXISTS support_ticket_comments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1159,10 +1224,12 @@ CREATE TABLE IF NOT EXISTS support_ticket_comments (
   author_name TEXT NOT NULL,
   author_role TEXT NOT NULL,
   body TEXT NOT NULL,
-  is_internal BOOLEAN NOT NULL DEFAULT FALSE,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Phase 4 (2026-07-30): internal-only support notes, hidden from partners.
+ALTER TABLE support_ticket_comments ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT FALSE;
 
 DROP TRIGGER IF EXISTS support_tickets_updated_at ON support_tickets;
 CREATE TRIGGER support_tickets_updated_at
