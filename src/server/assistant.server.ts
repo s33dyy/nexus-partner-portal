@@ -20,11 +20,49 @@ import type { CommandExecutionResult } from "@/domain/contracts/commands";
 import { ROLE_KEY_LABELS } from "@/domain/contracts/features";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { createDeal, resolveDealCommandActor } from "@/server/deal-commands.server";
-import { listDropdownSourceValues } from "@/server/dropdown-sources.server";
-import { getAuthContext, queryTable, type AuthContext } from "@/server/livey-service.server";
+import {
+  listDropdownSourceValues,
+  type DropdownCallerAuth,
+} from "@/server/dropdown-sources.server";
+import {
+  getAuthContext,
+  queryTableWithAuthContext,
+  type AuthContext,
+} from "@/server/livey-service.server";
 import { runChatCompletion, type ChatCompletionResult } from "@/server/openrouter.server";
 import { pool } from "@/server/postgres.server";
 import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
+import type { TablePolicyAuthContext } from "@/server/table-policy.server";
+
+// queryTable() (module default, no args) re-derives auth from the request
+// cookie via getAuthContext() — fine for the web chat path (a real TanStack
+// Start request), but the WhatsApp webhook path builds its authContext from
+// the verified sender's phone number with no request cookie at all, so it
+// must use queryTableWithAuthContext() with this explicit mapping instead.
+function toTablePolicyAuthContext(authContext: AuthContext): TablePolicyAuthContext {
+  return {
+    userId: authContext.session?.user.id ?? authContext.profile?.id ?? null,
+    roles: authContext.roles,
+    partnerId: authContext.profile?.partner_id ?? null,
+    companyName: authContext.profile?.company_name ?? null,
+    hasGovernedContext: Boolean(authContext.activeContext),
+    governedRoleKey: authContext.assignment?.roleKey ?? null,
+    geographyCeilingNodeId: authContext.assignment?.geographyCeilingNodeId ?? null,
+  };
+}
+
+// Same rationale as toTablePolicyAuthContext — listDropdownSourceValues()
+// re-derives its caller identity via getAuthContext()/the request cookie
+// unless handed one explicitly, which the session-less WhatsApp path needs.
+function toDropdownCallerAuth(authContext: AuthContext): DropdownCallerAuth | null {
+  const userId = authContext.session?.user.id ?? authContext.profile?.id ?? null;
+  if (!userId) return null;
+  return {
+    userId,
+    partnerId: authContext.profile?.partner_id ?? null,
+    isSuperAdmin: authContext.roles.includes("super_admin"),
+  };
+}
 
 // Every read below goes through queryTable() (the same RBAC-scoped path the
 // rest of the app's pages use — table-policy.server.ts applies identical
@@ -206,21 +244,27 @@ function matchesQuery(value: string, query: string | null): boolean {
   return value.toLowerCase().includes(query.toLowerCase());
 }
 
-async function fetchScopedDeals(filters: {
-  stage: string | null;
-  status: string | null;
-}): Promise<AssistantDealSummary[]> {
+async function fetchScopedDeals(
+  filters: {
+    stage: string | null;
+    status: string | null;
+  },
+  policyCtx: TablePolicyAuthContext,
+): Promise<AssistantDealSummary[]> {
   const queryFilters: Array<{ column: string; value: unknown; operator: "eq" }> = [];
   if (filters.stage) queryFilters.push({ column: "stage", value: filters.stage, operator: "eq" });
   if (filters.status)
     queryFilters.push({ column: "status", value: filters.status, operator: "eq" });
 
-  const { data, error } = await queryTable({
-    table: "portal_deals",
-    operation: "select",
-    filters: queryFilters,
-    order: { column: "updated_at", ascending: false },
-  });
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "portal_deals",
+      operation: "select",
+      filters: queryFilters,
+      order: { column: "updated_at", ascending: false },
+    },
+    policyCtx,
+  );
 
   if (error || !Array.isArray(data)) return [];
 
@@ -236,13 +280,19 @@ async function fetchScopedDeals(filters: {
   }));
 }
 
-async function fetchScopedPartners(searchTerm: string | null): Promise<AssistantPartnerSummary[]> {
-  const { data, error } = await queryTable({
-    table: "partners",
-    operation: "select",
-    filters: [],
-    order: { column: "updated_at", ascending: false },
-  });
+async function fetchScopedPartners(
+  searchTerm: string | null,
+  policyCtx: TablePolicyAuthContext,
+): Promise<AssistantPartnerSummary[]> {
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "partners",
+      operation: "select",
+      filters: [],
+      order: { column: "updated_at", ascending: false },
+    },
+    policyCtx,
+  );
   if (error || !Array.isArray(data)) return [];
 
   return data
@@ -261,13 +311,17 @@ async function fetchScopedPartners(searchTerm: string | null): Promise<Assistant
 
 async function fetchScopedCustomers(
   searchTerm: string | null,
+  policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantCustomerSummary[]> {
-  const { data, error } = await queryTable({
-    table: "portal_customers",
-    operation: "select",
-    filters: [],
-    order: { column: "updated_at", ascending: false },
-  });
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "portal_customers",
+      operation: "select",
+      filters: [],
+      order: { column: "updated_at", ascending: false },
+    },
+    policyCtx,
+  );
   if (error || !Array.isArray(data)) return [];
 
   return data
@@ -284,13 +338,19 @@ async function fetchScopedCustomers(
     }));
 }
 
-async function fetchScopedTasks(searchTerm: string | null): Promise<AssistantTaskSummary[]> {
-  const { data, error } = await queryTable({
-    table: "tasks",
-    operation: "select",
-    filters: [],
-    order: { column: "updated_at", ascending: false },
-  });
+async function fetchScopedTasks(
+  searchTerm: string | null,
+  policyCtx: TablePolicyAuthContext,
+): Promise<AssistantTaskSummary[]> {
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "tasks",
+      operation: "select",
+      filters: [],
+      order: { column: "updated_at", ascending: false },
+    },
+    policyCtx,
+  );
   if (error || !Array.isArray(data)) return [];
 
   return data
@@ -305,13 +365,19 @@ async function fetchScopedTasks(searchTerm: string | null): Promise<AssistantTas
     }));
 }
 
-async function fetchScopedTickets(searchTerm: string | null): Promise<AssistantTicketSummary[]> {
-  const { data, error } = await queryTable({
-    table: "support_tickets",
-    operation: "select",
-    filters: [],
-    order: { column: "updated_at", ascending: false },
-  });
+async function fetchScopedTickets(
+  searchTerm: string | null,
+  policyCtx: TablePolicyAuthContext,
+): Promise<AssistantTicketSummary[]> {
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "support_tickets",
+      operation: "select",
+      filters: [],
+      order: { column: "updated_at", ascending: false },
+    },
+    policyCtx,
+  );
   if (error || !Array.isArray(data)) return [];
 
   return data
@@ -325,8 +391,15 @@ async function fetchScopedTickets(searchTerm: string | null): Promise<AssistantT
     }));
 }
 
-async function fetchScopedUsers(searchTerm: string | null): Promise<AssistantUserSummary[]> {
-  const rows = await listDropdownSourceValues({ source: "poc", q: searchTerm ?? undefined });
+async function fetchScopedUsers(
+  searchTerm: string | null,
+  callerAuth: DropdownCallerAuth | null,
+): Promise<AssistantUserSummary[]> {
+  const rows = await listDropdownSourceValues({
+    source: "poc",
+    q: searchTerm ?? undefined,
+    callerAuth: callerAuth ?? undefined,
+  });
   return rows.slice(0, 20).map((row) => ({
     id: row.id,
     fullName: row.label,
@@ -337,20 +410,27 @@ async function fetchScopedUsers(searchTerm: string | null): Promise<AssistantUse
 async function fetchScopedLearning(
   searchTerm: string | null,
   userId: string,
+  policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantLearningSummary[]> {
-  const { data: trackData, error: trackError } = await queryTable({
-    table: "learning_tracks",
-    operation: "select",
-    filters: [{ column: "is_published", value: true, operator: "eq" }],
-    order: { column: "created_at", ascending: true },
-  });
+  const { data: trackData, error: trackError } = await queryTableWithAuthContext(
+    {
+      table: "learning_tracks",
+      operation: "select",
+      filters: [{ column: "is_published", value: true, operator: "eq" }],
+      order: { column: "created_at", ascending: true },
+    },
+    policyCtx,
+  );
   if (trackError || !Array.isArray(trackData)) return [];
 
-  const { data: enrollData } = await queryTable({
-    table: "learning_enrollments",
-    operation: "select",
-    filters: [{ column: "user_id", value: userId, operator: "eq" }],
-  });
+  const { data: enrollData } = await queryTableWithAuthContext(
+    {
+      table: "learning_enrollments",
+      operation: "select",
+      filters: [{ column: "user_id", value: userId, operator: "eq" }],
+    },
+    policyCtx,
+  );
   const enrollmentByTrack = new Map(
     (Array.isArray(enrollData) ? enrollData : []).map((row: Record<string, unknown>) => [
       String(row.track_id),
@@ -372,13 +452,19 @@ async function fetchScopedLearning(
     });
 }
 
-async function fetchScopedNews(searchTerm: string | null): Promise<AssistantNewsSummary[]> {
-  const { data, error } = await queryTable({
-    table: "portal_news_posts",
-    operation: "select",
-    filters: [],
-    order: { column: "created_at", ascending: false },
-  });
+async function fetchScopedNews(
+  searchTerm: string | null,
+  policyCtx: TablePolicyAuthContext,
+): Promise<AssistantNewsSummary[]> {
+  const { data, error } = await queryTableWithAuthContext(
+    {
+      table: "portal_news_posts",
+      operation: "select",
+      filters: [],
+      order: { column: "created_at", ascending: false },
+    },
+    policyCtx,
+  );
   if (error || !Array.isArray(data)) return [];
 
   return data
@@ -501,8 +587,9 @@ type AccountMatch =
 async function resolveAccountOrClientMatch(
   source: "account" | "client",
   name: string,
+  callerAuth: DropdownCallerAuth | null,
 ): Promise<AccountMatch> {
-  const rows = await listDropdownSourceValues({ source, q: name });
+  const rows = await listDropdownSourceValues({ source, q: name, callerAuth: callerAuth ?? undefined });
   if (rows.length === 0) return { kind: "none" };
 
   const normalized = name.trim().toLowerCase();
@@ -514,12 +601,13 @@ async function resolveAccountOrClientMatch(
 
 async function resolveDraftLinks(
   draft: AssistantDealDraft,
+  callerAuth: DropdownCallerAuth | null,
 ): Promise<{ draft: AssistantDealDraft; note: string | null }> {
   let resolved = draft;
   const notes: string[] = [];
 
   if (resolved.accountName && !resolved.partnerId) {
-    const match = await resolveAccountOrClientMatch("account", resolved.accountName);
+    const match = await resolveAccountOrClientMatch("account", resolved.accountName, callerAuth);
     if (match.kind === "match") {
       resolved = { ...resolved, partnerId: match.id, accountName: match.label };
       notes.push(`Using existing account "${match.label}".`);
@@ -531,7 +619,7 @@ async function resolveDraftLinks(
   }
 
   if (resolved.contactName && !resolved.customerId) {
-    const match = await resolveAccountOrClientMatch("client", resolved.contactName);
+    const match = await resolveAccountOrClientMatch("client", resolved.contactName, callerAuth);
     if (match.kind === "match") {
       resolved = { ...resolved, customerId: match.id, contactName: match.label };
       notes.push(`Using existing client "${match.label}".`);
@@ -631,6 +719,8 @@ export async function runAssistantTurn(
   }
 
   const capabilities = await loadRoleCapabilities(authContext.assignment?.roleKey ?? null);
+  const policyCtx = toTablePolicyAuthContext(authContext);
+  const dropdownAuth = toDropdownCallerAuth(authContext);
 
   if (!hasCapability(capabilities, "assistant", "read")) {
     const reply = "Your role doesn't have access to the Assistant.";
@@ -778,7 +868,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_deals") {
-    const deals = await fetchScopedDeals({ stage: intent.stage, status: intent.status });
+    const deals = await fetchScopedDeals({ stage: intent.stage, status: intent.status }, policyCtx);
     const reply = [intent.reply, formatDealsSummary(deals), CLOSING_QUESTION_FOR_DEALS]
       .filter(Boolean)
       .join("\n\n");
@@ -800,7 +890,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_partners") {
-    const partners = await fetchScopedPartners(intent.query);
+    const partners = await fetchScopedPartners(intent.query, policyCtx);
     const reply = [
       intent.reply,
       formatPartnersSummary(partners),
@@ -826,7 +916,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_customers") {
-    const customers = await fetchScopedCustomers(intent.query);
+    const customers = await fetchScopedCustomers(intent.query, policyCtx);
     const reply = [
       intent.reply,
       formatCustomersSummary(customers),
@@ -852,7 +942,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_tasks") {
-    const tasks = await fetchScopedTasks(intent.query);
+    const tasks = await fetchScopedTasks(intent.query, policyCtx);
     const reply = [
       intent.reply,
       formatTasksSummary(tasks),
@@ -878,7 +968,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_tickets") {
-    const tickets = await fetchScopedTickets(intent.query);
+    const tickets = await fetchScopedTickets(intent.query, policyCtx);
     const reply = [
       intent.reply,
       formatTicketsSummary(tickets),
@@ -904,7 +994,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_users") {
-    const users = await fetchScopedUsers(intent.query);
+    const users = await fetchScopedUsers(intent.query, dropdownAuth);
     const reply = [
       intent.reply,
       formatUsersSummary(users),
@@ -930,7 +1020,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_learning") {
-    const learning = await fetchScopedLearning(intent.query, userId);
+    const learning = await fetchScopedLearning(intent.query, userId, policyCtx);
     const reply = [
       intent.reply,
       formatLearningSummary(learning),
@@ -956,7 +1046,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_news") {
-    const news = await fetchScopedNews(intent.query);
+    const news = await fetchScopedNews(intent.query, policyCtx);
     const reply = [intent.reply, formatNewsSummary(news), CLOSING_QUESTION_BY_LIST_TYPE.list_news]
       .filter(Boolean)
       .join("\n\n");
@@ -978,7 +1068,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "create_deal_draft") {
-    const { draft, note } = await resolveDraftLinks(intent.draft);
+    const { draft, note } = await resolveDraftLinks(intent.draft, dropdownAuth);
     const missing = missingDraftFields(draft);
 
     if (missing.length > 0) {

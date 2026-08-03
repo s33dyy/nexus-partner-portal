@@ -35,7 +35,7 @@ import type { DropdownOption, DropdownSourceKey } from "@/lib/dropdown-sources";
  * remain intentionally open to any authenticated-or-not caller, matching
  * table-policy.server.ts's PUBLIC_READ_TABLES precedent for those same two
  * tables (lookup_values, portal_catalog_items). */
-type DropdownCallerAuth = { userId: string; partnerId: string | null; isSuperAdmin: boolean };
+export type DropdownCallerAuth = { userId: string; partnerId: string | null; isSuperAdmin: boolean };
 
 async function requireAuthenticatedCaller(): Promise<DropdownCallerAuth> {
   const ctx = await getAuthContext();
@@ -125,6 +125,11 @@ export async function listDropdownSourceValues(input: {
   partnerId?: string | null;
   userId?: string | null;
   catalogKind?: CatalogKind | "all";
+  // Callers outside a TanStack Start request (e.g. the WhatsApp webhook,
+  // which has no session cookie to read) already have a resolved caller
+  // identity and pass it here instead of letting requireAuthenticatedCaller
+  // re-derive it from getAuthContext()/the request cookie.
+  callerAuth?: DropdownCallerAuth;
 }) {
   const term = normalizeTerm(input.q);
   const search = term ? likePattern(term) : "";
@@ -198,7 +203,7 @@ export async function listDropdownSourceValues(input: {
   // caller's own partner/user identity always wins over whatever the
   // client passed, so this can never be used to browse another tenant's
   // records by supplying (or omitting) partnerId/userId.
-  const auth = await requireAuthenticatedCaller();
+  const auth = input.callerAuth ?? (await requireAuthenticatedCaller());
   const { scopedPartnerId, scopedUserId } = resolveDropdownScope(auth, input);
 
   if (input.source === "account") {
