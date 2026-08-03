@@ -11,6 +11,7 @@ import {
   handleZohoSignUrl,
 } from "./server/zoho-api.server";
 import { handleGoogleConnect, handleGoogleCallback } from "./server/google-oauth.server";
+import { handleWhatsappWebhook } from "./server/twilio.server";
 import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
 
 type ServerEntry = {
@@ -84,6 +85,9 @@ export default {
       }
       if (url.pathname === "/api/auth/google/callback") {
         return attachCorrelationHeader(await handleGoogleCallback(request), correlationId);
+      }
+      if (url.pathname === "/api/integrations/whatsapp/webhook" && request.method === "POST") {
+        return attachCorrelationHeader(await handleWhatsappWebhook(request), correlationId);
       }
 
       const handler = await getServerEntry();

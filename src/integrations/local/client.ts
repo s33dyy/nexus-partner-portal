@@ -290,6 +290,37 @@ export async function updateProfile(input: { full_name: string; phone: string | 
   return updateProfileFn({ data: input });
 }
 
+const requestWhatsappLinkFn = createServerFn({ method: "POST" })
+  .validator((input: { phoneE164: string }) => input)
+  .handler(async ({ data }) => {
+    const { requestWhatsappLink } = await import("@/server/twilio.server");
+    return requestWhatsappLink(data);
+  });
+
+export async function requestWhatsappLink(input: { phoneE164: string }) {
+  return requestWhatsappLinkFn({ data: input });
+}
+
+const confirmWhatsappLinkFn = createServerFn({ method: "POST" })
+  .validator((input: { phoneE164: string; code: string }) => input)
+  .handler(async ({ data }) => {
+    const { confirmWhatsappLink } = await import("@/server/twilio.server");
+    return confirmWhatsappLink(data);
+  });
+
+export async function confirmWhatsappLink(input: { phoneE164: string; code: string }) {
+  return confirmWhatsappLinkFn({ data: input });
+}
+
+const disconnectWhatsappFn = createServerFn({ method: "POST" }).handler(async () => {
+  const { disconnectWhatsapp } = await import("@/server/twilio.server");
+  return disconnectWhatsapp();
+});
+
+export async function disconnectWhatsapp() {
+  return disconnectWhatsappFn();
+}
+
 export async function uploadRewardImage(input: { file: File; folder?: string; publicId?: string }) {
   try {
     const form = new FormData();

@@ -24,6 +24,8 @@ export type Profile = {
   google_id: string | null;
   google_email: string | null;
   google_linked_at: string | null;
+  whatsapp_phone_e164: string | null;
+  whatsapp_verified_at: string | null;
 };
 
 type AuthContextValue = {

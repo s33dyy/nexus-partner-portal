@@ -21,7 +21,7 @@ import { ROLE_KEY_LABELS } from "@/domain/contracts/features";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { createDeal, resolveDealCommandActor } from "@/server/deal-commands.server";
 import { listDropdownSourceValues } from "@/server/dropdown-sources.server";
-import { getAuthContext, queryTable } from "@/server/livey-service.server";
+import { getAuthContext, queryTable, type AuthContext } from "@/server/livey-service.server";
 import { runChatCompletion, type ChatCompletionResult } from "@/server/openrouter.server";
 import { pool } from "@/server/postgres.server";
 import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
@@ -176,12 +176,13 @@ async function logAssistantMessage(entry: {
   outcome: string | null;
   model: string | null;
   correlationId: string;
+  channel?: "web" | "whatsapp";
 }) {
   await pool.query(
     `INSERT INTO assistant_messages (
        conversation_id, user_id, assignment_id, role, content, proposed_action,
-       action_payload, retrieved_deal_ids, confirmed, outcome, model, correlation_id
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+       action_payload, retrieved_deal_ids, confirmed, outcome, model, correlation_id, channel
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       entry.conversationId,
       entry.userId,
@@ -195,6 +196,7 @@ async function logAssistantMessage(entry: {
       entry.outcome,
       entry.model,
       entry.correlationId,
+      entry.channel ?? "web",
     ],
   );
 }
@@ -554,17 +556,32 @@ const EMPTY_LIST_RESULTS = {
   news: [] as AssistantNewsSummary[],
 };
 
-export async function sendAssistantMessage(input: {
-  conversationId?: string | null;
-  message: string;
-  history: AssistantChatMessage[];
-}): Promise<AssistantTurnResult> {
+// RBAC-gated core of the assistant turn — capability checks, LLM call,
+// intent parsing, command execution, and logging. Shared by the web chat
+// path (sendAssistantMessage, cookie-derived authContext) and the WhatsApp
+// webhook path (authContext resolved from the verified sender's phone via
+// resolveAuthContextForProfile, no session cookie). `channel` is threaded
+// into the system prompt so WhatsApp replies stay short, plain text (no
+// markdown) while still ending with a CTA per the web style, and is
+// recorded on every logged assistant_messages row.
+export async function runAssistantTurn(
+  authContext: AuthContext,
+  input: {
+    conversationId?: string | null;
+    message: string;
+    history: AssistantChatMessage[];
+    channel?: "web" | "whatsapp";
+  },
+): Promise<AssistantTurnResult> {
   const correlationId = createCorrelationId();
   const conversationId = input.conversationId ?? randomUUID();
-  const authContext = await getAuthContext();
-  const userId = authContext.session?.user.id ?? null;
+  const channel = input.channel ?? "web";
+  const userId = authContext.session?.user.id ?? authContext.profile?.id ?? null;
   const assignmentId = authContext.assignment?.assignmentId ?? null;
   const message = input.message.trim();
+
+  const log = (entry: Omit<Parameters<typeof logAssistantMessage>[0], "channel">) =>
+    logAssistantMessage({ ...entry, channel });
 
   const empty: AssistantTurnResult = {
     conversationId,
@@ -579,7 +596,7 @@ export async function sendAssistantMessage(input: {
     return { ...empty, reply: "Type a message to get started." };
   }
 
-  await logAssistantMessage({
+  await log({
     conversationId,
     userId,
     assignmentId,
@@ -596,7 +613,7 @@ export async function sendAssistantMessage(input: {
 
   if (!userId || !authContext.activeContext) {
     const reply = "Sign in with an active assignment to use the assistant.";
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -617,7 +634,7 @@ export async function sendAssistantMessage(input: {
 
   if (!hasCapability(capabilities, "assistant", "read")) {
     const reply = "Your role doesn't have access to the Assistant.";
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -643,17 +660,22 @@ export async function sendAssistantMessage(input: {
 
   let completion: ChatCompletionResult;
   try {
+    const channelContext =
+      channel === "whatsapp"
+        ? 'This turn is being delivered over WhatsApp, not the web chat UI. Keep "reply" short and plain text — no markdown, no bullet lists, no headings, no asterisks/underscores for emphasis — since WhatsApp renders raw text. Still end with a brief closing question/CTA per the usual rules.'
+        : null;
     completion = await runChatCompletion({
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "system", content: identityContext },
+        ...(channelContext ? [{ role: "system" as const, content: channelContext }] : []),
         ...input.history.slice(-12),
         { role: "user", content: message },
       ],
     });
   } catch {
     const reply = "The assistant is temporarily unavailable. Please try again shortly.";
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -674,7 +696,7 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "list_deals" && !hasCapability(capabilities, "deals", "read")) {
     const reply = "Your role doesn't have permission to view deals through the Assistant.";
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -693,7 +715,7 @@ export async function sendAssistantMessage(input: {
 
   if (intent.type === "create_deal_draft" && !hasCapability(capabilities, "deals", "create")) {
     const reply = "Your role doesn't have permission to create deals through the Assistant.";
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -737,7 +759,7 @@ export async function sendAssistantMessage(input: {
                 : "news";
     if (!hasCapability(capabilities, featureKey, "read")) {
       const reply = `Your role doesn't have permission to view ${featureKey} through the Assistant.`;
-      await logAssistantMessage({
+      await log({
         conversationId,
         userId,
         assignmentId,
@@ -760,7 +782,7 @@ export async function sendAssistantMessage(input: {
     const reply = [intent.reply, formatDealsSummary(deals), CLOSING_QUESTION_FOR_DEALS]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -786,7 +808,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -812,7 +834,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -838,7 +860,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -864,7 +886,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -890,7 +912,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -916,7 +938,7 @@ export async function sendAssistantMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -938,7 +960,7 @@ export async function sendAssistantMessage(input: {
     const reply = [intent.reply, formatNewsSummary(news), CLOSING_QUESTION_BY_LIST_TYPE.list_news]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -963,7 +985,7 @@ export async function sendAssistantMessage(input: {
       const reply = [note, intent.reply || `I still need: ${missing.join(", ")}.`]
         .filter(Boolean)
         .join("\n\n");
-      await logAssistantMessage({
+      await log({
         conversationId,
         userId,
         assignmentId,
@@ -983,7 +1005,7 @@ export async function sendAssistantMessage(input: {
     const reply = [note, `${formatDraftPreview(draft)}\n\nConfirm to create this deal.`]
       .filter(Boolean)
       .join("\n\n");
-    await logAssistantMessage({
+    await log({
       conversationId,
       userId,
       assignmentId,
@@ -1000,7 +1022,7 @@ export async function sendAssistantMessage(input: {
     return { ...empty, reply, draft, requiresConfirmation: true };
   }
 
-  await logAssistantMessage({
+  await log({
     conversationId,
     userId,
     assignmentId,
@@ -1015,6 +1037,17 @@ export async function sendAssistantMessage(input: {
     correlationId,
   });
   return { ...empty, reply: intent.reply };
+}
+
+// Web chat entrypoint — resolves the caller's authContext from the request's
+// session cookie, then delegates all RBAC-gated logic to runAssistantTurn.
+export async function sendAssistantMessage(input: {
+  conversationId?: string | null;
+  message: string;
+  history: AssistantChatMessage[];
+}): Promise<AssistantTurnResult> {
+  const authContext = await getAuthContext();
+  return runAssistantTurn(authContext, { ...input, channel: "web" });
 }
 
 export async function confirmAssistantDeal(input: {

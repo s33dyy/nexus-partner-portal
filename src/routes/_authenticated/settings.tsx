@@ -6,6 +6,7 @@ import {
   KeyRound,
   Layers3,
   Link2,
+  MessageCircle,
   ShieldCheck,
   User as UserIcon,
 } from "lucide-react";
@@ -27,7 +28,14 @@ import {
   type ExportDatasetDescriptor,
   type ExportScope,
 } from "@/lib/export-registry";
-import { disconnectGoogleAccount, supabase, updateProfile } from "@/integrations/local/client";
+import {
+  confirmWhatsappLink,
+  disconnectGoogleAccount,
+  disconnectWhatsapp,
+  requestWhatsappLink,
+  supabase,
+  updateProfile,
+} from "@/integrations/local/client";
 import { validatePasswordChange } from "@/lib/password-policy";
 
 const routeApi = getRouteApi("/_authenticated/settings");
@@ -111,6 +119,12 @@ function SettingsPage() {
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ full_name: "", phone: "" });
   const [updatingProfile, setUpdatingProfile] = useState(false);
+  const [whatsappPhoneDraft, setWhatsappPhoneDraft] = useState("");
+  const [whatsappCodeDraft, setWhatsappCodeDraft] = useState("");
+  const [whatsappCodeSent, setWhatsappCodeSent] = useState(false);
+  const [sendingWhatsappCode, setSendingWhatsappCode] = useState(false);
+  const [verifyingWhatsappCode, setVerifyingWhatsappCode] = useState(false);
+  const [disconnectingWhatsapp, setDisconnectingWhatsapp] = useState(false);
 
   useEffect(() => {
     if (!profile) return;
@@ -161,6 +175,59 @@ function SettingsPage() {
       toast.error(error instanceof Error ? error.message : "Failed to disconnect Google account");
     } finally {
       setDisconnectingGoogle(false);
+    }
+  };
+
+  const handleSendWhatsappCode = async () => {
+    const phone = whatsappPhoneDraft.trim();
+    if (!phone) {
+      toast.error("Enter a phone number first");
+      return;
+    }
+    setSendingWhatsappCode(true);
+    try {
+      await requestWhatsappLink({ phoneE164: phone });
+      setWhatsappCodeSent(true);
+      toast.success("Code sent — check your SMS messages.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send verification code");
+    } finally {
+      setSendingWhatsappCode(false);
+    }
+  };
+
+  const handleVerifyWhatsappCode = async () => {
+    const phone = whatsappPhoneDraft.trim();
+    const code = whatsappCodeDraft.trim();
+    if (!code) {
+      toast.error("Enter the code you received");
+      return;
+    }
+    setVerifyingWhatsappCode(true);
+    try {
+      await confirmWhatsappLink({ phoneE164: phone, code });
+      toast.success("WhatsApp connected!");
+      setWhatsappCodeSent(false);
+      setWhatsappPhoneDraft("");
+      setWhatsappCodeDraft("");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to verify code");
+    } finally {
+      setVerifyingWhatsappCode(false);
+    }
+  };
+
+  const handleDisconnectWhatsapp = async () => {
+    setDisconnectingWhatsapp(true);
+    try {
+      await disconnectWhatsapp();
+      toast.success("WhatsApp disconnected.");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect WhatsApp");
+    } finally {
+      setDisconnectingWhatsapp(false);
     }
   };
 
@@ -509,6 +576,99 @@ function SettingsPage() {
                   <a href="/api/auth/google/connect">Connect Google Account</a>
                 </Button>
               </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 shadow-sm">
+        <CardHeader className="border-b">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">WhatsApp</CardTitle>
+          </div>
+          <CardDescription>
+            Link a WhatsApp number so you can talk to the Assistant there too. We text you a
+            one-time code to confirm it's yours.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="rounded-xl border bg-muted/20 p-4">
+            {profile?.whatsapp_phone_e164 ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium">
+                    Connected as {"•".repeat(Math.max(profile.whatsapp_phone_e164.length - 4, 0))}
+                    {profile.whatsapp_phone_e164.slice(-4)}
+                  </div>
+                  {profile.whatsapp_verified_at && (
+                    <div className="text-sm text-muted-foreground mt-1">
+                      Since {new Date(profile.whatsapp_verified_at).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleDisconnectWhatsapp()}
+                  disabled={disconnectingWhatsapp}
+                >
+                  {disconnectingWhatsapp ? "Disconnecting..." : "Disconnect"}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                  <div className="space-y-2">
+                    <Label htmlFor="settings-whatsapp-phone">Phone number</Label>
+                    <Input
+                      id="settings-whatsapp-phone"
+                      placeholder="+14155552671"
+                      value={whatsappPhoneDraft}
+                      onChange={(event) => setWhatsappPhoneDraft(event.target.value)}
+                      disabled={whatsappCodeSent}
+                    />
+                  </div>
+                  {!whatsappCodeSent && (
+                    <Button
+                      onClick={() => void handleSendWhatsappCode()}
+                      disabled={sendingWhatsappCode || !whatsappPhoneDraft.trim()}
+                    >
+                      {sendingWhatsappCode ? "Sending..." : "Send code"}
+                    </Button>
+                  )}
+                </div>
+                {whatsappCodeSent && (
+                  <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
+                    <div className="space-y-2">
+                      <Label htmlFor="settings-whatsapp-code">Verification code</Label>
+                      <Input
+                        id="settings-whatsapp-code"
+                        placeholder="123456"
+                        value={whatsappCodeDraft}
+                        onChange={(event) => setWhatsappCodeDraft(event.target.value)}
+                      />
+                    </div>
+                    <Button
+                      onClick={() => void handleVerifyWhatsappCode()}
+                      disabled={verifyingWhatsappCode || !whatsappCodeDraft.trim()}
+                    >
+                      {verifyingWhatsappCode ? "Verifying..." : "Verify"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setWhatsappCodeSent(false);
+                        setWhatsappCodeDraft("");
+                      }}
+                    >
+                      Change number
+                    </Button>
+                  </div>
+                )}
+                <div className="text-sm text-muted-foreground">
+                  Use international format, e.g. +14155552671. The code arrives by SMS.
+                </div>
+              </div>
             )}
           </div>
         </CardContent>

@@ -109,6 +109,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "google_id",
     "google_email",
     "google_linked_at",
+    "whatsapp_phone_e164",
+    "whatsapp_verified_at",
     "is_seed",
     "created_at",
     "updated_at",
@@ -1564,32 +1566,23 @@ export async function revokeUserSessionsAndContexts(
   };
 }
 
-export async function getAuthContext(token?: string) {
-  const session = token ? await getSessionFromToken(token) : await findSessionFromRequest();
-  if (!session) {
-    return {
-      session: null,
-      profile: null,
-      roles: [] as AppRole[],
-      assignment: null,
-      activeContext: null,
-    };
-  }
-
-  // getAuthContext() is called by every authenticated page load and its
-  // result is sent straight to the browser (see the client-facing
-  // getAuthContext RPC in integrations/local/client.ts) — this SELECT must
-  // never include password_hash or any other credential/secret column.
+// Shared by the cookie-based getAuthContext() (web) and the WhatsApp
+// webhook path (no session cookie — the profile is resolved by verified
+// phone number instead). Loads profile → roles → assignment/active-context
+// for a known profileId. Must never select password_hash or any other
+// credential/secret column — getAuthContext()'s result is sent straight to
+// the browser via the client-facing getAuthContext RPC.
+export async function resolveAuthContextForProfile(profileId: string) {
   const [{ rows: profileRows }, { rows: roleRows }, governedState] = await Promise.all([
     pool.query(
       `SELECT id, email, full_name, phone, company_name, avatar_url, partner_id, partner_status, must_reset_password
        FROM profiles WHERE id = $1 LIMIT 1`,
-      [session.user.id],
+      [profileId],
     ),
     pool.query(`SELECT role FROM user_roles WHERE user_id = $1 ORDER BY created_at ASC`, [
-      session.user.id,
+      profileId,
     ]),
-    loadGovernedAuthState(session.user.id),
+    loadGovernedAuthState(profileId),
   ]);
 
   const profile = profileRows[0]
@@ -1614,11 +1607,43 @@ export async function getAuthContext(token?: string) {
   const roles = roleRows.map((row: { role: AppRole }) => row.role);
 
   return {
-    session,
     profile,
     roles,
     assignment: governedState.assignment,
     activeContext: governedState.activeContext,
+  };
+}
+
+export type ResolvedAuthContext = Awaited<ReturnType<typeof resolveAuthContextForProfile>>;
+
+// Single flat shape (not a session-null-vs-not discriminated union) so both
+// getAuthContext() (web, session-derived) and the WhatsApp webhook path
+// (session-less — resolved from a verified phone number instead) can hand
+// the same type into runAssistantTurn.
+export type AuthContext = ResolvedAuthContext & {
+  session: Awaited<ReturnType<typeof findSessionFromRequest>>;
+};
+
+export async function getAuthContext(token?: string): Promise<AuthContext> {
+  const session = token ? await getSessionFromToken(token) : await findSessionFromRequest();
+  if (!session) {
+    return {
+      session: null,
+      profile: null,
+      roles: [] as AppRole[],
+      assignment: null,
+      activeContext: null,
+    };
+  }
+
+  const resolved = await resolveAuthContextForProfile(session.user.id);
+
+  return {
+    session,
+    profile: resolved.profile,
+    roles: resolved.roles,
+    assignment: resolved.assignment,
+    activeContext: resolved.activeContext,
   };
 }
 

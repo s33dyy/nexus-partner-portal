@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   partner_status partner_status NOT NULL DEFAULT 'pending_partner_registration',
   must_reset_password BOOLEAN NOT NULL DEFAULT FALSE,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  whatsapp_phone_e164 TEXT UNIQUE,
+  whatsapp_verified_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1264,7 +1266,10 @@ CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (dea
 -- Append-only conversation/audit log — no delete surface anywhere in the app.
 CREATE TABLE IF NOT EXISTS assistant_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  conversation_id UUID NOT NULL,
+  -- TEXT, not UUID: WhatsApp threads use a deterministic non-UUID id
+  -- ("whatsapp:<phoneE164>") so history can be reloaded per-thread with no
+  -- client-side state, alongside random UUIDs for web conversations.
+  conversation_id TEXT NOT NULL,
   user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
   role TEXT NOT NULL,
@@ -1276,6 +1281,7 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
   outcome TEXT,
   model TEXT,
   correlation_id TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'whatsapp')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
