@@ -169,8 +169,14 @@ function isListIntentType(value: unknown): value is ListIntentType {
 export function parseIntent(content: string): AssistantIntent {
   const parsed = parseModelJson(content);
   if (!parsed) {
-    const fallback = content.trim().slice(0, 2000);
-    return { type: "none", reply: fallback || "I didn't understand that — could you rephrase?" };
+    // content is raw, unparsed model output here — it may be malformed JSON,
+    // a stray <tool_call> block, or anything else the model emitted instead
+    // of the required shape. Never echo it back to the user as if it were a
+    // real reply; only a JSON object we successfully parsed is trusted.
+    return {
+      type: "none",
+      reply: "Sorry, I couldn't process that — could you rephrase?",
+    };
   }
 
   const reply = typeof parsed.reply === "string" ? parsed.reply.slice(0, 2000) : "";
