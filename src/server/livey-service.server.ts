@@ -2134,6 +2134,22 @@ export async function updatePasswordFromSession(password: string) {
   return { ok: true };
 }
 
+export async function updateProfileFromSession(input: { full_name: string; phone: string | null }) {
+  const session = await findSessionFromRequest();
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+  const fullName = input.full_name.trim();
+  if (!fullName) {
+    throw new Error("Full name is required");
+  }
+  await pool.query(
+    `UPDATE profiles SET full_name = $1, phone = $2, updated_at = now() WHERE id = $3`,
+    [fullName, input.phone?.trim() || null, session.user.id],
+  );
+  return { ok: true as const };
+}
+
 export async function disconnectGoogleAccount() {
   const session = await findSessionFromRequest();
   if (!session) {

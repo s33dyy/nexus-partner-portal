@@ -279,6 +279,17 @@ export async function disconnectGoogleAccount() {
   return disconnectGoogle();
 }
 
+const updateProfileFn = createServerFn({ method: "POST" })
+  .validator((input: { full_name: string; phone: string | null }) => input)
+  .handler(async ({ data }) => {
+    const { updateProfileFromSession } = await import("@/server/livey-service.server");
+    return updateProfileFromSession(data);
+  });
+
+export async function updateProfile(input: { full_name: string; phone: string | null }) {
+  return updateProfileFn({ data: input });
+}
+
 export async function uploadRewardImage(input: { file: File; folder?: string; publicId?: string }) {
   try {
     const form = new FormData();

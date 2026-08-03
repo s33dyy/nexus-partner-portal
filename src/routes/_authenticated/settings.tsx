@@ -1,8 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Database, FolderOpen, KeyRound, Layers3, Link2, ShieldCheck } from "lucide-react";
+import {
+  Database,
+  IdCard,
+  KeyRound,
+  Layers3,
+  Link2,
+  ShieldCheck,
+  User as UserIcon,
+} from "lucide-react";
 
 import { SettingsExportCard } from "@/components/settings-export-card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -18,7 +27,7 @@ import {
   type ExportDatasetDescriptor,
   type ExportScope,
 } from "@/lib/export-registry";
-import { disconnectGoogleAccount, supabase } from "@/integrations/local/client";
+import { disconnectGoogleAccount, supabase, updateProfile } from "@/integrations/local/client";
 import { validatePasswordChange } from "@/lib/password-policy";
 
 const routeApi = getRouteApi("/_authenticated/settings");
@@ -61,6 +70,12 @@ function SettingsPage() {
     : hasRole("partner_admin")
       ? "partner_admin"
       : "partner_user";
+  const roleLabel =
+    role === "super_admin"
+      ? "Super Admin"
+      : role === "partner_admin"
+        ? "Partner Admin"
+        : "Partner User";
 
   useRequireAccess("partial");
 
@@ -94,6 +109,47 @@ function SettingsPage() {
   });
   const [updatingPassword, setUpdatingPassword] = useState(false);
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({ full_name: "", phone: "" });
+  const [updatingProfile, setUpdatingProfile] = useState(false);
+
+  useEffect(() => {
+    if (!profile) return;
+    setProfileDraft({ full_name: profile.full_name ?? "", phone: profile.phone ?? "" });
+  }, [profile]);
+
+  const initials =
+    profile?.full_name
+      ?.split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() ?? "U";
+
+  const profileDirty = Boolean(
+    profile &&
+    (profileDraft.full_name !== (profile.full_name ?? "") ||
+      profileDraft.phone !== (profile.phone ?? "")),
+  );
+
+  const submitProfileChange = async () => {
+    if (!profileDraft.full_name.trim()) {
+      toast.error("Full name is required");
+      return;
+    }
+    setUpdatingProfile(true);
+    try {
+      await updateProfile({
+        full_name: profileDraft.full_name.trim(),
+        phone: profileDraft.phone.trim() || null,
+      });
+      await refresh();
+      toast.success("Profile updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update profile");
+    } finally {
+      setUpdatingProfile(false);
+    }
+  };
 
   const handleDisconnectGoogle = async () => {
     setDisconnectingGoogle(true);
@@ -223,28 +279,101 @@ function SettingsPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <FolderOpen className="h-3.5 w-3.5" />
-            Settings data exports
+            <IdCard className="h-3.5 w-3.5" />
+            Settings
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Export hub</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Your account</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Every dataset downloads as its own CSV. The cards below are role-aware, scoped to your
-            account, and grouped by how the app uses the data.
+            Manage your profile, security, connected accounts, and data exports — all scoped to what
+            your role can see.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {role === "super_admin"
-              ? "Super Admin"
-              : role === "partner_admin"
-                ? "Partner Admin"
-                : "Partner User"}
-          </Badge>
+          <Badge variant="secondary">{roleLabel}</Badge>
           {profile?.company_name ? <Badge variant="outline">{profile.company_name}</Badge> : null}
           <Badge variant="outline">{visibleDatasets.length} exportable datasets</Badge>
         </div>
       </div>
+
+      <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+        <UserIcon className="h-3.5 w-3.5" />
+        Account
+      </div>
+
+      <Card className="border-border/70 shadow-sm">
+        <CardHeader className="border-b">
+          <div className="flex items-center gap-2">
+            <UserIcon className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Profile</CardTitle>
+          </div>
+          <CardDescription>
+            Your personal details. Email and company are managed elsewhere and shown here for
+            reference.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 py-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <Avatar className="h-14 w-14">
+                <AvatarFallback className="bg-primary text-lg text-primary-foreground">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <div className="font-medium">{profile?.full_name || "Unnamed"}</div>
+                <div className="text-sm text-muted-foreground">{profile?.email}</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="profile-full-name">Full name</Label>
+                <Input
+                  id="profile-full-name"
+                  value={profileDraft.full_name}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, full_name: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profile-phone">Phone</Label>
+                <Input
+                  id="profile-phone"
+                  type="tel"
+                  value={profileDraft.phone}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, phone: event.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <Button
+              onClick={() => void submitProfileChange()}
+              disabled={updatingProfile || !profileDirty}
+            >
+              {updatingProfile ? "Saving..." : "Save changes"}
+            </Button>
+          </div>
+
+          <div className="space-y-3 rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+            <div>
+              <div className="font-medium text-foreground">Email</div>
+              <div className="mt-1">{profile?.email}</div>
+            </div>
+            {profile?.company_name && (
+              <div>
+                <div className="font-medium text-foreground">Company</div>
+                <div className="mt-1">{profile.company_name}</div>
+              </div>
+            )}
+            <div>
+              <div className="font-medium text-foreground">Role</div>
+              <div className="mt-1">{roleLabel}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="border-border/70 shadow-sm">
         <CardHeader className="border-b">
