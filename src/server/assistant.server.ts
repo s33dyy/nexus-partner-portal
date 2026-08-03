@@ -7,6 +7,8 @@ import {
   type AssistantCustomerSummary,
   type AssistantDealDraft,
   type AssistantDealSummary,
+  type AssistantFilter,
+  type AssistantFilterOperator,
   type AssistantIntent,
   type AssistantLearningSummary,
   type AssistantNewsSummary,
@@ -28,6 +30,7 @@ import {
   getAuthContext,
   queryTableWithAuthContext,
   type AuthContext,
+  type QueryFilter,
 } from "@/server/livey-service.server";
 import { runChatCompletion, type ChatCompletionResult } from "@/server/openrouter.server";
 import { pool } from "@/server/postgres.server";
@@ -89,12 +92,21 @@ const SYSTEM_PROMPT = `You are the LIVEY PAM CRM Assistant. You help with:
 Refuse anything else (any write other than drafting a Deal, approvals, role or permission changes, exports, deletions, unrelated chit-chat) by explaining this limitation in "reply".
 
 Respond with ONLY a single minified JSON object, no markdown fences, no commentary outside the JSON, matching exactly this shape:
-{"type":"list_deals"|"create_deal_draft"|"list_partners"|"list_customers"|"list_tasks"|"list_tickets"|"list_users"|"list_learning"|"list_news"|"none","reply":"short natural-language message for the user","stage":string|null,"status":string|null,"query":string|null,"draft":{"accountName":string|null,"contactName":string|null,"product":string|null,"quantity":number|null,"amount":string|null,"currencyCode":string|null,"country":string|null,"notes":string|null}|null}
+{"type":"list_deals"|"create_deal_draft"|"list_partners"|"list_customers"|"list_tasks"|"list_tickets"|"list_users"|"list_learning"|"list_news"|"none","reply":"short natural-language message for the user","stage":string|null,"status":string|null,"query":string|null,"filters":[{"column":string,"operator":"eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"ilike","value":string|number|boolean|array}]|null,"draft":{"accountName":string|null,"contactName":string|null,"product":string|null,"quantity":number|null,"amount":string|null,"currencyCode":string|null,"country":string|null,"notes":string|null}|null}
 
 Rules:
 - Use "list_deals" when the user wants to see, count, list, or ask about their existing deals or pipeline — including phrasings like "show me my deals", "list my deals", "what deals do I have", "my pipeline", "my open deals", "how many deals". Set "stage" to a pipeline stage keyword if mentioned (sourced, demo, testing, qualified, proposal, negotiation, approved, won, lost), else null. Set "status" similarly (e.g. "submitted", "approved"), else null. "reply" is a short one-sentence intro only ("Here are your deals.") — never put deal names, accounts, counts, or stages in "reply"; the actual list is attached separately by the system from real data.
 - Use "create_deal_draft" when the user wants to create/register/log a new deal. Extract only fields the user actually gave into "draft" — leave anything unknown as null, never invent values. "reply" asks a short, specific question about the next missing required field (account/company name, contact/client name, product, and amount are all required), or says "Ready to create this deal — please confirm." once every required field has been given across the conversation.
 - Use "list_partners" to search/list/show/count Partner accounts (resellers/distributors) — including phrasings like "list all partners", "how many partners", "show partner accounts". Use "list_customers" for Customers (end accounts, same phrasings). Use "list_tasks" for the user's Tasks. Use "list_tickets" for Support tickets. Use "list_users" to search for a colleague/team member by name. Use "list_learning" for Insight Hub tracks and the user's own learning progress/certificates. Use "list_news" for the LIVEY News feed / editorial updates / announcements (e.g. "what's new", "any updates from LIVEY", "show me the news"). Any request to see, list, count, search, or ask about records of one of these kinds — including deals — ALWAYS uses the matching list_* type, never "none". For every one of these, set "query" to whatever search term the user gave (a name or keyword), or null if they just want everything in their scope. "reply" is a short one-sentence intro only ("Here are your partners.") — never put record names, companies, people, or counts in "reply" for these types; the actual list is attached separately by the system from real data, and repeating or guessing at it in "reply" would risk showing the user fabricated results.
+- "filters" (list_deals/list_partners/list_customers/list_tasks/list_tickets/list_learning/list_news only) is how you express any condition beyond stage/status/query — numeric thresholds, dates, or an exact/partial match on any other real column. Set it to null or [] when there's nothing extra to filter on. Each entry is {"column","operator","value"} using ONLY real column names below (never invent a column) and operator one of eq/neq/gt/gte/lt/lte/in/ilike (ilike = case-insensitive "contains" text match; in expects an array value). Combine multiple entries for multiple conditions (AND'ed together). Available columns per type:
+  - list_deals: amount_usd (number, deal value in USD — use for "above/over/under $X"), amount_value (number, in the deal's own currency), currency_code, quantity (number), probability (number 0-100), country, region, product, source, close_date (date, "YYYY-MM-DD"), possible_close_date (date), created_at/updated_at (timestamp).
+  - list_partners: tier, status, country.
+  - list_customers: segment, status, region, mrr.
+  - list_tasks: status, priority, due_at (timestamp).
+  - list_tickets: status, priority.
+  - list_learning: is_published (boolean).
+  - list_news: created_at/updated_at (timestamp).
+  Example — "deals closed and won above $5000": {"type":"list_deals","stage":"won","status":null,"filters":[{"column":"amount_usd","operator":"gt","value":5000}],...}.
 - Use "none" for genuine greetings, out-of-scope requests (approvals, role/permission changes, exports, deletions), refusals, small talk, or a question about the current user's own identity (name, role, email, company/account — answer these directly and accurately from the "You are currently assisting" block below, never from memory or a guess). Other than that identity block, this path has no database access — "reply" must NEVER include a specific record name, company, person, count, date, or any other business fact you were not directly given, and must NEVER be formatted as a bulleted or numbered list (a list-shaped "none" reply is itself a sign you should have picked a list_* type instead). If a request sounds like it wants specific records of ANY kind — deals very much included — classify it as the closest matching list_* type above instead of "none", even if you are unsure — never fall back to "none" and improvise a data-shaped answer.
 - Never claim to have created, changed, or deleted anything yourself — only the system creates a deal, and only after the user explicitly confirms a shown preview.
 - This is a conversation, not a one-shot answer: for "none" replies specifically, end "reply" with a short, natural closing question offering to help further (e.g. "Want me to check your tasks?", "Should I look into anything else?") — vary the wording naturally, keep it brief, and never let it reference a specific fact, name, or count you weren't given, or promise anything outside searching Deals/Partners/Customers/Tasks/Tickets/Learning/News and drafting a new Deal. Every list_* type already gets its own closing question appended automatically after its real results — do not add one yourself for those types, and keep "reply" for those types to just the short intro the rule above already describes.`;
@@ -166,6 +178,54 @@ function isListIntentType(value: unknown): value is ListIntentType {
   return typeof value === "string" && (LIST_INTENT_TYPES as readonly string[]).includes(value);
 }
 
+const ALLOWED_FILTER_OPERATORS: readonly AssistantFilterOperator[] = [
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "in",
+  "ilike",
+];
+
+function isFilterValue(value: unknown): value is AssistantFilter["value"] {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  return Array.isArray(value) && value.every((v) => typeof v === "string" || typeof v === "number");
+}
+
+// Sanitizes the model's free-form "filters" array to a known-safe shape
+// (real string column name, one of a fixed operator set, a primitive/array
+// value) — this is validation of *shape* only. The actual security
+// boundary is server-side in buildWhereClause (livey-service.server.ts),
+// which additionally rejects any column not in that table's curated
+// TABLE_COLUMNS allowlist and always binds values as query parameters, so
+// the model can never reach an arbitrary column or inject SQL even if it
+// hallucinates a column name here.
+function coerceFilters(value: unknown): AssistantFilter[] {
+  if (!Array.isArray(value)) return [];
+  const filters: AssistantFilter[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    const column = typeof raw.column === "string" ? raw.column.trim() : "";
+    const operator = raw.operator;
+    if (
+      !column ||
+      typeof operator !== "string" ||
+      !ALLOWED_FILTER_OPERATORS.includes(operator as AssistantFilterOperator) ||
+      !isFilterValue(raw.value)
+    ) {
+      continue;
+    }
+    filters.push({ column, operator: operator as AssistantFilterOperator, value: raw.value });
+    if (filters.length >= 5) break;
+  }
+  return filters;
+}
+
 export function parseIntent(content: string): AssistantIntent {
   const parsed = parseModelJson(content);
   if (!parsed) {
@@ -180,6 +240,7 @@ export function parseIntent(content: string): AssistantIntent {
   }
 
   const reply = typeof parsed.reply === "string" ? parsed.reply.slice(0, 2000) : "";
+  const filters = coerceFilters(parsed.filters);
 
   if (parsed.type === "list_deals") {
     return {
@@ -187,6 +248,7 @@ export function parseIntent(content: string): AssistantIntent {
       reply,
       stage: typeof parsed.stage === "string" ? parsed.stage.trim().toLowerCase() || null : null,
       status: typeof parsed.status === "string" ? parsed.status.trim().toLowerCase() || null : null,
+      filters,
     };
   }
 
@@ -194,9 +256,14 @@ export function parseIntent(content: string): AssistantIntent {
     return { type: "create_deal_draft", reply, draft: coerceDraft(parsed.draft) };
   }
 
+  if (parsed.type === "list_users") {
+    const query = typeof parsed.query === "string" ? parsed.query.trim() || null : null;
+    return { type: "list_users", reply, query };
+  }
+
   if (isListIntentType(parsed.type)) {
     const query = typeof parsed.query === "string" ? parsed.query.trim() || null : null;
-    return { type: parsed.type, reply, query };
+    return { type: parsed.type, reply, query, filters };
   }
 
   return {
@@ -255,9 +322,10 @@ async function fetchScopedDeals(
     stage: string | null;
     status: string | null;
   },
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantDealSummary[]> {
-  const queryFilters: Array<{ column: string; value: unknown; operator: "eq" }> = [];
+  const queryFilters: QueryFilter[] = [...extraFilters];
   if (filters.stage) queryFilters.push({ column: "stage", value: filters.stage, operator: "eq" });
   if (filters.status)
     queryFilters.push({ column: "status", value: filters.status, operator: "eq" });
@@ -288,13 +356,14 @@ async function fetchScopedDeals(
 
 async function fetchScopedPartners(
   searchTerm: string | null,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantPartnerSummary[]> {
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "partners",
       operation: "select",
-      filters: [],
+      filters: extraFilters,
       order: { column: "updated_at", ascending: false },
     },
     policyCtx,
@@ -317,13 +386,14 @@ async function fetchScopedPartners(
 
 async function fetchScopedCustomers(
   searchTerm: string | null,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantCustomerSummary[]> {
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "portal_customers",
       operation: "select",
-      filters: [],
+      filters: extraFilters,
       order: { column: "updated_at", ascending: false },
     },
     policyCtx,
@@ -346,13 +416,14 @@ async function fetchScopedCustomers(
 
 async function fetchScopedTasks(
   searchTerm: string | null,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantTaskSummary[]> {
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "tasks",
       operation: "select",
-      filters: [],
+      filters: extraFilters,
       order: { column: "updated_at", ascending: false },
     },
     policyCtx,
@@ -373,13 +444,14 @@ async function fetchScopedTasks(
 
 async function fetchScopedTickets(
   searchTerm: string | null,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantTicketSummary[]> {
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "support_tickets",
       operation: "select",
-      filters: [],
+      filters: extraFilters,
       order: { column: "updated_at", ascending: false },
     },
     policyCtx,
@@ -416,13 +488,14 @@ async function fetchScopedUsers(
 async function fetchScopedLearning(
   searchTerm: string | null,
   userId: string,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantLearningSummary[]> {
   const { data: trackData, error: trackError } = await queryTableWithAuthContext(
     {
       table: "learning_tracks",
       operation: "select",
-      filters: [{ column: "is_published", value: true, operator: "eq" }],
+      filters: [{ column: "is_published", value: true, operator: "eq" }, ...extraFilters],
       order: { column: "created_at", ascending: true },
     },
     policyCtx,
@@ -460,13 +533,14 @@ async function fetchScopedLearning(
 
 async function fetchScopedNews(
   searchTerm: string | null,
+  extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantNewsSummary[]> {
   const { data, error } = await queryTableWithAuthContext(
     {
       table: "portal_news_posts",
       operation: "select",
-      filters: [],
+      filters: extraFilters,
       order: { column: "created_at", ascending: false },
     },
     policyCtx,
@@ -595,7 +669,11 @@ async function resolveAccountOrClientMatch(
   name: string,
   callerAuth: DropdownCallerAuth | null,
 ): Promise<AccountMatch> {
-  const rows = await listDropdownSourceValues({ source, q: name, callerAuth: callerAuth ?? undefined });
+  const rows = await listDropdownSourceValues({
+    source,
+    q: name,
+    callerAuth: callerAuth ?? undefined,
+  });
   if (rows.length === 0) return { kind: "none" };
 
   const normalized = name.trim().toLowerCase();
@@ -892,7 +970,11 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_deals") {
-    const deals = await fetchScopedDeals({ stage: intent.stage, status: intent.status }, policyCtx);
+    const deals = await fetchScopedDeals(
+      { stage: intent.stage, status: intent.status },
+      intent.filters,
+      policyCtx,
+    );
     const reply = [intent.reply, formatDealsSummary(deals), CLOSING_QUESTION_FOR_DEALS]
       .filter(Boolean)
       .join("\n\n");
@@ -914,7 +996,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_partners") {
-    const partners = await fetchScopedPartners(intent.query, policyCtx);
+    const partners = await fetchScopedPartners(intent.query, intent.filters, policyCtx);
     const reply = [
       intent.reply,
       formatPartnersSummary(partners),
@@ -940,7 +1022,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_customers") {
-    const customers = await fetchScopedCustomers(intent.query, policyCtx);
+    const customers = await fetchScopedCustomers(intent.query, intent.filters, policyCtx);
     const reply = [
       intent.reply,
       formatCustomersSummary(customers),
@@ -966,7 +1048,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_tasks") {
-    const tasks = await fetchScopedTasks(intent.query, policyCtx);
+    const tasks = await fetchScopedTasks(intent.query, intent.filters, policyCtx);
     const reply = [
       intent.reply,
       formatTasksSummary(tasks),
@@ -992,7 +1074,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_tickets") {
-    const tickets = await fetchScopedTickets(intent.query, policyCtx);
+    const tickets = await fetchScopedTickets(intent.query, intent.filters, policyCtx);
     const reply = [
       intent.reply,
       formatTicketsSummary(tickets),
@@ -1044,7 +1126,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_learning") {
-    const learning = await fetchScopedLearning(intent.query, userId, policyCtx);
+    const learning = await fetchScopedLearning(intent.query, userId, intent.filters, policyCtx);
     const reply = [
       intent.reply,
       formatLearningSummary(learning),
@@ -1070,7 +1152,7 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "list_news") {
-    const news = await fetchScopedNews(intent.query, policyCtx);
+    const news = await fetchScopedNews(intent.query, intent.filters, policyCtx);
     const reply = [intent.reply, formatNewsSummary(news), CLOSING_QUESTION_BY_LIST_TYPE.list_news]
       .filter(Boolean)
       .join("\n\n");

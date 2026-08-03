@@ -11,7 +11,7 @@ import {
 export type QueryFilter = {
   column: string;
   value: unknown;
-  operator: "eq" | "in";
+  operator: "eq" | "neq" | "in" | "gt" | "gte" | "lt" | "lte" | "ilike";
 };
 
 export type TableQueryLike = {

@@ -14,7 +14,11 @@ import {
   type AssignmentRecord,
 } from "@/domain/contracts/governance";
 import { pool } from "@/server/postgres.server";
-import { applyTablePolicy, type TablePolicyAuthContext } from "@/server/table-policy.server";
+import {
+  applyTablePolicy,
+  type QueryFilter as TablePolicyQueryFilter,
+  type TablePolicyAuthContext,
+} from "@/server/table-policy.server";
 import type { PartnerStatus } from "@/lib/partner-status";
 import {
   deleteFromCloudinary,
@@ -55,11 +59,8 @@ type WorkspaceUserInput = {
   must_reset_password?: boolean;
 };
 
-type QueryFilter = {
-  column: string;
-  value: unknown;
-  operator: "eq" | "in";
-};
+export type QueryFilterOperator = TablePolicyQueryFilter["operator"];
+export type QueryFilter = TablePolicyQueryFilter;
 
 type QueryOrder = {
   column: string;
@@ -958,14 +959,42 @@ function buildWhereClause(filters: QueryFilter[], columns: string[], parameterOf
       throw new Error(`Unsupported filter column: ${filter.column}`);
     }
     const paramIndex = parameterOffset + index + 1;
-    if (filter.operator === "eq") {
-      whereClauses.push(`${quoteIdent(filter.column)} = $${paramIndex}`);
-      whereParams.push(filter.value);
-    } else if (filter.operator === "in") {
-      whereClauses.push(`${quoteIdent(filter.column)} = ANY($${paramIndex})`);
-      whereParams.push(filter.value);
-    } else {
-      throw new Error(`Unsupported filter operator: ${filter.operator}`);
+    const col = quoteIdent(filter.column);
+    switch (filter.operator) {
+      case "eq":
+        whereClauses.push(`${col} = $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "neq":
+        whereClauses.push(`${col} != $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "in":
+        whereClauses.push(`${col} = ANY($${paramIndex})`);
+        whereParams.push(filter.value);
+        break;
+      case "gt":
+        whereClauses.push(`${col} > $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "gte":
+        whereClauses.push(`${col} >= $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "lt":
+        whereClauses.push(`${col} < $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "lte":
+        whereClauses.push(`${col} <= $${paramIndex}`);
+        whereParams.push(filter.value);
+        break;
+      case "ilike":
+        whereClauses.push(`${col} ILIKE $${paramIndex}`);
+        whereParams.push(`%${String(filter.value)}%`);
+        break;
+      default:
+        throw new Error(`Unsupported filter operator: ${filter.operator as string}`);
     }
   });
 
@@ -1165,8 +1194,22 @@ export async function queryTableWithAuthContext(
       ? ` LIMIT ${Math.min(policyQuery.limit as number, 1000)}`
       : "";
 
-  if (policyQuery.operation === "select") {
-    const { whereSql, whereParams } = buildWhereClause(filters, columns);
+  // select/count filters can now come from the Assistant's model-generated
+  // "filters" array (unknown column/operator combos, e.g. a stale or typoed
+  // column name) rather than only hand-written app code — buildWhereClause
+  // throws on those, so this path returns a normal {error} result instead
+  // of a 500, exactly like the applyTablePolicy failure above.
+  if (policyQuery.operation === "select" || policyQuery.operation === "count") {
+    let whereSql: string;
+    let whereParams: unknown[];
+    try {
+      ({ whereSql, whereParams } = buildWhereClause(filters, columns));
+    } catch (err) {
+      return {
+        data: null,
+        error: { message: err instanceof Error ? err.message : "Invalid filter" },
+      };
+    }
     const anyColumnScoped = appendAnyColumnScope(
       whereSql,
       whereParams,
@@ -1180,6 +1223,18 @@ export async function queryTableWithAuthContext(
       policyQuery.table,
       columns,
     );
+
+    if (policyQuery.operation === "count") {
+      const result = await pool.query(
+        `SELECT count(*) AS count FROM ${quoteIdent(policyQuery.table)}${scopedWhereSql}`,
+        scopedParams,
+      );
+      return {
+        data: result.rows[0]?.count ?? 0,
+        error: null,
+      };
+    }
+
     const selectSql = buildSelectColumnsSql(policyQuery.select, columns);
     const result = await pool.query(
       `SELECT ${selectSql} FROM ${quoteIdent(policyQuery.table)}${scopedWhereSql}${orderSql}${limitSql}`,
@@ -1193,31 +1248,6 @@ export async function queryTableWithAuthContext(
           : policyQuery.single === "maybeSingle"
             ? (data[0] ?? null)
             : data,
-      error: null,
-    };
-  }
-
-  if (policyQuery.operation === "count") {
-    const { whereSql, whereParams } = buildWhereClause(filters, columns);
-    const anyColumnScoped = appendAnyColumnScope(
-      whereSql,
-      whereParams,
-      policyQuery.scopeAnyColumnEquals,
-      columns,
-    );
-    const { sql: scopedWhereSql, params: scopedParams } = appendOwnerOrParticipantTagScope(
-      anyColumnScoped.sql,
-      anyColumnScoped.params,
-      policyQuery.scopeOwnerOrParticipantTag,
-      policyQuery.table,
-      columns,
-    );
-    const result = await pool.query(
-      `SELECT count(*) AS count FROM ${quoteIdent(policyQuery.table)}${scopedWhereSql}`,
-      scopedParams,
-    );
-    return {
-      data: result.rows[0]?.count ?? 0,
       error: null,
     };
   }

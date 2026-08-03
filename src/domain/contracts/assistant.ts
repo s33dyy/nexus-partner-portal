@@ -52,16 +52,36 @@ export const REQUIRED_ASSISTANT_DEAL_FIELDS = [
   "amount",
 ] as const;
 
+// Lets the model express conditions beyond the hand-picked stage/status/query
+// shortcuts below — e.g. "deals over $5000", "tasks due before next week" —
+// without ever letting it write SQL. column/operator are checked server-side
+// against a real table's curated column allowlist and a fixed operator set
+// (see buildWhereClause in livey-service.server.ts); an unrecognized column
+// or operator fails the read cleanly rather than executing anything.
+export type AssistantFilterOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "ilike";
+
+export type AssistantFilter = {
+  column: string;
+  operator: AssistantFilterOperator;
+  value: string | number | boolean | Array<string | number>;
+};
+
 export type AssistantIntent =
-  | { type: "list_deals"; reply: string; stage: string | null; status: string | null }
+  | {
+      type: "list_deals";
+      reply: string;
+      stage: string | null;
+      status: string | null;
+      filters: AssistantFilter[];
+    }
   | { type: "create_deal_draft"; reply: string; draft: AssistantDealDraft }
-  | { type: "list_partners"; reply: string; query: string | null }
-  | { type: "list_customers"; reply: string; query: string | null }
-  | { type: "list_tasks"; reply: string; query: string | null }
-  | { type: "list_tickets"; reply: string; query: string | null }
+  | { type: "list_partners"; reply: string; query: string | null; filters: AssistantFilter[] }
+  | { type: "list_customers"; reply: string; query: string | null; filters: AssistantFilter[] }
+  | { type: "list_tasks"; reply: string; query: string | null; filters: AssistantFilter[] }
+  | { type: "list_tickets"; reply: string; query: string | null; filters: AssistantFilter[] }
   | { type: "list_users"; reply: string; query: string | null }
-  | { type: "list_learning"; reply: string; query: string | null }
-  | { type: "list_news"; reply: string; query: string | null }
+  | { type: "list_learning"; reply: string; query: string | null; filters: AssistantFilter[] }
+  | { type: "list_news"; reply: string; query: string | null; filters: AssistantFilter[] }
   | { type: "none"; reply: string };
 
 export type AssistantDealSummary = {
