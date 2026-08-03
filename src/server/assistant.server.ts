@@ -754,21 +754,39 @@ export async function runAssistantTurn(
     companyName: authContext.profile?.company_name ?? null,
   });
 
+  const channelContext =
+    channel === "whatsapp"
+      ? 'This turn is being delivered over WhatsApp, not the web chat UI. Keep the "reply" field short and plain text — no markdown, no bullet lists, no headings, no asterisks/underscores for emphasis — since WhatsApp renders raw text. Still end with a brief closing question/CTA per the usual rules. This changes the *content* of "reply" only — the response as a whole must still be ONLY the single minified JSON object, exactly as specified above; never a tool-call block or any other wrapper format.'
+      : null;
+  const baseMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: identityContext },
+    ...(channelContext ? [{ role: "system" as const, content: channelContext }] : []),
+    ...input.history.slice(-12),
+    { role: "user", content: message },
+  ];
+
   let completion: ChatCompletionResult;
   try {
-    const channelContext =
-      channel === "whatsapp"
-        ? 'This turn is being delivered over WhatsApp, not the web chat UI. Keep "reply" short and plain text — no markdown, no bullet lists, no headings, no asterisks/underscores for emphasis — since WhatsApp renders raw text. Still end with a brief closing question/CTA per the usual rules.'
-        : null;
-    completion = await runChatCompletion({
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "system", content: identityContext },
-        ...(channelContext ? [{ role: "system" as const, content: channelContext }] : []),
-        ...input.history.slice(-12),
-        { role: "user", content: message },
-      ],
-    });
+    completion = await runChatCompletion({ messages: baseMessages });
+    // The auto-selected cheapest model occasionally ignores the "respond
+    // with ONLY JSON" instruction (observed: emitting <tool_call> blocks
+    // instead). One corrective retry, rather than surfacing a generic
+    // "couldn't process that" on the first hiccup, matches how reliable the
+    // assistant feels on any channel.
+    if (!parseModelJson(completion.content)) {
+      completion = await runChatCompletion({
+        messages: [
+          ...baseMessages,
+          { role: "assistant", content: completion.content.slice(0, 500) },
+          {
+            role: "user",
+            content:
+              "That was not valid JSON. Respond again with ONLY the single minified JSON object in the exact shape specified — no tool-call tags, no markdown, no commentary.",
+          },
+        ],
+      });
+    }
   } catch {
     const reply = "The assistant is temporarily unavailable. Please try again shortly.";
     await log({
