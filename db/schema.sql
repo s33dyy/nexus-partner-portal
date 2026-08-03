@@ -105,8 +105,6 @@ CREATE TABLE IF NOT EXISTS profiles (
   partner_status partner_status NOT NULL DEFAULT 'pending_partner_registration',
   must_reset_password BOOLEAN NOT NULL DEFAULT FALSE,
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
-  whatsapp_phone_e164 TEXT UNIQUE,
-  whatsapp_verified_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1266,10 +1264,7 @@ CREATE INDEX IF NOT EXISTS deal_transitions_deal_id_idx ON deal_transitions (dea
 -- Append-only conversation/audit log — no delete surface anywhere in the app.
 CREATE TABLE IF NOT EXISTS assistant_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- TEXT, not UUID: WhatsApp threads use a deterministic non-UUID id
-  -- ("whatsapp:<phoneE164>") so history can be reloaded per-thread with no
-  -- client-side state, alongside random UUIDs for web conversations.
-  conversation_id TEXT NOT NULL,
+  conversation_id UUID NOT NULL,
   user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE SET NULL,
   role TEXT NOT NULL,
@@ -1281,7 +1276,6 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
   outcome TEXT,
   model TEXT,
   correlation_id TEXT NOT NULL,
-  channel TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'whatsapp')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -1820,3 +1814,31 @@ ALTER TABLE customer_participants ADD COLUMN IF NOT EXISTS participant_user_id U
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_email TEXT;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_linked_at TIMESTAMPTZ;
+
+-- WhatsApp Assistant: OTP-verified account linking (Twilio Verify). Same
+-- shape as Google linking above — whatsapp_phone_e164 is UNIQUE so one
+-- WhatsApp number can only ever link to one profile, NULL allowed for
+-- every profile that hasn't linked one.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS whatsapp_phone_e164 TEXT UNIQUE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS whatsapp_verified_at TIMESTAMPTZ;
+
+-- assistant_messages.conversation_id widens from UUID to TEXT: WhatsApp
+-- threads use a deterministic non-UUID id ("whatsapp:<phoneE164>") so
+-- history can be reloaded per-thread with no client-side state, alongside
+-- random UUIDs for web conversations. channel distinguishes the two so
+-- history queries can filter/thread them separately.
+ALTER TABLE assistant_messages ALTER COLUMN conversation_id TYPE TEXT USING conversation_id::text;
+ALTER TABLE assistant_messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'web';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'assistant_messages_channel_check'
+      AND conrelid = 'assistant_messages'::regclass
+  ) THEN
+    ALTER TABLE assistant_messages ADD CONSTRAINT assistant_messages_channel_check CHECK (channel IN ('web', 'whatsapp'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS assistant_messages_channel_conversation_idx ON assistant_messages (channel, conversation_id);
