@@ -21,6 +21,9 @@ export type Profile = {
   partner_id: string | null;
   partner_status: PartnerStatus;
   must_reset_password: boolean;
+  google_id: string | null;
+  google_email: string | null;
+  google_linked_at: string | null;
 };
 
 type AuthContextValue = {

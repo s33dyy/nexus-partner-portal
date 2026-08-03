@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Database, FolderOpen, KeyRound, Layers3, ShieldCheck } from "lucide-react";
+import { Database, FolderOpen, KeyRound, Layers3, Link2, ShieldCheck } from "lucide-react";
 
 import { SettingsExportCard } from "@/components/settings-export-card";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import {
   type ExportDatasetDescriptor,
   type ExportScope,
 } from "@/lib/export-registry";
-import { supabase } from "@/integrations/local/client";
+import { disconnectGoogleAccount, supabase } from "@/integrations/local/client";
 import { validatePasswordChange } from "@/lib/password-policy";
 
 const routeApi = getRouteApi("/_authenticated/settings");
@@ -85,12 +85,28 @@ function SettingsPage() {
     zohoSignConnected?: string;
     zohoSignError?: string;
     passwordReset?: string;
+    googleConnected?: string;
+    googleError?: string;
   };
   const [passwordDraft, setPasswordDraft] = useState({
     password: "",
     confirmPassword: "",
   });
   const [updatingPassword, setUpdatingPassword] = useState(false);
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+
+  const handleDisconnectGoogle = async () => {
+    setDisconnectingGoogle(true);
+    try {
+      await disconnectGoogleAccount();
+      toast.success("Google account disconnected.");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect Google account");
+    } finally {
+      setDisconnectingGoogle(false);
+    }
+  };
 
   useEffect(() => {
     if (searchParams.zohoSignConnected === "1") {
@@ -100,8 +116,15 @@ function SettingsPage() {
     } else if (searchParams.zohoSignError) {
       toast.error(`Zoho Sign connection failed: ${searchParams.zohoSignError}`);
       window.history.replaceState(null, "", "/settings");
+    } else if (searchParams.googleConnected === "1") {
+      toast.success("Google account connected!");
+      window.history.replaceState(null, "", "/settings");
+      void refresh();
+    } else if (searchParams.googleError) {
+      toast.error(`Google connection failed: ${searchParams.googleError}`);
+      window.history.replaceState(null, "", "/settings");
     }
-  }, [searchParams]);
+  }, [searchParams, refresh]);
 
   const groupedDatasets = useMemo(() => {
     const buckets: Record<ExportDatasetDescriptor["group"], ExportDatasetDescriptor[]> = {
@@ -311,6 +334,53 @@ function SettingsPage() {
                 the rest of the portal.
               </div>
             ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 shadow-sm">
+        <CardHeader className="border-b">
+          <div className="flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Google account</CardTitle>
+          </div>
+          <CardDescription>
+            Connect your Google account so you can sign in with it, instead of only your password.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-4">
+            {profile?.google_email ? (
+              <>
+                <div>
+                  <div className="font-medium">Connected as {profile.google_email}</div>
+                  {profile.google_linked_at && (
+                    <div className="text-sm text-muted-foreground mt-1">
+                      Since {new Date(profile.google_linked_at).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleDisconnectGoogle()}
+                  disabled={disconnectingGoogle}
+                >
+                  {disconnectingGoogle ? "Disconnecting..." : "Disconnect"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="font-medium">Not connected</div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Link your Google account for a faster sign-in.
+                  </div>
+                </div>
+                <Button asChild>
+                  <a href="/api/auth/google/connect">Connect Google Account</a>
+                </Button>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>

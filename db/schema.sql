@@ -1804,3 +1804,13 @@ CREATE INDEX IF NOT EXISTS learning_lesson_progress_lesson_id_idx ON learning_le
 -- resolved yet.
 ALTER TABLE deal_participants ADD COLUMN IF NOT EXISTS participant_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
 ALTER TABLE customer_participants ADD COLUMN IF NOT EXISTS participant_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
+-- Google Sign-In: identity linking only, not a new access grant on its own —
+-- a brand-new Google signup still goes through bootstrapPartnerAssignment
+-- the same as any other self-registered partner admin. google_id is UNIQUE
+-- so one Google account can only ever link to one profile; NULL is allowed
+-- (and multiple NULLs never conflict under a UNIQUE constraint) for every
+-- profile that has never connected a Google account at all.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_email TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS google_linked_at TIMESTAMPTZ;

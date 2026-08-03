@@ -15,6 +15,7 @@ import { BrandLogo } from "@/components/brand-logo";
 const authSearchSchema = z.object({
   mode: z.enum(["signin", "signup", "forgot"]).optional(),
   redirect: z.string().optional(),
+  googleError: z.string().optional(),
 });
 
 export const Route = createFileRoute("/auth")({
@@ -37,6 +38,13 @@ function AuthPage() {
       if (data.session) navigate({ to: search.redirect ?? "/dashboard", replace: true });
     });
   }, [navigate, search.redirect]);
+
+  useEffect(() => {
+    if (search.googleError) {
+      toast.error(`Google sign-in failed: ${search.googleError}`);
+      window.history.replaceState(null, "", "/auth");
+    }
+  }, [search.googleError]);
 
   return (
     <div className="grid min-h-dvh overflow-x-hidden lg:grid-cols-2">
@@ -100,22 +108,69 @@ function AuthPage() {
           {tab === "forgot" ? (
             <ForgotForm />
           ) : (
-            <Tabs value={tab} onValueChange={setTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="signin">Sign in</TabsTrigger>
-                <TabsTrigger value="signup">Register</TabsTrigger>
-              </TabsList>
-              <TabsContent value="signin" className="mt-6">
-                <SignInForm redirect={search.redirect} />
-              </TabsContent>
-              <TabsContent value="signup" className="mt-6">
-                <SignUpForm />
-              </TabsContent>
-            </Tabs>
+            <>
+              <GoogleContinueButton />
+              <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="h-px flex-1 bg-border" />
+                <span>or continue with email</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <Tabs value={tab} onValueChange={setTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="signin">Sign in</TabsTrigger>
+                  <TabsTrigger value="signup">Register</TabsTrigger>
+                </TabsList>
+                <TabsContent value="signin" className="mt-6">
+                  <SignInForm redirect={search.redirect} />
+                </TabsContent>
+                <TabsContent value="signup" className="mt-6">
+                  <SignUpForm />
+                </TabsContent>
+              </Tabs>
+            </>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// Full-page redirect to the OAuth flow (src/server/google-oauth.server.ts,
+// intercepted in src/server.ts) — a plain link, not a client-side auth call,
+// same pattern as the "Connect Zoho Sign" button in settings.tsx. Works for
+// both login (existing account) and signup (brand-new account); which one
+// happens is decided server-side once Google's identity comes back.
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 18 18" className={className} aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+      />
+    </svg>
+  );
+}
+
+function GoogleContinueButton() {
+  return (
+    <Button type="button" variant="outline" className="w-full gap-2" asChild>
+      <a href="/api/auth/google/connect">
+        <GoogleIcon className="h-4 w-4" />
+        Continue with Google
+      </a>
+    </Button>
   );
 }
 

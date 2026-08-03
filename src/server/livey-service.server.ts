@@ -106,6 +106,9 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "partner_id",
     "partner_status",
     "must_reset_password",
+    "google_id",
+    "google_email",
+    "google_linked_at",
     "is_seed",
     "created_at",
     "updated_at",
@@ -674,7 +677,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   role_geography_access: ["role_key", "geography_node_id", "created_at"],
 };
 
-const SESSION_COOKIE = "livey_session";
+export const SESSION_COOKIE = "livey_session";
 // §19.2: Super Admin, Partner Admin, and every LIVEY-internal role get the
 // stricter 12h absolute lifetime; only a caller whose sole role is
 // partner_user gets the looser 24h one. Unknown/no role falls back to the
@@ -2131,6 +2134,18 @@ export async function updatePasswordFromSession(password: string) {
   return { ok: true };
 }
 
+export async function disconnectGoogleAccount() {
+  const session = await findSessionFromRequest();
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+  await pool.query(
+    `UPDATE profiles SET google_id = NULL, google_email = NULL, google_linked_at = NULL WHERE id = $1`,
+    [session.user.id],
+  );
+  return { ok: true as const };
+}
+
 export async function requestPasswordReset(email: string) {
   // Deliberately returns the same { ok: true } shape regardless of whether the
   // account exists, and never puts the reset token/link in the response — a
@@ -2535,7 +2550,16 @@ export async function removeDocumentBlobs(paths: string[]) {
   return { removed: result.rowCount ?? 0 };
 }
 
-export async function createSessionForUser(userId: string) {
+// Cookie-free half of session creation — safe to call from anywhere,
+// including request handlers that run outside TanStack's own router (e.g.
+// google-oauth.server.ts's manually-intercepted routes in server.ts, which
+// run before the AsyncLocalStorage context setCookie()/getCookie() depend
+// on is ever established — see createSessionForUser's own comment below).
+export async function createSessionTokenForUser(userId: string): Promise<{
+  token: string;
+  expiresAt: Date;
+  user: LocalUser;
+}> {
   const result = await pool.query(
     `SELECT id, email, full_name, phone, company_name FROM profiles WHERE id = $1 LIMIT 1`,
     [userId],
@@ -2560,6 +2584,16 @@ export async function createSessionForUser(userId: string) {
     hashSha256(token),
     expiresAt,
   ]);
+  return { token, expiresAt, user: toLocalUser(profile) };
+}
+
+// Callers inside a real TanStack request (e.g. a createServerFn handler) —
+// use this. Anything intercepted in server.ts before TanStack's router runs
+// (see google-oauth.server.ts) must call createSessionTokenForUser directly
+// and write its own Set-Cookie header instead, since setCookie() here would
+// throw outside that context.
+export async function createSessionForUser(userId: string) {
+  const { token, expiresAt, user } = await createSessionTokenForUser(userId);
   setCookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -2571,7 +2605,7 @@ export async function createSessionForUser(userId: string) {
     session: {
       access_token: token,
       expires_at: Math.floor(expiresAt.getTime() / 1000),
-      user: toLocalUser(profile),
+      user,
     } satisfies LocalSession,
   };
 }

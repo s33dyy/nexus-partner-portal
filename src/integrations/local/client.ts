@@ -270,6 +270,15 @@ export async function requestPasswordReset(email: string, redirectTo?: string) {
   return requestReset({ data: { email, redirectTo } });
 }
 
+const disconnectGoogle = createServerFn({ method: "POST" }).handler(async () => {
+  const { disconnectGoogleAccount } = await import("@/server/livey-service.server");
+  return disconnectGoogleAccount();
+});
+
+export async function disconnectGoogleAccount() {
+  return disconnectGoogle();
+}
+
 export async function uploadRewardImage(input: { file: File; folder?: string; publicId?: string }) {
   try {
     const form = new FormData();

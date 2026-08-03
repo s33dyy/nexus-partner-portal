@@ -10,6 +10,7 @@ import {
   handleZohoResyncAgreement,
   handleZohoSignUrl,
 } from "./server/zoho-api.server";
+import { handleGoogleConnect, handleGoogleCallback } from "./server/google-oauth.server";
 import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
 
 type ServerEntry = {
@@ -77,6 +78,12 @@ export default {
       }
       if (url.pathname === "/api/integrations/zoho-sign/sign-url") {
         return attachCorrelationHeader(await handleZohoSignUrl(request), correlationId);
+      }
+      if (url.pathname === "/api/auth/google/connect") {
+        return attachCorrelationHeader(await handleGoogleConnect(request), correlationId);
+      }
+      if (url.pathname === "/api/auth/google/callback") {
+        return attachCorrelationHeader(await handleGoogleCallback(request), correlationId);
       }
 
       const handler = await getServerEntry();
