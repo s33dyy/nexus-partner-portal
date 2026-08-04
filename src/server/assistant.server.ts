@@ -711,15 +711,22 @@ async function resolveDraftLinks(
   const notes: string[] = [];
   let accountCandidates: AccountMatchCandidate[] | null = null;
 
-  if (resolved.accountName && !resolved.partnerId && partnerScope.partnerId) {
-    // Ignore whatever account name the model extracted — a partner-scoped
-    // caller's account is fixed, not a free-text choice.
-    resolved = {
-      ...resolved,
-      partnerId: partnerScope.partnerId,
-      accountName: partnerScope.companyName ?? resolved.accountName,
-    };
-  } else if (!resolved.accountName && !resolved.partnerId && partnerScope.partnerId) {
+  if (!resolved.partnerId && partnerScope.partnerId) {
+    // A partner-scoped caller's account is fixed — not a free-text choice —
+    // so ignore whatever name the model extracted (or the absence of one)
+    // and use their own account every time. If they typed something that
+    // doesn't look like their own company, say so explicitly instead of
+    // silently substituting it turn after turn with no explanation, which
+    // reads as the bot ignoring them.
+    const typedSomethingElse =
+      resolved.accountName &&
+      partnerScope.companyName &&
+      resolved.accountName.trim().toLowerCase() !== partnerScope.companyName.trim().toLowerCase();
+    if (typedSomethingElse) {
+      notes.push(
+        `Deals can only be created under your own account, "${partnerScope.companyName}" — that's what I'll use.`,
+      );
+    }
     resolved = {
       ...resolved,
       partnerId: partnerScope.partnerId,
