@@ -112,6 +112,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "google_linked_at",
     "whatsapp_phone_e164",
     "whatsapp_verified_at",
+    "call_ready",
     "is_seed",
     "created_at",
     "updated_at",
@@ -678,6 +679,25 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "updated_at",
   ],
   role_geography_access: ["role_key", "geography_node_id", "created_at"],
+  call_logs: [
+    "id",
+    "twilio_call_sid",
+    "direction",
+    "from_number",
+    "to_number",
+    "agent_user_id",
+    "status",
+    "started_at",
+    "ended_at",
+    "duration_seconds",
+    "recording_url",
+    "disposition",
+    "linked_ticket_id",
+    "linked_deal_id",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
 };
 
 export const SESSION_COOKIE = "livey_session";

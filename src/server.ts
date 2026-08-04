@@ -12,6 +12,11 @@ import {
 } from "./server/zoho-api.server";
 import { handleGoogleConnect, handleGoogleCallback } from "./server/google-oauth.server";
 import { handleWhatsappWebhook } from "./server/twilio.server";
+import {
+  handleVoiceIncoming,
+  handleVoiceOutgoing,
+  handleVoiceStatusCallback,
+} from "./server/twilio-voice.server";
 import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
 
 type ServerEntry = {
@@ -88,6 +93,15 @@ export default {
       }
       if (url.pathname === "/api/integrations/whatsapp/webhook" && request.method === "POST") {
         return attachCorrelationHeader(await handleWhatsappWebhook(request), correlationId);
+      }
+      if (url.pathname === "/api/integrations/twilio/voice/incoming" && request.method === "POST") {
+        return attachCorrelationHeader(await handleVoiceIncoming(request), correlationId);
+      }
+      if (url.pathname === "/api/integrations/twilio/voice/outgoing" && request.method === "POST") {
+        return attachCorrelationHeader(await handleVoiceOutgoing(request), correlationId);
+      }
+      if (url.pathname === "/api/integrations/twilio/voice/status" && request.method === "POST") {
+        return attachCorrelationHeader(await handleVoiceStatusCallback(request), correlationId);
       }
 
       const handler = await getServerEntry();

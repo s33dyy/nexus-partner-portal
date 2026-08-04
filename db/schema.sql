@@ -1489,6 +1489,7 @@ INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_u
   ('super_admin', 'audit', true, true, true, true),
   ('super_admin', 'news', true, true, true, true),
   ('super_admin', 'assistant', true, true, true, true),
+  ('super_admin', 'calls', true, true, true, true),
 
   ('rm', 'deals', true, true, true, false),
   ('rm', 'partners', false, true, true, false),
@@ -1559,6 +1560,7 @@ INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_u
   ('livey_support', 'audit', false, true, false, false),
   ('livey_support', 'news', false, true, false, false),
   ('livey_support', 'assistant', false, true, false, false),
+  ('livey_support', 'calls', true, true, true, true),
 
   ('restricted_distributor', 'deals', false, true, true, false),
   ('restricted_distributor', 'partners', false, false, false, false),
@@ -1866,3 +1868,40 @@ CREATE TABLE IF NOT EXISTS whatsapp_wizard_state (
   data JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Call Center Phase 1: Voice calling (Twilio Voice + browser softphone).
+-- Brand-new table, so plain CREATE TABLE IF NOT EXISTS is correct here —
+-- unlike profiles.call_ready below, call_logs doesn't exist on any
+-- previously-migrated database, so there's no "existing table" trap.
+CREATE TABLE IF NOT EXISTS call_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  twilio_call_sid TEXT UNIQUE NOT NULL,
+  direction TEXT NOT NULL,              -- 'inbound' | 'outbound'
+  from_number TEXT NOT NULL,
+  to_number TEXT NOT NULL,
+  agent_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  status TEXT NOT NULL,                 -- queued/ringing/in-progress/completed/busy/failed/no-answer/canceled
+  started_at TIMESTAMPTZ,
+  ended_at TIMESTAMPTZ,
+  duration_seconds INTEGER,
+  recording_url TEXT,
+  disposition TEXT,
+  linked_ticket_id UUID REFERENCES support_tickets(id) ON DELETE SET NULL,
+  linked_deal_id UUID REFERENCES portal_deals(id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS call_logs_agent_user_id_idx ON call_logs (agent_user_id);
+CREATE INDEX IF NOT EXISTS call_logs_created_at_idx ON call_logs (created_at DESC);
+
+-- Simple agent presence for Phase 1 (no live "who's on duty" dashboard
+-- yet — that's Phase 2). The softphone panel's ready/not-ready toggle
+-- writes this directly; the inbound-call webhook reads it to decide who
+-- to ring. profiles is an existing production table, so this MUST be an
+-- explicit ALTER TABLE ADD COLUMN IF NOT EXISTS (same trap/fix as
+-- google_id/whatsapp_phone_e164 above) — inlining it into the CREATE
+-- TABLE IF NOT EXISTS profiles block near the top of this file would
+-- silently never apply here.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS call_ready BOOLEAN NOT NULL DEFAULT FALSE;

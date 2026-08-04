@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Activity,
   ShieldQuestion,
+  Phone,
 } from "lucide-react";
 
 import {
@@ -125,6 +126,7 @@ export function AppSidebar() {
       ? [{ title: "Integrations", url: "/admin/integrations", icon: Activity }]
       : []),
     ...(can("audit", "read") ? [{ title: "Audit Logs", url: "/admin/audit", icon: FileText }] : []),
+    ...(can("calls", "read") ? [{ title: "Calls", url: "/calls", icon: Phone }] : []),
   ];
 
   const renderGroup = (label: string, items: Item[]) => {

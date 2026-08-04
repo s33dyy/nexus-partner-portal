@@ -19,6 +19,7 @@ export const FEATURE_KEYS = [
   "audit",
   "news",
   "assistant",
+  "calls",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -37,6 +38,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   audit: "Audit",
   news: "News",
   assistant: "Assistant",
+  calls: "Calls",
 };
 
 export type CrudOperation = "create" | "read" | "update" | "delete";

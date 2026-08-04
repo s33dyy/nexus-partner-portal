@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AssistantPanel } from "@/components/assistant-panel";
+import { SoftphonePanel } from "@/components/softphone-panel";
 import { DailyDigestDialog } from "@/components/daily-digest-dialog";
 import { AgreementPendingBanner } from "@/components/agreement-pending-banner";
 import { RegionFilterSelect } from "@/components/region-filter-select";
@@ -49,7 +50,7 @@ const statusTone: Record<string, "secondary" | "default" | "destructive" | "outl
 };
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { profile, user, roles, activeContext, assignment, signOut, refresh } = useAuth();
+  const { profile, user, roles, activeContext, assignment, signOut, refresh, can } = useAuth();
   const access = usePartnerAccess();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
@@ -167,6 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               Briefing
             </Button>
             <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
+            {can("calls", "read") && <SoftphonePanel />}
             <Button asChild variant="ghost" size="icon" aria-label="Notifications">
               <Link to="/notifications" className="relative">
                 <Bell className="h-4 w-4" />

@@ -153,6 +153,7 @@ const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
   learning_enrollments: "learning",
   learning_assessment_attempts: "learning",
   learning_lesson_progress: "learning",
+  call_logs: "calls",
 };
 
 // Tables with a resolvable geography column, restricted to a role's region
@@ -468,6 +469,15 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
     case "learning_assessment_attempts":
     case "learning_lesson_progress":
       return { kind: "column", column: "user_id", value: auth.userId };
+    // Call Center Phase 1: "calls" is livey_support/super_admin only (see
+    // role_permissions seed), so unlike the partner-facing tables above
+    // there's no partnerId branch — a non-super-admin caller (livey_support)
+    // sees only calls they personally handled. The webhook handlers in
+    // twilio-voice.server.ts write agent_user_id directly via raw pool
+    // queries and never go through this generic path, so this scope only
+    // ever applies to the read-only call history list.
+    case "call_logs":
+      return { kind: "column", column: "agent_user_id", value: auth.userId };
     case "customer_participants":
     case "deal_participants":
     case "customer_merge_events":

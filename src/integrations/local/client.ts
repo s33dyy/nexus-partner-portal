@@ -321,6 +321,37 @@ export async function disconnectWhatsapp() {
   return disconnectWhatsappFn();
 }
 
+const mintVoiceAccessTokenFn = createServerFn({ method: "POST" }).handler(async () => {
+  const { mintVoiceAccessToken } = await import("@/server/twilio-voice.server");
+  return mintVoiceAccessToken();
+});
+
+export async function mintVoiceAccessToken() {
+  return mintVoiceAccessTokenFn();
+}
+
+const setCallDispositionFn = createServerFn({ method: "POST" })
+  .validator((input: { twilioCallSid: string; disposition: string }) => input)
+  .handler(async ({ data }) => {
+    const { setCallDisposition } = await import("@/server/twilio-voice.server");
+    return setCallDisposition(data);
+  });
+
+export async function setCallDisposition(input: { twilioCallSid: string; disposition: string }) {
+  return setCallDispositionFn({ data: input });
+}
+
+const setCallReadyFn = createServerFn({ method: "POST" })
+  .validator((input: { ready: boolean }) => input)
+  .handler(async ({ data }) => {
+    const { setCallReady } = await import("@/server/twilio-voice.server");
+    return setCallReady(data);
+  });
+
+export async function setCallReady(input: { ready: boolean }) {
+  return setCallReadyFn({ data: input });
+}
+
 export async function uploadRewardImage(input: { file: File; folder?: string; publicId?: string }) {
   try {
     const form = new FormData();
