@@ -251,6 +251,44 @@ async function sendMainMenuChip(toE164: string): Promise<void> {
   });
 }
 
+// ---- Dynamic account picker (create_deal_draft ambiguous-account case) ----
+//
+// Unlike the static main menu, each search's candidate list differs, so this
+// can't reuse a single cached Content resource — a fresh ephemeral
+// twilio/list-picker Content is created per prompt. WhatsApp list-picker item
+// titles are capped at 24 chars, hence the truncation below. The partner id
+// is embedded directly in the item id (see ACCOUNT_PICKER_ID_PREFIX handling
+// in handleWhatsappWebhook) so no separate state needs to be kept between
+// sending this and handling the tap.
+const ACCOUNT_PICKER_ID_PREFIX = "acct_";
+
+async function sendAccountPicker(
+  toE164: string,
+  body: string,
+  candidates: Array<{ id: string; label: string }>,
+): Promise<void> {
+  const sid = await createContent({
+    friendly_name: `livey_whatsapp_account_picker_${Date.now()}`,
+    language: "en",
+    types: {
+      "twilio/list-picker": {
+        body: body.slice(0, 1024),
+        button: "Select",
+        items: candidates.slice(0, 10).map((c) => ({
+          id: `${ACCOUNT_PICKER_ID_PREFIX}${c.id}`,
+          item: c.label.slice(0, 24),
+        })),
+      },
+    },
+  });
+  const client = getClient();
+  await client.messages.create({
+    from: requireWhatsappFrom(),
+    to: `whatsapp:${toE164}`,
+    contentSid: sid,
+  });
+}
+
 // Mirrors the raw-body-first pattern in handleZohoWebhook (zoho-api.server.ts)
 // — Twilio's request signature is the only auth it gives us on this route,
 // so an invalid/unverifiable signature must fail closed (reject), never be
@@ -333,8 +371,28 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
     // route it to the same synthetic phrasing a typed request would use, so
     // it goes through the exact same RBAC-gated assistant turn as any other
     // message (no separate/duplicated logic for menu vs. typed requests).
-    const selectedMenuItem = listId ? MAIN_MENU_ITEMS.find((m) => m.id === listId) : undefined;
-    const effectiveMessage = selectedMenuItem ? selectedMenuItem.syntheticMessage : bodyText;
+    // An account-picker tap (see accountPicker below) is stateless: the
+    // partner id is embedded directly in the list item's own id
+    // ("acct_<partnerId>"), so the real company name can be looked up fresh
+    // here without needing to remember anything from when the picker was
+    // built — the resulting synthetic message re-enters the create_deal_draft
+    // flow exactly as if the user had typed the exact account name, which
+    // resolveAccountOrClientMatch then matches unambiguously.
+    let effectiveMessage: string;
+    if (listId.startsWith(ACCOUNT_PICKER_ID_PREFIX)) {
+      const partnerId = listId.slice(ACCOUNT_PICKER_ID_PREFIX.length);
+      const partnerRes = await pool.query<{ company_name: string }>(
+        `SELECT company_name FROM partners WHERE id = $1 LIMIT 1`,
+        [partnerId],
+      );
+      const companyName = partnerRes.rows[0]?.company_name;
+      effectiveMessage = companyName
+        ? `Use the partner account "${companyName}" for this deal.`
+        : bodyText;
+    } else {
+      const selectedMenuItem = listId ? MAIN_MENU_ITEMS.find((m) => m.id === listId) : undefined;
+      effectiveMessage = selectedMenuItem ? selectedMenuItem.syntheticMessage : bodyText;
+    }
 
     if (!effectiveMessage) {
       await sendMainMenu(phoneE164);
@@ -372,10 +430,19 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
     });
 
     // Switched from a single synchronous TwiML reply to two async REST
-    // sends — a plain-text reply followed by a "Main Menu" quick-reply chip
-    // (mirrors the always-available menu shortcut seen in bank WhatsApp
-    // bots) — since TwiML can't carry a Content API contentSid.
-    await sendWhatsappMessage(phoneE164, result.reply || "Sorry, I couldn't process that.");
+    // sends — a plain-text (or interactive list-picker) reply followed by a
+    // "Main Menu" quick-reply chip (mirrors the always-available menu
+    // shortcut seen in bank WhatsApp bots) — since TwiML can't carry a
+    // Content API contentSid.
+    if (result.accountPicker && result.accountPicker.candidates.length > 0) {
+      await sendAccountPicker(
+        phoneE164,
+        result.reply || "A few existing accounts look similar — which one is this for?",
+        result.accountPicker.candidates,
+      );
+    } else {
+      await sendWhatsappMessage(phoneE164, result.reply || "Sorry, I couldn't process that.");
+    }
     await sendMainMenuChip(phoneE164).catch((err) =>
       console.error("[Twilio webhook] failed to send main-menu chip:", err),
     );

@@ -148,6 +148,13 @@ export type AssistantNewsSummary = {
   updatedAt: string;
 };
 
+// Only set on the WhatsApp channel, when a create_deal_draft turn's account
+// name matched more than one existing Partner — web has its own
+// LookupCombobox for this same "which account did you mean" case, so it
+// never needs this. The caller (twilio.server.ts) renders these as a
+// tappable list-picker instead of the plain-text "which one" note web gets.
+export type AssistantAccountCandidate = { id: string; label: string };
+
 export type AssistantTurnResult = {
   conversationId: string;
   reply: string;
@@ -162,4 +169,5 @@ export type AssistantTurnResult = {
   learning: AssistantLearningSummary[];
   news: AssistantNewsSummary[];
   correlationId: string;
+  accountPicker: { candidates: AssistantAccountCandidate[] } | null;
 };

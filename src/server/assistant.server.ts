@@ -654,9 +654,11 @@ function missingDraftFields(draft: AssistantDealDraft): string[] {
   return REQUIRED_ASSISTANT_DEAL_FIELDS.filter((field) => !draft[field]?.toString().trim());
 }
 
+type AccountMatchCandidate = { id: string; label: string };
+
 type AccountMatch =
   | { kind: "match"; id: string; label: string }
-  | { kind: "ambiguous"; candidates: string[] }
+  | { kind: "ambiguous"; candidates: AccountMatchCandidate[] }
   | { kind: "none" };
 
 /** Mirrors what deals.tsx's own Account/Client LookupCombobox fields already
@@ -680,25 +682,62 @@ async function resolveAccountOrClientMatch(
   const exact = rows.filter((row) => row.label.trim().toLowerCase() === normalized);
   if (exact.length === 1) return { kind: "match", id: exact[0].id, label: exact[0].label };
   if (rows.length === 1) return { kind: "match", id: rows[0].id, label: rows[0].label };
-  return { kind: "ambiguous", candidates: rows.slice(0, 5).map((row) => row.label) };
+  return {
+    kind: "ambiguous",
+    candidates: rows.slice(0, 10).map((row) => ({ id: row.id, label: row.label })),
+  };
 }
 
 async function resolveDraftLinks(
   draft: AssistantDealDraft,
   callerAuth: DropdownCallerAuth | null,
-): Promise<{ draft: AssistantDealDraft; note: string | null }> {
+  // Partner-scoped callers (partner_admin/partner_user) only ever create
+  // deals under their own account — governed assignments already confine
+  // everything else they can see/do to that same partner_id, so asking them
+  // to type/pick their own company name is pure friction. Internal/LIVEY
+  // roles (partnerScope.partnerId === null) manage many partners and do need
+  // to pick one.
+  partnerScope: { partnerId: string | null; companyName: string | null },
+  // WhatsApp has no LookupCombobox — an "ambiguous" account match there gets
+  // surfaced as tappable candidates (via AssistantTurnResult.accountPicker)
+  // instead of the plain-text "which one did you mean" note web still uses.
+  channel: "web" | "whatsapp",
+): Promise<{
+  draft: AssistantDealDraft;
+  note: string | null;
+  accountCandidates: AccountMatchCandidate[] | null;
+}> {
   let resolved = draft;
   const notes: string[] = [];
+  let accountCandidates: AccountMatchCandidate[] | null = null;
 
-  if (resolved.accountName && !resolved.partnerId) {
+  if (resolved.accountName && !resolved.partnerId && partnerScope.partnerId) {
+    // Ignore whatever account name the model extracted — a partner-scoped
+    // caller's account is fixed, not a free-text choice.
+    resolved = {
+      ...resolved,
+      partnerId: partnerScope.partnerId,
+      accountName: partnerScope.companyName ?? resolved.accountName,
+    };
+  } else if (!resolved.accountName && !resolved.partnerId && partnerScope.partnerId) {
+    resolved = {
+      ...resolved,
+      partnerId: partnerScope.partnerId,
+      accountName: partnerScope.companyName ?? resolved.accountName,
+    };
+  } else if (resolved.accountName && !resolved.partnerId) {
     const match = await resolveAccountOrClientMatch("account", resolved.accountName, callerAuth);
     if (match.kind === "match") {
       resolved = { ...resolved, partnerId: match.id, accountName: match.label };
       notes.push(`Using existing account "${match.label}".`);
     } else if (match.kind === "ambiguous") {
-      notes.push(
-        `A few existing accounts look similar: ${match.candidates.join(", ")}. Tell me which one, or say "new" to create "${resolved.accountName}" as a new account.`,
-      );
+      if (channel === "whatsapp") {
+        accountCandidates = match.candidates;
+      } else {
+        notes.push(
+          `A few existing accounts look similar: ${match.candidates.map((c) => c.label).join(", ")}. Tell me which one, or say "new" to create "${resolved.accountName}" as a new account.`,
+        );
+      }
     }
   }
 
@@ -709,12 +748,12 @@ async function resolveDraftLinks(
       notes.push(`Using existing client "${match.label}".`);
     } else if (match.kind === "ambiguous") {
       notes.push(
-        `A few existing clients look similar: ${match.candidates.join(", ")}. Tell me which one, or say "new" to create "${resolved.contactName}" as new.`,
+        `A few existing clients look similar: ${match.candidates.map((c) => c.label).join(", ")}. Tell me which one, or say "new" to create "${resolved.contactName}" as new.`,
       );
     }
   }
 
-  return { draft: resolved, note: notes.length > 0 ? notes.join(" ") : null };
+  return { draft: resolved, note: notes.length > 0 ? notes.join(" ") : null, accountCandidates };
 }
 
 const EMPTY_LIST_RESULTS = {
@@ -761,6 +800,7 @@ export async function runAssistantTurn(
     requiresConfirmation: false,
     draft: null,
     correlationId,
+    accountPicker: null,
     ...EMPTY_LIST_RESULTS,
   };
 
@@ -1174,7 +1214,41 @@ export async function runAssistantTurn(
   }
 
   if (intent.type === "create_deal_draft") {
-    const { draft, note } = await resolveDraftLinks(intent.draft, dropdownAuth);
+    const { draft, note, accountCandidates } = await resolveDraftLinks(
+      intent.draft,
+      dropdownAuth,
+      {
+        partnerId: authContext.profile?.partner_id ?? null,
+        companyName: authContext.profile?.company_name ?? null,
+      },
+      channel ?? "web",
+    );
+
+    if (accountCandidates && accountCandidates.length > 0) {
+      const reply =
+        intent.reply || "A few existing accounts look similar — which one is this deal for?";
+      await log({
+        conversationId,
+        userId,
+        assignmentId,
+        role: "assistant",
+        content: reply,
+        proposedAction: "create_deal_draft",
+        actionPayload: draft,
+        retrievedDealIds: [],
+        confirmed: null,
+        outcome: "draft_incomplete",
+        model: completion.model,
+        correlationId,
+      });
+      return {
+        ...empty,
+        reply,
+        draft,
+        accountPicker: { candidates: accountCandidates },
+      };
+    }
+
     const missing = missingDraftFields(draft);
 
     if (missing.length > 0) {
