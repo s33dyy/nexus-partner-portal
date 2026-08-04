@@ -29,6 +29,8 @@ import {
   toTablePolicyAuthContext,
 } from "@/server/assistant.server";
 import type { FeatureKey } from "@/domain/contracts/features";
+import { WORLD_COUNTRIES, WORLD_CURRENCY_CODES } from "@/domain/contracts/world-geography";
+import { listDropdownSourceValues } from "@/server/dropdown-sources.server";
 import type { AuthContext } from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
 import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
@@ -59,7 +61,9 @@ type CreateDealStep =
   | "product"
   | "quantity"
   | "amount"
-  | "extra"
+  | "currency"
+  | "country"
+  | "notes"
   | "confirm";
 
 type WizardState = {
@@ -83,9 +87,31 @@ const CANCEL_WORDS = new Set(["cancel", "stop", "quit", "exit"]);
 const SKIP_WORDS = new Set(["skip", "none", "no", "n/a"]);
 const ACCOUNT_PICK_PREFIX = "wz_acct_";
 const CONTACT_PICK_PREFIX = "wz_cust_";
-const NEW_ACCOUNT_ID = "wz_new_account";
 const NEW_CONTACT_ID = "wz_new_contact";
 const STAGE_PICK_PREFIX = "wz_stage_";
+const PRODUCT_PICK_PREFIX = "wz_prod_";
+const CURRENCY_PICK_PREFIX = "wz_ccy_";
+const COUNTRY_PICK_PREFIX = "wz_ctry_";
+const COUNTRY_SKIP_ID = "wz_ctry_skip";
+
+// Matches the web Create Deal form's own currency dropdown (LookupCombobox
+// with static DEAL_CURRENCY_OPTIONS = WORLD_CURRENCY_CODES, allowCreate:
+// false) — a closed ISO 4217 list, not free text. Shortlist shown as
+// tappable options (WhatsApp list-picker caps at 10 items); any other valid
+// code can still be typed and is validated against the full list below.
+const COMMON_CURRENCIES = ["USD", "EUR", "GBP", "INR", "AED", "SGD", "AUD", "CAD", "JPY"] as const;
+
+// Matches the web form's country dropdown (also allowCreate: false) — full
+// validation is against WORLD_COUNTRIES; shortlist is just the common cases
+// shown as one tap instead of typing.
+const COMMON_COUNTRIES = ["United States", "United Kingdom", "India", "UAE", "Singapore"] as const;
+
+function findWorldCountryByName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return WORLD_COUNTRIES.find(
+    (c) => c.name.toLowerCase() === normalized || (normalized === "uae" && c.code === "AE"),
+  );
+}
 
 async function getWizardState(conversationId: string): Promise<WizardState | null> {
   const res = await pool.query<{ flow: WizardFlow; step: string; data: Record<string, unknown> }>(
@@ -332,9 +358,6 @@ async function stepCreateDeal(
   };
 
   if (step === "account") {
-    if (input.listId === NEW_ACCOUNT_ID) {
-      return advance("contact", draft, "What's the contact or client name for this deal?");
-    }
     if (input.listId.startsWith(ACCOUNT_PICK_PREFIX)) {
       const partnerId = input.listId.slice(ACCOUNT_PICK_PREFIX.length);
       const partnerRes = await pool.query<{ company_name: string }>(
@@ -374,24 +397,29 @@ async function stepCreateDeal(
         sends: [
           {
             kind: "list",
-            body: `A few existing accounts match "${name}" — pick one, or "New account" to create it.`,
+            body: `A few existing accounts match "${name}" — pick one.`,
             button: "Select",
-            items: [
-              ...match.candidates
-                .slice(0, 9)
-                .map((c) => ({ id: `${ACCOUNT_PICK_PREFIX}${c.id}`, item: c.label.slice(0, 24) })),
-              { id: NEW_ACCOUNT_ID, item: "New account", description: `Create "${name}"` },
-            ],
+            items: match.candidates
+              .slice(0, 10)
+              .map((c) => ({ id: `${ACCOUNT_PICK_PREFIX}${c.id}`, item: c.label.slice(0, 24) })),
           },
         ],
       };
     }
-    const nextDraft = { ...draft, accountName: name };
-    return advance(
-      "contact",
-      nextDraft,
-      `No existing account found — I'll create "${name}" as new. What's the contact or client name for this deal?`,
-    );
+    // Accounts are Partner records — same restriction as the web Create
+    // Deal form's own Account field (LookupCombobox allowCreate={false}):
+    // must pick an existing one, no inline creation from free text. Stay on
+    // this step and let them search again instead of silently creating a
+    // new partner from a WhatsApp reply.
+    return {
+      handled: true,
+      sends: [
+        {
+          kind: "text",
+          body: `No existing account matches "${name}" — try a different search term.`,
+        },
+      ],
+    };
   }
 
   if (step === "contact") {
@@ -458,12 +486,59 @@ async function stepCreateDeal(
   }
 
   if (step === "product") {
-    const product = input.bodyText.trim();
-    if (!product) {
-      return { handled: true, sends: [{ kind: "text", body: "What product is this deal for?" }] };
+    // Matches the web form: Product is always picked from the catalog
+    // (LookupCombobox source="catalog"), never free text — inline catalog
+    // creation there needs pricing/stock/category fields WhatsApp has no
+    // reasonable way to collect, so unlike account/contact this step has no
+    // "create new" path at all, for any role.
+    if (input.listId.startsWith(PRODUCT_PICK_PREFIX)) {
+      const catalogId = input.listId.slice(PRODUCT_PICK_PREFIX.length);
+      const rows = await listDropdownSourceValues({ source: "catalog", catalogKind: "all" });
+      const chosen = rows.find((r) => r.id === catalogId);
+      if (chosen) {
+        const nextDraft = { ...draft, product: chosen.label };
+        return advance("quantity", nextDraft, 'How many units? Reply a number, or "skip" for 1.');
+      }
     }
-    const nextDraft = { ...draft, product };
-    return advance("quantity", nextDraft, 'How many units? Reply a number, or "skip" for 1.');
+    const term = input.bodyText.trim();
+    if (!term) {
+      return {
+        handled: true,
+        sends: [{ kind: "text", body: "What product is this deal for? Type a search term." }],
+      };
+    }
+    const matches = await listDropdownSourceValues({
+      source: "catalog",
+      q: term,
+      catalogKind: "all",
+    });
+    if (matches.length === 0) {
+      return {
+        handled: true,
+        sends: [
+          {
+            kind: "text",
+            body: `No catalog product matches "${term}" — try a different search term.`,
+          },
+        ],
+      };
+    }
+    await setWizardState(conversationId, "create_deal", "product", { draft });
+    return {
+      handled: true,
+      sends: [
+        {
+          kind: "list",
+          body: `Products matching "${term}" — pick one.`,
+          button: "Select",
+          items: matches.slice(0, 10).map((m) => ({
+            id: `${PRODUCT_PICK_PREFIX}${m.id}`,
+            item: m.label.slice(0, 24),
+            ...(m.description ? { description: m.description.slice(0, 72) } : {}),
+          })),
+        },
+      ],
+    };
   }
 
   if (step === "quantity") {
@@ -480,25 +555,110 @@ async function stepCreateDeal(
       quantity = parsed;
     }
     const nextDraft = { ...draft, quantity };
-    return advance("amount", nextDraft, 'What\'s the deal amount? e.g. "25000" or "25000 EUR".');
+    return advance("amount", nextDraft, 'What\'s the deal amount? e.g. "25000".');
   }
 
   if (step === "amount") {
-    const text = input.bodyText.trim();
-    const match = text.match(/^([\d,.]+)\s*([A-Za-z]{3})?$/);
-    if (!match) {
+    const text = input.bodyText.trim().replace(/,/g, "");
+    if (!/^\d+(\.\d+)?$/.test(text)) {
       return {
         handled: true,
-        sends: [{ kind: "text", body: 'Enter an amount, e.g. "25000" or "25000 EUR".' }],
+        sends: [{ kind: "text", body: 'Enter an amount, e.g. "25000".' }],
       };
     }
-    const amount = match[1].replace(/,/g, "");
-    const currencyCode = match[2] ? match[2].toUpperCase() : (draft.currencyCode ?? "USD");
-    const nextDraft = { ...draft, amount, currencyCode };
-    return advance("extra", nextDraft, 'Any notes or country to add? Reply with them, or "skip".');
+    const nextDraft = { ...draft, amount: text };
+    await setWizardState(conversationId, "create_deal", "currency", { draft: nextDraft });
+    return {
+      handled: true,
+      sends: [
+        {
+          kind: "list",
+          body: 'Currency? Tap one, or reply with any 3-letter ISO code (e.g. "CHF"). Defaults to USD.',
+          button: "Select",
+          items: COMMON_CURRENCIES.map((code) => ({
+            id: `${CURRENCY_PICK_PREFIX}${code}`,
+            item: code,
+          })),
+        },
+      ],
+    };
   }
 
-  if (step === "extra") {
+  if (step === "currency") {
+    let currencyCode: string | null = null;
+    if (input.listId.startsWith(CURRENCY_PICK_PREFIX)) {
+      currencyCode = input.listId.slice(CURRENCY_PICK_PREFIX.length);
+    } else {
+      const text = input.bodyText.trim().toUpperCase();
+      if (SKIP_WORDS.has(text.toLowerCase())) {
+        currencyCode = "USD";
+      } else if (WORLD_CURRENCY_CODES.includes(text)) {
+        currencyCode = text;
+      }
+    }
+    if (!currencyCode) {
+      return {
+        handled: true,
+        sends: [
+          {
+            kind: "text",
+            body: 'Not a recognized currency code — reply a valid 3-letter ISO code, e.g. "USD", or "skip".',
+          },
+        ],
+      };
+    }
+    const nextDraft = { ...draft, currencyCode };
+    await setWizardState(conversationId, "create_deal", "country", { draft: nextDraft });
+    return {
+      handled: true,
+      sends: [
+        {
+          kind: "list",
+          body: 'Country? Tap one, reply with a country name, or "skip".',
+          button: "Select",
+          items: [
+            ...COMMON_COUNTRIES.map((name) => ({
+              id: `${COUNTRY_PICK_PREFIX}${name}`,
+              item: name,
+            })),
+            { id: COUNTRY_SKIP_ID, item: "Skip" },
+          ],
+        },
+      ],
+    };
+  }
+
+  if (step === "country") {
+    if (input.listId === COUNTRY_SKIP_ID) {
+      return advance("notes", draft, 'Any notes to add? Reply with them, or "skip".');
+    }
+    let countryName: string | null = null;
+    if (input.listId.startsWith(COUNTRY_PICK_PREFIX)) {
+      countryName = input.listId.slice(COUNTRY_PICK_PREFIX.length);
+    } else {
+      const text = input.bodyText.trim();
+      if (SKIP_WORDS.has(text.toLowerCase())) {
+        return advance("notes", draft, 'Any notes to add? Reply with them, or "skip".');
+      }
+      const found = findWorldCountryByName(text);
+      countryName = found?.name ?? null;
+    }
+    if (!countryName) {
+      return {
+        handled: true,
+        sends: [
+          {
+            kind: "text",
+            body: 'Not a recognized country — reply the country name (e.g. "France"), or "skip".',
+          },
+        ],
+      };
+    }
+    const nextDraft = { ...draft, country: countryName };
+    return advance("notes", nextDraft, 'Any notes to add? Reply with them, or "skip".');
+  }
+
+  if (step === "notes") {
     const text = input.bodyText.trim();
     const nextDraft = SKIP_WORDS.has(text.toLowerCase()) ? draft : { ...draft, notes: text };
     await setWizardState(conversationId, "create_deal", "confirm", { draft: nextDraft });
@@ -508,6 +668,7 @@ async function stepCreateDeal(
       `Product: ${nextDraft.product}`,
       nextDraft.quantity ? `Quantity: ${nextDraft.quantity}` : null,
       `Amount: ${nextDraft.currencyCode ?? "USD"} ${nextDraft.amount}`,
+      nextDraft.country ? `Country: ${nextDraft.country}` : null,
       nextDraft.notes ? `Notes: ${nextDraft.notes}` : null,
     ]
       .filter((l): l is string => Boolean(l))
