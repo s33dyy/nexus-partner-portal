@@ -1842,3 +1842,13 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS assistant_messages_channel_conversation_idx ON assistant_messages (channel, conversation_id);
+
+-- Tiny generic key/value store — first use: caching the Twilio Content API
+-- SIDs for the WhatsApp menu's interactive list-picker/quick-reply
+-- templates, created lazily on first use and reused across restarts
+-- instead of creating a fresh Content resource on every deploy.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

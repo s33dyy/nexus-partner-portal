@@ -56,17 +56,198 @@ export async function checkWhatsappVerification(phoneE164: string, code: string)
     .verificationChecks.create({ to: phoneE164, code });
 }
 
-// Used only for out-of-band sends — the primary inbound-reply path responds
-// to Twilio synchronously via TwiML in handleWhatsappWebhook below.
-export async function sendWhatsappMessage(toE164: string, body: string) {
+function requireWhatsappFrom(): string {
   if (!WHATSAPP_FROM) {
     throw new Error("Twilio WhatsApp sender is not configured (missing TWILIO_WHATSAPP_FROM)");
   }
+  return `whatsapp:${WHATSAPP_FROM}`;
+}
+
+export async function sendWhatsappMessage(toE164: string, body: string) {
   const client = getClient();
   return client.messages.create({
-    from: `whatsapp:${WHATSAPP_FROM}`,
+    from: requireWhatsappFrom(),
     to: `whatsapp:${toE164}`,
     body,
+  });
+}
+
+// ---- Main-menu interactive message (Twilio Content API) -------------------
+//
+// WhatsApp's native tappable list/button UI isn't sendable via plain TwiML
+// or a plain messages.create({body}) — it requires a Content API "Content"
+// resource (a reusable interactive-message definition) referenced by SID.
+// twilio/list-picker and twilio/quick-reply are session-message content
+// types, not marketing/HSM templates, so they don't need WhatsApp business
+// template approval — they can be created and used immediately. Created
+// lazily on first use and cached in app_settings so a redeploy reuses the
+// same Content resource instead of creating a new one every time.
+type MenuItem = { id: string; item: string; description: string; syntheticMessage: string };
+
+const MAIN_MENU_ITEMS: MenuItem[] = [
+  {
+    id: "menu_deals",
+    item: "Deals",
+    description: "View your pipeline",
+    syntheticMessage: "Show my deals",
+  },
+  {
+    id: "menu_partners",
+    item: "Partners",
+    description: "Search partner accounts",
+    syntheticMessage: "Show my partners",
+  },
+  {
+    id: "menu_customers",
+    item: "Customers",
+    description: "Search customer accounts",
+    syntheticMessage: "Show my customers",
+  },
+  {
+    id: "menu_tasks",
+    item: "Tasks",
+    description: "Your open tasks",
+    syntheticMessage: "Show my tasks",
+  },
+  {
+    id: "menu_tickets",
+    item: "Support Tickets",
+    description: "Your support tickets",
+    syntheticMessage: "Show my support tickets",
+  },
+  {
+    id: "menu_learning",
+    item: "Insight Hub",
+    description: "Learning tracks & certifications",
+    syntheticMessage: "Show my learning tracks",
+  },
+  {
+    id: "menu_news",
+    item: "News",
+    description: "LIVEY News feed",
+    syntheticMessage: "Show the LIVEY news feed",
+  },
+  {
+    id: "menu_create_deal",
+    item: "Create a Deal",
+    description: "Start a new deal",
+    syntheticMessage: "I want to create a new deal",
+  },
+];
+
+const MAIN_MENU_TRIGGERS = new Set(["menu", "hi", "hello", "hey", "start"]);
+const MAIN_MENU_BUTTON_PAYLOAD = "main_menu";
+
+async function getAppSetting(key: string): Promise<string | null> {
+  const result = await pool.query<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = $1 LIMIT 1`,
+    [key],
+  );
+  return result.rows[0]?.value ?? null;
+}
+
+async function setAppSetting(key: string, value: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [key, value],
+  );
+}
+
+async function createContent(body: Record<string, unknown>): Promise<string> {
+  const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString("base64");
+  const res = await fetch("https://content.twilio.com/v1/Content", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Twilio Content API create failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as { sid: string };
+  return json.sid;
+}
+
+let menuContentSidPromise: Promise<string> | null = null;
+
+async function ensureMainMenuContentSid(): Promise<string> {
+  if (!menuContentSidPromise) {
+    menuContentSidPromise = (async () => {
+      const cached = await getAppSetting("twilio_menu_content_sid");
+      if (cached) return cached;
+      const sid = await createContent({
+        friendly_name: `livey_whatsapp_main_menu_${Date.now()}`,
+        language: "en",
+        types: {
+          "twilio/list-picker": {
+            body: "Please choose an option from the menu below.",
+            button: "Main Menu",
+            items: MAIN_MENU_ITEMS.map((m) => ({
+              id: m.id,
+              item: m.item,
+              description: m.description,
+            })),
+          },
+        },
+      });
+      await setAppSetting("twilio_menu_content_sid", sid);
+      return sid;
+    })().catch((err) => {
+      menuContentSidPromise = null;
+      throw err;
+    });
+  }
+  return menuContentSidPromise;
+}
+
+let menuChipContentSidPromise: Promise<string> | null = null;
+
+async function ensureMainMenuChipContentSid(): Promise<string> {
+  if (!menuChipContentSidPromise) {
+    menuChipContentSidPromise = (async () => {
+      const cached = await getAppSetting("twilio_menu_chip_content_sid");
+      if (cached) return cached;
+      const sid = await createContent({
+        friendly_name: `livey_whatsapp_main_menu_chip_${Date.now()}`,
+        language: "en",
+        types: {
+          "twilio/quick-reply": {
+            body: "Want anything else?",
+            actions: [{ type: "QUICK_REPLY", title: "Main Menu", id: MAIN_MENU_BUTTON_PAYLOAD }],
+          },
+        },
+      });
+      await setAppSetting("twilio_menu_chip_content_sid", sid);
+      return sid;
+    })().catch((err) => {
+      menuChipContentSidPromise = null;
+      throw err;
+    });
+  }
+  return menuChipContentSidPromise;
+}
+
+async function sendMainMenu(toE164: string): Promise<void> {
+  const contentSid = await ensureMainMenuContentSid();
+  const client = getClient();
+  await client.messages.create({
+    from: requireWhatsappFrom(),
+    to: `whatsapp:${toE164}`,
+    contentSid,
+  });
+}
+
+async function sendMainMenuChip(toE164: string): Promise<void> {
+  const contentSid = await ensureMainMenuChipContentSid();
+  const client = getClient();
+  await client.messages.create({
+    from: requireWhatsappFrom(),
+    to: `whatsapp:${toE164}`,
+    contentSid,
   });
 }
 
@@ -99,6 +280,11 @@ function twiml(message: string): Response {
 const NOT_LINKED_REPLY =
   "This WhatsApp number isn't linked to a Livey account yet. Go to Settings → WhatsApp in the app to connect it.";
 
+const EMPTY_TWIML = new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+  status: 200,
+  headers: { "Content-Type": "text/xml" },
+});
+
 // Wired into src/server.ts as POST /api/integrations/whatsapp/webhook, next
 // to the existing Zoho interceptor block.
 export async function handleWhatsappWebhook(request: Request): Promise<Response> {
@@ -113,8 +299,12 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
   const from = (params.From ?? "").trim();
   const bodyText = (params.Body ?? "").trim();
   const phoneE164 = from.replace(/^whatsapp:/i, "");
+  // Interactive-reply params Twilio adds on top of Body when the user tapped
+  // a list-picker item or a quick-reply button, instead of typing free text.
+  const listId = (params.ListId ?? "").trim();
+  const buttonPayload = (params.ButtonPayload ?? "").trim();
 
-  if (!phoneE164 || !bodyText) {
+  if (!phoneE164) {
     return twiml(NOT_LINKED_REPLY);
   }
 
@@ -127,6 +317,28 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
 
     if (!profileId) {
       return twiml(NOT_LINKED_REPLY);
+    }
+
+    const wantsMenu =
+      buttonPayload === MAIN_MENU_BUTTON_PAYLOAD ||
+      !bodyText ||
+      MAIN_MENU_TRIGGERS.has(bodyText.toLowerCase());
+
+    if (wantsMenu && !listId) {
+      await sendMainMenu(phoneE164);
+      return EMPTY_TWIML;
+    }
+
+    // A tapped list item carries its id in ListId, not free text in Body —
+    // route it to the same synthetic phrasing a typed request would use, so
+    // it goes through the exact same RBAC-gated assistant turn as any other
+    // message (no separate/duplicated logic for menu vs. typed requests).
+    const selectedMenuItem = listId ? MAIN_MENU_ITEMS.find((m) => m.id === listId) : undefined;
+    const effectiveMessage = selectedMenuItem ? selectedMenuItem.syntheticMessage : bodyText;
+
+    if (!effectiveMessage) {
+      await sendMainMenu(phoneE164);
+      return EMPTY_TWIML;
     }
 
     const resolved = await resolveAuthContextForProfile(profileId);
@@ -154,12 +366,20 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
 
     const result = await runAssistantTurn(authContext, {
       conversationId,
-      message: bodyText,
+      message: effectiveMessage,
       history,
       channel: "whatsapp",
     });
 
-    return twiml(result.reply || "Sorry, I couldn't process that.");
+    // Switched from a single synchronous TwiML reply to two async REST
+    // sends — a plain-text reply followed by a "Main Menu" quick-reply chip
+    // (mirrors the always-available menu shortcut seen in bank WhatsApp
+    // bots) — since TwiML can't carry a Content API contentSid.
+    await sendWhatsappMessage(phoneE164, result.reply || "Sorry, I couldn't process that.");
+    await sendMainMenuChip(phoneE164).catch((err) =>
+      console.error("[Twilio webhook] failed to send main-menu chip:", err),
+    );
+    return EMPTY_TWIML;
   } catch (err) {
     console.error("[Twilio webhook] handler failed:", err);
     // Never error back to Twilio for a processing miss — reply plainly and
