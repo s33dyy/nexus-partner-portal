@@ -1852,3 +1852,17 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- WhatsApp guided-menu wizard: tracks which deterministic step a
+-- conversation is on (browsing a record type, or mid-way through the
+-- Create-a-Deal flow) so multi-step flows don't depend on an LLM correctly
+-- re-inferring state from free-text history every turn. One row per active
+-- conversation; deleted when a flow finishes, is cancelled, or the user
+-- returns to the main menu.
+CREATE TABLE IF NOT EXISTS whatsapp_wizard_state (
+  conversation_id TEXT PRIMARY KEY,
+  flow TEXT NOT NULL,
+  step TEXT NOT NULL,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

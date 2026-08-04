@@ -42,7 +42,7 @@ import type { TablePolicyAuthContext } from "@/server/table-policy.server";
 // Start request), but the WhatsApp webhook path builds its authContext from
 // the verified sender's phone number with no request cookie at all, so it
 // must use queryTableWithAuthContext() with this explicit mapping instead.
-function toTablePolicyAuthContext(authContext: AuthContext): TablePolicyAuthContext {
+export function toTablePolicyAuthContext(authContext: AuthContext): TablePolicyAuthContext {
   return {
     userId: authContext.session?.user.id ?? authContext.profile?.id ?? null,
     roles: authContext.roles,
@@ -57,7 +57,7 @@ function toTablePolicyAuthContext(authContext: AuthContext): TablePolicyAuthCont
 // Same rationale as toTablePolicyAuthContext — listDropdownSourceValues()
 // re-derives its caller identity via getAuthContext()/the request cookie
 // unless handed one explicitly, which the session-less WhatsApp path needs.
-function toDropdownCallerAuth(authContext: AuthContext): DropdownCallerAuth | null {
+export function toDropdownCallerAuth(authContext: AuthContext): DropdownCallerAuth | null {
   const userId = authContext.session?.user.id ?? authContext.profile?.id ?? null;
   if (!userId) return null;
   return {
@@ -317,7 +317,7 @@ function matchesQuery(value: string, query: string | null): boolean {
   return value.toLowerCase().includes(query.toLowerCase());
 }
 
-async function fetchScopedDeals(
+export async function fetchScopedDeals(
   filters: {
     stage: string | null;
     status: string | null;
@@ -354,7 +354,7 @@ async function fetchScopedDeals(
   }));
 }
 
-async function fetchScopedPartners(
+export async function fetchScopedPartners(
   searchTerm: string | null,
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
@@ -384,7 +384,7 @@ async function fetchScopedPartners(
     }));
 }
 
-async function fetchScopedCustomers(
+export async function fetchScopedCustomers(
   searchTerm: string | null,
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
@@ -414,7 +414,7 @@ async function fetchScopedCustomers(
     }));
 }
 
-async function fetchScopedTasks(
+export async function fetchScopedTasks(
   searchTerm: string | null,
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
@@ -442,7 +442,7 @@ async function fetchScopedTasks(
     }));
 }
 
-async function fetchScopedTickets(
+export async function fetchScopedTickets(
   searchTerm: string | null,
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
@@ -485,7 +485,7 @@ async function fetchScopedUsers(
   }));
 }
 
-async function fetchScopedLearning(
+export async function fetchScopedLearning(
   searchTerm: string | null,
   userId: string,
   extraFilters: AssistantFilter[],
@@ -531,7 +531,7 @@ async function fetchScopedLearning(
     });
 }
 
-async function fetchScopedNews(
+export async function fetchScopedNews(
   searchTerm: string | null,
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
@@ -564,7 +564,7 @@ async function fetchScopedNews(
     }));
 }
 
-function formatDealsSummary(deals: AssistantDealSummary[]): string {
+export function formatDealsSummary(deals: AssistantDealSummary[]): string {
   if (deals.length === 0) return "No matching deals found in your current scope.";
   return deals
     .map(
@@ -574,21 +574,21 @@ function formatDealsSummary(deals: AssistantDealSummary[]): string {
     .join("\n");
 }
 
-function formatPartnersSummary(partners: AssistantPartnerSummary[]): string {
+export function formatPartnersSummary(partners: AssistantPartnerSummary[]): string {
   if (partners.length === 0) return "No matching partners found in your current scope.";
   return partners
     .map((p) => `• ${p.companyName} — ${p.tier || "no tier"} — ${p.status} — ${p.country}`)
     .join("\n");
 }
 
-function formatCustomersSummary(customers: AssistantCustomerSummary[]): string {
+export function formatCustomersSummary(customers: AssistantCustomerSummary[]): string {
   if (customers.length === 0) return "No matching customers found in your current scope.";
   return customers
     .map((c) => `• ${c.companyName} — ${c.segment || "unsegmented"} — ${c.status} — ${c.region}`)
     .join("\n");
 }
 
-function formatTasksSummary(tasks: AssistantTaskSummary[]): string {
+export function formatTasksSummary(tasks: AssistantTaskSummary[]): string {
   if (tasks.length === 0) return "No matching tasks found in your current scope.";
   return tasks
     .map(
@@ -598,7 +598,7 @@ function formatTasksSummary(tasks: AssistantTaskSummary[]): string {
     .join("\n");
 }
 
-function formatTicketsSummary(tickets: AssistantTicketSummary[]): string {
+export function formatTicketsSummary(tickets: AssistantTicketSummary[]): string {
   if (tickets.length === 0) return "No matching support tickets found in your current scope.";
   return tickets.map((t) => `• ${t.subject} — ${t.status}/${t.priority}`).join("\n");
 }
@@ -608,14 +608,14 @@ function formatUsersSummary(users: AssistantUserSummary[]): string {
   return users.map((u) => `• ${u.fullName}${u.email ? ` — ${u.email}` : ""}`).join("\n");
 }
 
-function formatLearningSummary(tracks: AssistantLearningSummary[]): string {
+export function formatLearningSummary(tracks: AssistantLearningSummary[]): string {
   if (tracks.length === 0) return "No learning tracks available yet.";
   return tracks
     .map((t) => `• ${t.title} — ${t.status.replace(/_/g, " ")} (${t.progressPercent}%)`)
     .join("\n");
 }
 
-function formatNewsSummary(news: AssistantNewsSummary[]): string {
+export function formatNewsSummary(news: AssistantNewsSummary[]): string {
   if (news.length === 0) return "No news posts found.";
   return news.map((n) => `• ${n.title} — ${n.caption} (${n.postedByName})`).join("\n");
 }
@@ -666,7 +666,7 @@ type AccountMatch =
  * literal "search existing records instead of always creating new" behavior:
  * an exact (case-insensitive) name match links the draft to the real
  * Partner/Customer row instead of leaving it as an unlinked free-text name. */
-async function resolveAccountOrClientMatch(
+export async function resolveAccountOrClientMatch(
   source: "account" | "client",
   name: string,
   callerAuth: DropdownCallerAuth | null,
@@ -1327,13 +1327,27 @@ export async function sendAssistantMessage(input: {
   return runAssistantTurn(authContext, { ...input, channel: "web" });
 }
 
+// Web entrypoint — resolves authContext from the request's session cookie,
+// then delegates to confirmDealDraft (shared with the WhatsApp wizard's
+// confirm step, which builds its own session-less authContext the same way
+// runAssistantTurn does).
 export async function confirmAssistantDeal(input: {
   conversationId: string;
   draft: AssistantDealDraft;
 }): Promise<{ reply: string; result: CommandExecutionResult; correlationId: string }> {
-  const correlationId = createCorrelationId();
   const authContext = await getAuthContext();
-  const userId = authContext.session?.user.id ?? null;
+  return confirmDealDraft(authContext, input);
+}
+
+export async function confirmDealDraft(
+  authContext: AuthContext,
+  input: {
+    conversationId: string;
+    draft: AssistantDealDraft;
+  },
+): Promise<{ reply: string; result: CommandExecutionResult; correlationId: string }> {
+  const correlationId = createCorrelationId();
+  const userId = authContext.session?.user.id ?? authContext.profile?.id ?? null;
   const assignmentId = authContext.assignment?.assignmentId ?? null;
 
   const actorResult = resolveDealCommandActor({

@@ -6,6 +6,11 @@ import {
   resolveAuthContextForProfile,
 } from "@/server/livey-service.server";
 import { runAssistantTurn } from "@/server/assistant.server";
+import {
+  clearWizardState,
+  handleWizardTurn,
+  type SendInstruction,
+} from "@/server/whatsapp-wizard.server";
 import type { AssistantChatMessage } from "@/domain/contracts/assistant";
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID ?? "";
@@ -82,56 +87,48 @@ export async function sendWhatsappMessage(toE164: string, body: string) {
 // template approval — they can be created and used immediately. Created
 // lazily on first use and cached in app_settings so a redeploy reuses the
 // same Content resource instead of creating a new one every time.
-type MenuItem = { id: string; item: string; description: string; syntheticMessage: string };
+type MenuItem = { id: string; item: string; description: string };
 
 const MAIN_MENU_ITEMS: MenuItem[] = [
   {
     id: "menu_deals",
     item: "Deals",
     description: "View your pipeline",
-    syntheticMessage: "Show my deals",
   },
   {
     id: "menu_partners",
     item: "Partners",
     description: "Search partner accounts",
-    syntheticMessage: "Show my partners",
   },
   {
     id: "menu_customers",
     item: "Customers",
     description: "Search customer accounts",
-    syntheticMessage: "Show my customers",
   },
   {
     id: "menu_tasks",
     item: "Tasks",
     description: "Your open tasks",
-    syntheticMessage: "Show my tasks",
   },
   {
     id: "menu_tickets",
     item: "Support Tickets",
     description: "Your support tickets",
-    syntheticMessage: "Show my support tickets",
   },
   {
     id: "menu_learning",
     item: "Insight Hub",
     description: "Learning tracks & certifications",
-    syntheticMessage: "Show my learning tracks",
   },
   {
     id: "menu_news",
     item: "News",
     description: "LIVEY News feed",
-    syntheticMessage: "Show the LIVEY news feed",
   },
   {
     id: "menu_create_deal",
     item: "Create a Deal",
     description: "Start a new deal",
-    syntheticMessage: "I want to create a new deal",
   },
 ];
 
@@ -289,6 +286,67 @@ async function sendAccountPicker(
   });
 }
 
+// Turns a whatsapp-wizard.server.ts SendInstruction into an actual Twilio
+// send — the wizard module stays Twilio-agnostic (returns plain data), this
+// is the only place that knows how to realize "list"/"quickReply" as
+// ephemeral Content API resources vs. a plain messages.create({body}).
+async function realizeSend(toE164: string, send: SendInstruction): Promise<void> {
+  if (send.kind === "text") {
+    await sendWhatsappMessage(toE164, send.body);
+    return;
+  }
+  const client = getClient();
+  if (send.kind === "list") {
+    const sid = await createContent({
+      friendly_name: `livey_whatsapp_wizard_list_${Date.now()}`,
+      language: "en",
+      types: {
+        "twilio/list-picker": {
+          body: send.body.slice(0, 1024),
+          button: send.button,
+          items: send.items.map((i) => ({
+            id: i.id,
+            item: i.item.slice(0, 24),
+            ...(i.description ? { description: i.description.slice(0, 72) } : {}),
+          })),
+        },
+      },
+    });
+    await client.messages.create({
+      from: requireWhatsappFrom(),
+      to: `whatsapp:${toE164}`,
+      contentSid: sid,
+    });
+    return;
+  }
+  // quickReply
+  const sid = await createContent({
+    friendly_name: `livey_whatsapp_wizard_qr_${Date.now()}`,
+    language: "en",
+    types: {
+      "twilio/quick-reply": {
+        body: send.body.slice(0, 1024),
+        actions: send.actions.map((a) => ({
+          type: "QUICK_REPLY",
+          title: a.title.slice(0, 20),
+          id: a.id,
+        })),
+      },
+    },
+  });
+  await client.messages.create({
+    from: requireWhatsappFrom(),
+    to: `whatsapp:${toE164}`,
+    contentSid: sid,
+  });
+}
+
+async function realizeSends(toE164: string, sends: SendInstruction[]): Promise<void> {
+  for (const send of sends) {
+    await realizeSend(toE164, send);
+  }
+}
+
 // Mirrors the raw-body-first pattern in handleZohoWebhook (zoho-api.server.ts)
 // — Twilio's request signature is the only auth it gives us on this route,
 // so an invalid/unverifiable signature must fail closed (reject), never be
@@ -362,43 +420,6 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
       !bodyText ||
       MAIN_MENU_TRIGGERS.has(bodyText.toLowerCase());
 
-    if (wantsMenu && !listId) {
-      await sendMainMenu(phoneE164);
-      return EMPTY_TWIML;
-    }
-
-    // A tapped list item carries its id in ListId, not free text in Body —
-    // route it to the same synthetic phrasing a typed request would use, so
-    // it goes through the exact same RBAC-gated assistant turn as any other
-    // message (no separate/duplicated logic for menu vs. typed requests).
-    // An account-picker tap (see accountPicker below) is stateless: the
-    // partner id is embedded directly in the list item's own id
-    // ("acct_<partnerId>"), so the real company name can be looked up fresh
-    // here without needing to remember anything from when the picker was
-    // built — the resulting synthetic message re-enters the create_deal_draft
-    // flow exactly as if the user had typed the exact account name, which
-    // resolveAccountOrClientMatch then matches unambiguously.
-    let effectiveMessage: string;
-    if (listId.startsWith(ACCOUNT_PICKER_ID_PREFIX)) {
-      const partnerId = listId.slice(ACCOUNT_PICKER_ID_PREFIX.length);
-      const partnerRes = await pool.query<{ company_name: string }>(
-        `SELECT company_name FROM partners WHERE id = $1 LIMIT 1`,
-        [partnerId],
-      );
-      const companyName = partnerRes.rows[0]?.company_name;
-      effectiveMessage = companyName
-        ? `Use the partner account "${companyName}" for this deal.`
-        : bodyText;
-    } else {
-      const selectedMenuItem = listId ? MAIN_MENU_ITEMS.find((m) => m.id === listId) : undefined;
-      effectiveMessage = selectedMenuItem ? selectedMenuItem.syntheticMessage : bodyText;
-    }
-
-    if (!effectiveMessage) {
-      await sendMainMenu(phoneE164);
-      return EMPTY_TWIML;
-    }
-
     const resolved = await resolveAuthContextForProfile(profileId);
     const authContext = {
       session: null,
@@ -407,17 +428,48 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
       assignment: resolved.assignment,
       activeContext: resolved.activeContext,
     };
-    // TEMP DEBUG — remove once the partner-scoping investigation is done.
-    console.log("[Twilio webhook] debug authContext", {
-      partnerId: resolved.profile?.partner_id ?? null,
-      companyName: resolved.profile?.company_name ?? null,
-      roles: resolved.roles,
-      assignmentRoleKey: resolved.assignment?.roleKey ?? null,
-      effectiveMessage,
-    });
-
     const conversationId = `whatsapp:${phoneE164}`;
 
+    if (wantsMenu && !listId) {
+      await clearWizardState(conversationId);
+      await sendMainMenu(phoneE164);
+      return EMPTY_TWIML;
+    }
+
+    // Deterministic, LLM-free path first — a tapped menu item or an
+    // in-progress guided flow (Create a Deal, browse sub-menus) is handled
+    // entirely by whatsapp-wizard.server.ts's own step state, never by
+    // asking a model to re-infer "what step are we on" from history.
+    const wizardResult = await handleWizardTurn({
+      conversationId,
+      authContext,
+      listId,
+      buttonPayload,
+      bodyText,
+    });
+
+    if (wizardResult.handled) {
+      // No trailing "Main Menu" chip here, unlike the LLM fallback below —
+      // every wizard step already ends in its own actionable prompt (a
+      // question to answer, or a list/quick-reply to tap), and stacking a
+      // "Want anything else?" chip after e.g. "What's the account name?"
+      // reads as if the flow just ended. Typing "menu" or tapping the main
+      // menu's own quick-reply chip (sent after non-wizard replies) still
+      // escapes a flow at any point via the wantsMenu check above.
+      await realizeSends(phoneE164, wizardResult.sends);
+      return EMPTY_TWIML;
+    }
+
+    // Not a wizard flow — a tapped list item whose id nothing above claimed
+    // has no free-text meaning to fall back to.
+    if (listId) {
+      await sendMainMenu(phoneE164);
+      return EMPTY_TWIML;
+    }
+
+    // Free-text fallback: the original LLM-driven Assistant, unchanged —
+    // still handles arbitrary questions, and free-typed (not tapped)
+    // "create a deal" requests via its own create_deal_draft intent path.
     const historyRes = await pool.query<{ role: "user" | "assistant"; content: string }>(
       `SELECT role, content FROM assistant_messages
        WHERE channel = 'whatsapp' AND conversation_id = $1
@@ -432,7 +484,7 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
 
     const result = await runAssistantTurn(authContext, {
       conversationId,
-      message: effectiveMessage,
+      message: bodyText,
       history,
       channel: "whatsapp",
     });
