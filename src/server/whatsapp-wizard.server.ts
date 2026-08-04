@@ -30,7 +30,10 @@ import {
 } from "@/server/assistant.server";
 import type { FeatureKey } from "@/domain/contracts/features";
 import { WORLD_COUNTRIES, WORLD_CURRENCY_CODES } from "@/domain/contracts/world-geography";
-import { listDropdownSourceValues } from "@/server/dropdown-sources.server";
+import {
+  listDropdownSourceValues,
+  type DropdownCallerAuth,
+} from "@/server/dropdown-sources.server";
 import type { AuthContext } from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
 import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
@@ -111,6 +114,86 @@ function findWorldCountryByName(name: string) {
   return WORLD_COUNTRIES.find(
     (c) => c.name.toLowerCase() === normalized || (normalized === "uae" && c.code === "AE"),
   );
+}
+
+// Account/contact/product steps show a browseable menu up front — not just
+// a "type a search term" prompt — so a caller who doesn't already know the
+// exact name can still tap through instead of guessing at free text (this
+// is what a live tester hit: guessing account names one at a time got "no
+// match" every time with no way to just see what exists). Reuses the exact
+// same listDropdownSourceValues source each field's search step already
+// searches, so a tapped id here round-trips through the same lookup query
+// the search-result taps use.
+async function buildPickerItems(
+  query: Parameters<typeof listDropdownSourceValues>[0],
+  idPrefix: string,
+  limit: number,
+): Promise<Array<{ id: string; item: string; description?: string }>> {
+  const rows = await listDropdownSourceValues(query);
+  return rows.slice(0, limit).map((r) => ({
+    id: `${idPrefix}${r.id}`,
+    item: r.label.slice(0, 24),
+    ...(r.description ? { description: r.description.slice(0, 72) } : {}),
+  }));
+}
+
+async function withAccountPicker(
+  intro: string,
+  callerAuth: DropdownCallerAuth | null,
+): Promise<SendInstruction[]> {
+  const items = await buildPickerItems(
+    { source: "account", callerAuth: callerAuth ?? undefined },
+    ACCOUNT_PICK_PREFIX,
+    10,
+  );
+  const sends: SendInstruction[] = [{ kind: "text", body: intro }];
+  if (items.length > 0) {
+    sends.push({
+      kind: "list",
+      body: "Existing accounts — tap one, or reply with a name to search for another.",
+      button: "Select",
+      items,
+    });
+  }
+  return sends;
+}
+
+async function withContactPicker(
+  intro: string,
+  callerAuth: DropdownCallerAuth | null,
+): Promise<SendInstruction[]> {
+  const items = await buildPickerItems(
+    { source: "client", callerAuth: callerAuth ?? undefined },
+    CONTACT_PICK_PREFIX,
+    9,
+  );
+  return [
+    { kind: "text", body: intro },
+    {
+      kind: "list",
+      body: "Existing clients — tap one, reply with a name to search for another, or create a new one.",
+      button: "Select",
+      items: [...items, { id: NEW_CONTACT_ID, item: "New client" }],
+    },
+  ];
+}
+
+async function withProductPicker(intro: string): Promise<SendInstruction[]> {
+  const items = await buildPickerItems(
+    { source: "catalog", catalogKind: "all" },
+    PRODUCT_PICK_PREFIX,
+    10,
+  );
+  const sends: SendInstruction[] = [{ kind: "text", body: intro }];
+  if (items.length > 0) {
+    sends.push({
+      kind: "list",
+      body: "Catalog products — tap one, or reply with a search term for another.",
+      button: "Select",
+      items,
+    });
+  }
+  return sends;
 }
 
 async function getWizardState(conversationId: string): Promise<WizardState | null> {
@@ -312,6 +395,7 @@ async function startCreateDeal(
 
   const scope = isPartnerScoped(input.authContext);
   const draft: AssistantDealDraft = { ...EMPTY_ASSISTANT_DEAL_DRAFT };
+  const dropdownAuth = toDropdownCallerAuth(input.authContext);
 
   if (scope.partnerId) {
     draft.partnerId = scope.partnerId;
@@ -321,12 +405,10 @@ async function startCreateDeal(
     });
     return {
       handled: true,
-      sends: [
-        {
-          kind: "text",
-          body: `Using your account, ${scope.companyName}. What's the contact or client name for this deal?`,
-        },
-      ],
+      sends: await withContactPicker(
+        `Using your account, ${scope.companyName}. What's the contact or client name for this deal?`,
+        dropdownAuth,
+      ),
     };
   }
 
@@ -335,7 +417,10 @@ async function startCreateDeal(
   });
   return {
     handled: true,
-    sends: [{ kind: "text", body: "What's the account or company name for this deal?" }],
+    sends: await withAccountPicker(
+      "What's the account or company name for this deal?",
+      dropdownAuth,
+    ),
   };
 }
 
@@ -357,6 +442,15 @@ async function stepCreateDeal(
     return { handled: true, sends: [{ kind: "text", body: prompt } as SendInstruction] };
   };
 
+  const advanceWithSends = async (
+    nextStep: CreateDealStep,
+    nextDraft: AssistantDealDraft,
+    sends: SendInstruction[],
+  ) => {
+    await setWizardState(conversationId, "create_deal", nextStep, { draft: nextDraft });
+    return { handled: true, sends };
+  };
+
   if (step === "account") {
     if (input.listId.startsWith(ACCOUNT_PICK_PREFIX)) {
       const partnerId = input.listId.slice(ACCOUNT_PICK_PREFIX.length);
@@ -367,10 +461,13 @@ async function stepCreateDeal(
       const companyName = partnerRes.rows[0]?.company_name;
       if (companyName) {
         const nextDraft = { ...draft, partnerId, accountName: companyName };
-        return advance(
+        return advanceWithSends(
           "contact",
           nextDraft,
-          `Using account "${companyName}". What's the contact or client name for this deal?`,
+          await withContactPicker(
+            `Using account "${companyName}". What's the contact or client name for this deal?`,
+            dropdownAuth,
+          ),
         );
       }
     }
@@ -378,16 +475,22 @@ async function stepCreateDeal(
     if (!name) {
       return {
         handled: true,
-        sends: [{ kind: "text", body: "What's the account or company name for this deal?" }],
+        sends: await withAccountPicker(
+          "What's the account or company name for this deal?",
+          dropdownAuth,
+        ),
       };
     }
     const match = await resolveAccountOrClientMatch("account", name, dropdownAuth);
     if (match.kind === "match") {
       const nextDraft = { ...draft, partnerId: match.id, accountName: match.label };
-      return advance(
+      return advanceWithSends(
         "contact",
         nextDraft,
-        `Using existing account "${match.label}". What's the contact or client name for this deal?`,
+        await withContactPicker(
+          `Using existing account "${match.label}". What's the contact or client name for this deal?`,
+          dropdownAuth,
+        ),
       );
     }
     if (match.kind === "ambiguous") {
@@ -410,21 +513,24 @@ async function stepCreateDeal(
     // Deal form's own Account field (LookupCombobox allowCreate={false}):
     // must pick an existing one, no inline creation from free text. Stay on
     // this step and let them search again instead of silently creating a
-    // new partner from a WhatsApp reply.
+    // new partner from a WhatsApp reply — but still show the full browse
+    // list again so a bad guess doesn't dead-end into more guessing.
     return {
       handled: true,
-      sends: [
-        {
-          kind: "text",
-          body: `No existing account matches "${name}" — try a different search term.`,
-        },
-      ],
+      sends: await withAccountPicker(
+        `No existing account matches "${name}" — pick one below, or try a different search term.`,
+        dropdownAuth,
+      ),
     };
   }
 
   if (step === "contact") {
     if (input.listId === NEW_CONTACT_ID) {
-      return advance("product", draft, "What product is this deal for?");
+      return advanceWithSends(
+        "product",
+        draft,
+        await withProductPicker("What product is this deal for?"),
+      );
     }
     if (input.listId.startsWith(CONTACT_PICK_PREFIX)) {
       const customerId = input.listId.slice(CONTACT_PICK_PREFIX.length);
@@ -435,10 +541,10 @@ async function stepCreateDeal(
       const companyName = custRes.rows[0]?.company_name;
       if (companyName) {
         const nextDraft = { ...draft, customerId, contactName: companyName };
-        return advance(
+        return advanceWithSends(
           "product",
           nextDraft,
-          `Using client "${companyName}". What product is this deal for?`,
+          await withProductPicker(`Using client "${companyName}". What product is this deal for?`),
         );
       }
     }
@@ -446,16 +552,21 @@ async function stepCreateDeal(
     if (!name) {
       return {
         handled: true,
-        sends: [{ kind: "text", body: "What's the contact or client name for this deal?" }],
+        sends: await withContactPicker(
+          "What's the contact or client name for this deal?",
+          dropdownAuth,
+        ),
       };
     }
     const match = await resolveAccountOrClientMatch("client", name, dropdownAuth);
     if (match.kind === "match") {
       const nextDraft = { ...draft, customerId: match.id, contactName: match.label };
-      return advance(
+      return advanceWithSends(
         "product",
         nextDraft,
-        `Using existing client "${match.label}". What product is this deal for?`,
+        await withProductPicker(
+          `Using existing client "${match.label}". What product is this deal for?`,
+        ),
       );
     }
     if (match.kind === "ambiguous") {
@@ -478,10 +589,12 @@ async function stepCreateDeal(
       };
     }
     const nextDraft = { ...draft, contactName: name };
-    return advance(
+    return advanceWithSends(
       "product",
       nextDraft,
-      `No existing client found — I'll use "${name}" as new. What product is this deal for?`,
+      await withProductPicker(
+        `No existing client found — I'll use "${name}" as new. What product is this deal for?`,
+      ),
     );
   }
 
@@ -504,7 +617,7 @@ async function stepCreateDeal(
     if (!term) {
       return {
         handled: true,
-        sends: [{ kind: "text", body: "What product is this deal for? Type a search term." }],
+        sends: await withProductPicker("What product is this deal for?"),
       };
     }
     const matches = await listDropdownSourceValues({
