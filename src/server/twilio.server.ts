@@ -376,10 +376,17 @@ function twiml(message: string): Response {
 const NOT_LINKED_REPLY =
   "This WhatsApp number isn't linked to a Livey account yet. Go to Settings → WhatsApp in the app to connect it.";
 
-const EMPTY_TWIML = new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
-  status: 200,
-  headers: { "Content-Type": "text/xml" },
-});
+// A function, not a shared const Response — server.ts's attachCorrelationHeader
+// wraps every response via `new Response(response.body, ...)`, which reads
+// (and locks) the body stream. A single reused Response instance across
+// requests throws "Response body object should not be disturbed or locked"
+// on its second use, so every call site needs its own fresh instance.
+function emptyTwiml(): Response {
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+    status: 200,
+    headers: { "Content-Type": "text/xml" },
+  });
+}
 
 // Wired into src/server.ts as POST /api/integrations/whatsapp/webhook, next
 // to the existing Zoho interceptor block.
@@ -433,7 +440,7 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
     if (wantsMenu && !listId) {
       await clearWizardState(conversationId);
       await sendMainMenu(phoneE164);
-      return EMPTY_TWIML;
+      return emptyTwiml();
     }
 
     // Deterministic, LLM-free path first — a tapped menu item or an
@@ -457,14 +464,14 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
       // menu's own quick-reply chip (sent after non-wizard replies) still
       // escapes a flow at any point via the wantsMenu check above.
       await realizeSends(phoneE164, wizardResult.sends);
-      return EMPTY_TWIML;
+      return emptyTwiml();
     }
 
     // Not a wizard flow — a tapped list item whose id nothing above claimed
     // has no free-text meaning to fall back to.
     if (listId) {
       await sendMainMenu(phoneE164);
-      return EMPTY_TWIML;
+      return emptyTwiml();
     }
 
     // Free-text fallback: the original LLM-driven Assistant, unchanged —
@@ -506,7 +513,7 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
     await sendMainMenuChip(phoneE164).catch((err) =>
       console.error("[Twilio webhook] failed to send main-menu chip:", err),
     );
-    return EMPTY_TWIML;
+    return emptyTwiml();
   } catch (err) {
     console.error("[Twilio webhook] handler failed:", err);
     // Never error back to Twilio for a processing miss — reply plainly and
