@@ -400,12 +400,28 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
   }
 
   const from = (params.From ?? "").trim();
-  const bodyText = (params.Body ?? "").trim();
   const phoneE164 = from.replace(/^whatsapp:/i, "");
   // Interactive-reply params Twilio adds on top of Body when the user tapped
   // a list-picker item or a quick-reply button, instead of typing free text.
-  const listId = (params.ListId ?? "").trim();
-  const buttonPayload = (params.ButtonPayload ?? "").trim();
+  let listId = (params.ListId ?? "").trim();
+  let buttonPayload = (params.ButtonPayload ?? "").trim();
+  let bodyText = (params.Body ?? "").trim();
+  // Defensive fallback: observed live, tapping an older/no-longer-"live"
+  // interactive message can arrive with ListId/ButtonPayload empty and the
+  // raw internal id (e.g. "menu_create_deal") in Body instead — which, left
+  // unhandled, gets misread as if the user had typed that literal string as
+  // a search term. A real typed message will essentially never coincidentally
+  // match one of our own internally-generated id shapes, so reclassify it
+  // instead of treating it as free text.
+  if (!listId && !buttonPayload && bodyText) {
+    if (/^(menu_|wz_)/.test(bodyText)) {
+      listId = bodyText;
+      bodyText = "";
+    } else if (bodyText === MAIN_MENU_BUTTON_PAYLOAD || /^wizard_/.test(bodyText)) {
+      buttonPayload = bodyText;
+      bodyText = "";
+    }
+  }
 
   if (!phoneE164) {
     return twiml(NOT_LINKED_REPLY);

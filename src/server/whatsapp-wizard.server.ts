@@ -137,6 +137,12 @@ async function buildPickerItems(
   }));
 }
 
+// Each of these folds the question into the list-picker's own body instead
+// of sending a separate leading text message — one WhatsApp send per step
+// instead of two. Beyond the UX win (fewer separate bubbles), Twilio's
+// trial/sandbox account has a hard daily message cap, so halving send count
+// directly doubles how many wizard steps fit in a day of testing.
+
 async function withAccountPicker(
   intro: string,
   callerAuth: DropdownCallerAuth | null,
@@ -146,16 +152,17 @@ async function withAccountPicker(
     ACCOUNT_PICK_PREFIX,
     10,
   );
-  const sends: SendInstruction[] = [{ kind: "text", body: intro }];
-  if (items.length > 0) {
-    sends.push({
+  if (items.length === 0) {
+    return [{ kind: "text", body: intro }];
+  }
+  return [
+    {
       kind: "list",
-      body: "Existing accounts — tap one, or reply with a name to search for another.",
+      body: `${intro} Tap an existing account below, or reply with a name to search for another.`,
       button: "Select",
       items,
-    });
-  }
-  return sends;
+    },
+  ];
 }
 
 async function withContactPicker(
@@ -168,10 +175,9 @@ async function withContactPicker(
     9,
   );
   return [
-    { kind: "text", body: intro },
     {
       kind: "list",
-      body: "Existing clients — tap one, reply with a name to search for another, or create a new one.",
+      body: `${intro} Tap an existing client below, reply with a name to search for another, or create a new one.`,
       button: "Select",
       items: [...items, { id: NEW_CONTACT_ID, item: "New client" }],
     },
@@ -184,16 +190,17 @@ async function withProductPicker(intro: string): Promise<SendInstruction[]> {
     PRODUCT_PICK_PREFIX,
     10,
   );
-  const sends: SendInstruction[] = [{ kind: "text", body: intro }];
-  if (items.length > 0) {
-    sends.push({
+  if (items.length === 0) {
+    return [{ kind: "text", body: intro }];
+  }
+  return [
+    {
       kind: "list",
-      body: "Catalog products — tap one, or reply with a search term for another.",
+      body: `${intro} Tap a catalog product below, or reply with a search term for another.`,
       button: "Select",
       items,
-    });
-  }
-  return sends;
+    },
+  ];
 }
 
 async function getWizardState(conversationId: string): Promise<WizardState | null> {
@@ -247,10 +254,18 @@ export async function handleWizardTurn(
     return { handled: true, sends: [{ kind: "text", body: "Cancelled." }] };
   }
 
+  // A menu tap always (re)starts its flow, even if state already exists —
+  // e.g. re-tapping an older still-visible "Create a Deal" list item after
+  // abandoning (not cancelling) a previous attempt mid-flow. Without this,
+  // that tap's id fell through into whatever step the stale state left
+  // behind and got misread as if it were typed free text for that step.
+  const menuFlow = input.listId ? MENU_ID_TO_FLOW[input.listId] : undefined;
+  if (menuFlow) {
+    return startFlow(menuFlow, input);
+  }
+
   if (!state) {
-    const flow = input.listId ? MENU_ID_TO_FLOW[input.listId] : undefined;
-    if (!flow) return { handled: false, sends: [] };
-    return startFlow(flow, input);
+    return { handled: false, sends: [] };
   }
 
   if (state.flow === "create_deal") {
