@@ -407,6 +407,14 @@ export async function handleWhatsappWebhook(request: Request): Promise<Response>
       assignment: resolved.assignment,
       activeContext: resolved.activeContext,
     };
+    // TEMP DEBUG — remove once the partner-scoping investigation is done.
+    console.log("[Twilio webhook] debug authContext", {
+      partnerId: resolved.profile?.partner_id ?? null,
+      companyName: resolved.profile?.company_name ?? null,
+      roles: resolved.roles,
+      assignmentRoleKey: resolved.assignment?.roleKey ?? null,
+      effectiveMessage,
+    });
 
     const conversationId = `whatsapp:${phoneE164}`;
 
