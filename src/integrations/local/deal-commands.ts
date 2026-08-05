@@ -1,7 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
-import type { CreateDealInput } from "@/server/deal-commands.server";
+import type {
+  CreateDealInput,
+  DealRegistrationDecision,
+  DealWonPoChoice,
+} from "@/server/deal-commands.server";
 import type { DealStage } from "@/lib/portal-records";
 
 async function resolveActorOrDenial() {
@@ -55,7 +59,15 @@ const moveDealStageBackwardFn = createServerFn({ method: "POST" })
   });
 
 const markDealWonFn = createServerFn({ method: "POST" })
-  .validator((input: { dealId: string; expectedVersion: number; reason?: string | null }) => input)
+  .validator(
+    (input: {
+      dealId: string;
+      expectedVersion: number;
+      reason?: string | null;
+      outcomeDate?: string | null;
+      poChoice?: DealWonPoChoice | null;
+    }) => input,
+  )
   .handler(async ({ data }): Promise<CommandExecutionResult> => {
     const actorResult = await resolveActorOrDenial();
     if (!actorResult.ok) return actorDenialResult(actorResult.failure);
@@ -65,6 +77,8 @@ const markDealWonFn = createServerFn({ method: "POST" })
       dealId: data.dealId,
       expectedVersion: data.expectedVersion,
       reason: data.reason ?? null,
+      outcomeDate: data.outcomeDate ?? null,
+      poChoice: data.poChoice ?? null,
     });
   });
 
@@ -78,7 +92,7 @@ const createDealFn = createServerFn({ method: "POST" })
   });
 
 const markDealLostFn = createServerFn({ method: "POST" })
-  .validator((input: { dealId: string; expectedVersion: number; reason?: string | null }) => input)
+  .validator((input: { dealId: string; expectedVersion: number; reason: string }) => input)
   .handler(async ({ data }): Promise<CommandExecutionResult> => {
     const actorResult = await resolveActorOrDenial();
     if (!actorResult.ok) return actorDenialResult(actorResult.failure);
@@ -87,7 +101,7 @@ const markDealLostFn = createServerFn({ method: "POST" })
       actor: actorResult.actor,
       dealId: data.dealId,
       expectedVersion: data.expectedVersion,
-      reason: data.reason ?? null,
+      reason: data.reason,
     });
   });
 
@@ -116,6 +130,8 @@ export async function markDealWon(input: {
   dealId: string;
   expectedVersion: number;
   reason?: string | null;
+  outcomeDate?: string | null;
+  poChoice?: DealWonPoChoice | null;
 }): Promise<CommandExecutionResult> {
   return markDealWonFn({ data: input });
 }
@@ -123,7 +139,7 @@ export async function markDealWon(input: {
 export async function markDealLost(input: {
   dealId: string;
   expectedVersion: number;
-  reason?: string | null;
+  reason: string;
 }): Promise<CommandExecutionResult> {
   return markDealLostFn({ data: input });
 }
@@ -137,6 +153,37 @@ const submitDealForRegistrationFn = createServerFn({ method: "POST" })
     return submitDealForRegistration({ actor: actorResult.actor, data });
   });
 
-export async function submitDealForRegistration(input: { dealId: string }): Promise<CommandExecutionResult> {
+export async function submitDealForRegistration(input: {
+  dealId: string;
+}): Promise<CommandExecutionResult> {
   return submitDealForRegistrationFn({ data: input });
+}
+
+const reviewDealRegistrationFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      dealId: string;
+      expectedVersion: number;
+      decision: DealRegistrationDecision;
+      reason?: string | null;
+    }) => input,
+  )
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { reviewDealRegistration } = await import("@/server/deal-commands.server");
+    return reviewDealRegistration({
+      actor: actorResult.actor,
+      expectedVersion: data.expectedVersion,
+      data: { dealId: data.dealId, decision: data.decision, reason: data.reason ?? null },
+    });
+  });
+
+export async function reviewDealRegistration(input: {
+  dealId: string;
+  expectedVersion: number;
+  decision: DealRegistrationDecision;
+  reason?: string | null;
+}): Promise<CommandExecutionResult> {
+  return reviewDealRegistrationFn({ data: input });
 }

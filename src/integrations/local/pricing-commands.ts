@@ -1,6 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
-import type { AddDealLineItemInput, UpdateDealLineItemInput, RemoveDealLineItemInput, FreezePricingRevisionInput } from "@/server/pricing-commands.server";
+import type {
+  AddDealLineItemInput,
+  UpdateDealLineItemInput,
+  RemoveDealLineItemInput,
+  FreezePricingRevisionInput,
+  RequestDiscountInput,
+  ApproveDiscountInput,
+} from "@/server/pricing-commands.server";
 
 async function resolveActorOrDenial() {
   const { getAuthContext } = await import("@/server/livey-service.server");
@@ -56,15 +63,51 @@ const freezePricingRevisionFn = createServerFn({ method: "POST" })
     return freezePricingRevision({ actor: actorResult.actor, data });
   });
 
-export async function addDealLineItem(input: AddDealLineItemInput): Promise<CommandExecutionResult> {
+const requestDiscountFn = createServerFn({ method: "POST" })
+  .validator((input: RequestDiscountInput) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { requestDiscount } = await import("@/server/pricing-commands.server");
+    return requestDiscount({ actor: actorResult.actor, data });
+  });
+
+const approveDiscountFn = createServerFn({ method: "POST" })
+  .validator((input: ApproveDiscountInput) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { approveDiscount } = await import("@/server/pricing-commands.server");
+    return approveDiscount({ actor: actorResult.actor, data });
+  });
+
+export async function addDealLineItem(
+  input: AddDealLineItemInput,
+): Promise<CommandExecutionResult> {
   return addDealLineItemFn({ data: input });
 }
-export async function updateDealLineItem(input: UpdateDealLineItemInput): Promise<CommandExecutionResult> {
+export async function updateDealLineItem(
+  input: UpdateDealLineItemInput,
+): Promise<CommandExecutionResult> {
   return updateDealLineItemFn({ data: input });
 }
-export async function removeDealLineItem(input: RemoveDealLineItemInput): Promise<CommandExecutionResult> {
+export async function removeDealLineItem(
+  input: RemoveDealLineItemInput,
+): Promise<CommandExecutionResult> {
   return removeDealLineItemFn({ data: input });
 }
-export async function freezePricingRevision(input: FreezePricingRevisionInput): Promise<CommandExecutionResult> {
+export async function freezePricingRevision(
+  input: FreezePricingRevisionInput,
+): Promise<CommandExecutionResult> {
   return freezePricingRevisionFn({ data: input });
+}
+export async function requestDiscount(
+  input: RequestDiscountInput,
+): Promise<CommandExecutionResult> {
+  return requestDiscountFn({ data: input });
+}
+export async function approveDiscount(
+  input: ApproveDiscountInput,
+): Promise<CommandExecutionResult> {
+  return approveDiscountFn({ data: input });
 }

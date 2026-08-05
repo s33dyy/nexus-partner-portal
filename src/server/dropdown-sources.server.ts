@@ -305,6 +305,95 @@ export async function listDropdownSourceValues(input: {
   return result.rows.map((row) => toOption(row, input.source));
 }
 
+export type LineItemCatalogOption = {
+  id: string;
+  label: string;
+  sku: string | null;
+  msrpUsd: number | null;
+  ptpUsd: number | null;
+  dtpUsd: number | null;
+  source: "governed" | "catalog";
+};
+
+function parseMoneyText(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const numeric = Number.parseFloat(String(value).replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+// §9f/§18c (Deals Phase 3): the new "Add line item" UI (deal-line-items.tsx)
+// needs product+price options. Prefers the governed products/
+// product_variants/product_skus tables (§18.10's canonical Catalogue/
+// Pricing domain — proper NUMERIC(18,4) money, not free text) when they
+// have any active rows, falling back to the legacy portal_catalog_items
+// duplicate when they don't. Per this file's own schema.sql comment, every
+// one of those governed tables has zero rows on every environment today, so
+// in practice this always falls back right now — but the preference is
+// real and takes effect the moment the governed tables are ever populated,
+// without any code change here. Deliberately bounded: this does not write
+// to or backfill the governed tables, and does not change any other reader
+// of portal_catalog_items (admin.catalog.tsx, the generic "catalog"
+// dropdown source above, exports) — see current gaps.md §18c for exactly
+// what remains duplicated.
+export async function listLineItemCatalogOptions(input: {
+  q?: string;
+}): Promise<LineItemCatalogOption[]> {
+  const term = normalizeTerm(input.q);
+  const search = term ? likePattern(term) : "";
+
+  const governedCheck = await pool.query(
+    `SELECT 1 FROM product_skus WHERE status = 'active' LIMIT 1`,
+  );
+  if (governedCheck.rows.length > 0) {
+    const values: unknown[] = [];
+    let sql = `
+      SELECT ps.id, ps.sku_code, ps.msrp_amount, ps.partner_transfer_amount,
+             ps.discounted_transfer_amount, p.product_name, pv.variant_name
+      FROM product_skus ps
+      JOIN product_variants pv ON pv.id = ps.product_variant_id
+      JOIN products p ON p.id = pv.product_id
+      WHERE ps.status = 'active' AND pv.status = 'active' AND p.status = 'active'`;
+    if (term) {
+      values.push(search, search, search);
+      sql += ` AND (ps.sku_code ILIKE $1 OR p.product_name ILIKE $2 OR pv.variant_name ILIKE $3)`;
+    }
+    sql += ` ORDER BY p.product_name ASC, pv.variant_name ASC LIMIT 100`;
+    const result = await pool.query(sql, values);
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      label: `${row.product_name} — ${row.variant_name}`,
+      sku: row.sku_code ? String(row.sku_code) : null,
+      msrpUsd: row.msrp_amount == null ? null : Number(row.msrp_amount),
+      ptpUsd: row.partner_transfer_amount == null ? null : Number(row.partner_transfer_amount),
+      dtpUsd:
+        row.discounted_transfer_amount == null ? null : Number(row.discounted_transfer_amount),
+      source: "governed" as const,
+    }));
+  }
+
+  const columns = await getPortalCatalogItemColumns();
+  const hasListPrice = columns.has("list_price");
+  const fallbackValues: unknown[] = [];
+  let fallbackSql = `SELECT id, sku, product_name${hasListPrice ? ", list_price" : ""} FROM portal_catalog_items`;
+  if (term) {
+    fallbackValues.push(search, search);
+    fallbackSql += ` WHERE (sku ILIKE $1 OR product_name ILIKE $2)`;
+  }
+  fallbackSql += ` ORDER BY updated_at DESC, product_name ASC LIMIT 100`;
+  const fallbackResult = await pool.query(fallbackSql, fallbackValues);
+  return fallbackResult.rows.map((row) => ({
+    id: String(row.id ?? ""),
+    label: String(row.product_name ?? ""),
+    sku: row.sku ? String(row.sku) : null,
+    // list_price/margin are TEXT (§18c) — parsed defensively; the legacy
+    // table has no PTP/DTP equivalent, so those stay null for manual entry.
+    msrpUsd: hasListPrice ? parseMoneyText(row.list_price as string | null) : null,
+    ptpUsd: null,
+    dtpUsd: null,
+    source: "catalog" as const,
+  }));
+}
+
 export async function createCatalogItemFromDropdown(input: {
   product_name: string;
   sku?: string;

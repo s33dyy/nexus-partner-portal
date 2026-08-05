@@ -131,6 +131,12 @@ const TABLE_FEATURE_MAP: Record<string, FeatureKey> = {
   portal_deals: "deals",
   portal_deal_collaborators: "deals",
   deal_line_items: "deals",
+  // 9h/§9.12: discount_requests reads (used by the new "Request discount"
+  // UI to list a deal's pending/decided requests) get the same linked-deal
+  // scoping as deal_line_items below — writes go through the dedicated
+  // requestDiscount/approveDiscount commands (pricing-commands.server.ts),
+  // never this generic path.
+  discount_requests: "deals",
   deal_documents: "deals",
   partners: "partners",
   partner_documents: "partners",
@@ -472,6 +478,7 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
       return { kind: "column", column: "company_name", value: auth.companyName };
     case "portal_deal_collaborators":
     case "deal_line_items":
+    case "discount_requests":
       return { kind: "linked-deal" };
     case "support_ticket_comments":
       return { kind: "linked-ticket" };

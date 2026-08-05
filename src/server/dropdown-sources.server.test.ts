@@ -113,3 +113,96 @@ test("listDropdownSourceValues adds a customer_participants tag filter to the 'c
     pool.query = originalQuery;
   }
 });
+
+// 9f/18c: the "Add line item" UI's product/price source. Prefers the
+// governed product_skus/product_variants/products tables when they have any
+// active rows, falling back to the legacy free-text portal_catalog_items
+// duplicate when they don't.
+test("listLineItemCatalogOptions prefers governed product_skus data when it has active rows", async () => {
+  const { pool } = await import("@/server/postgres.server");
+  const { listLineItemCatalogOptions } = await import("@/server/dropdown-sources.server");
+  const originalQuery = pool.query.bind(pool);
+  const queries: string[] = [];
+  pool.query = (async (sql: string) => {
+    const s = sql.trim();
+    queries.push(s);
+    if (s.startsWith("SELECT 1 FROM product_skus")) {
+      return { rows: [{ "?column?": 1 }], rowCount: 1 };
+    }
+    if (s.includes("FROM product_skus ps")) {
+      return {
+        rows: [
+          {
+            id: "sku-1",
+            sku_code: "WIDGET-PRO",
+            msrp_amount: "199.0000",
+            partner_transfer_amount: "179.0000",
+            discounted_transfer_amount: "159.0000",
+            product_name: "Widget",
+            variant_name: "Pro",
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    throw new Error(`Unexpected query in governed-preferred test: ${s}`);
+  }) as typeof pool.query;
+
+  try {
+    const options = await listLineItemCatalogOptions({});
+    expect(options).toHaveLength(1);
+    expect(options[0]).toEqual({
+      id: "sku-1",
+      label: "Widget — Pro",
+      sku: "WIDGET-PRO",
+      msrpUsd: 199,
+      ptpUsd: 179,
+      dtpUsd: 159,
+      source: "governed",
+    });
+    // Never falls back to the legacy table once governed data exists.
+    expect(queries.some((q) => q.includes("portal_catalog_items"))).toBe(false);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test("listLineItemCatalogOptions falls back to portal_catalog_items when the governed tables have no active rows", async () => {
+  const { pool } = await import("@/server/postgres.server");
+  const { listLineItemCatalogOptions } = await import("@/server/dropdown-sources.server");
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    const s = sql.trim();
+    if (s.startsWith("SELECT 1 FROM product_skus")) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (s.includes("information_schema.columns")) {
+      return { rows: [{ column_name: "list_price" }, { column_name: "sku" }], rowCount: 2 };
+    }
+    if (s.includes("FROM portal_catalog_items")) {
+      return {
+        rows: [
+          { id: "cat-1", sku: "LEGACY-1", product_name: "Legacy Widget", list_price: "$99.50" },
+        ],
+        rowCount: 1,
+      };
+    }
+    throw new Error(`Unexpected query in fallback test: ${s}`);
+  }) as typeof pool.query;
+
+  try {
+    const options = await listLineItemCatalogOptions({});
+    expect(options).toHaveLength(1);
+    expect(options[0]).toEqual({
+      id: "cat-1",
+      label: "Legacy Widget",
+      sku: "LEGACY-1",
+      msrpUsd: 99.5,
+      ptpUsd: null,
+      dtpUsd: null,
+      source: "catalog",
+    });
+  } finally {
+    pool.query = originalQuery;
+  }
+});

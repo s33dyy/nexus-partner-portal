@@ -398,6 +398,21 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "created_at",
     "updated_at",
   ],
+  // 9h/§9.12: read-only allowlist for the new "Request discount"/approval
+  // UI — writes always go through requestDiscount/approveDiscount
+  // (pricing-commands.server.ts), never this generic path.
+  discount_requests: [
+    "id",
+    "deal_id",
+    "line_item_id",
+    "requested_discount_pct",
+    "status",
+    "reason",
+    "approver_id",
+    "requester_id",
+    "created_at",
+    "updated_at",
+  ],
   learning_tracks: [
     "id",
     "title",

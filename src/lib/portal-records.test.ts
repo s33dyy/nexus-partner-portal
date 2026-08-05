@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   getDealUsdAmount,
+  getValidBackwardStages,
   normalizeDealCurrencyCode,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -27,4 +28,20 @@ test("normalizeDealCurrencyCode uppercases values and defaults blanks to USD", (
 test("getDealUsdAmount prefers stored USD equivalents and falls back to parsing the raw amount", () => {
   expect(getDealUsdAmount({ amount: "$10", amount_usd: 834.5 })).toBe(834.5);
   expect(getDealUsdAmount({ amount: "₹9,20,000", amount_usd: null })).toBe(920000);
+});
+
+test("9e: getValidBackwardStages returns every earlier non-terminal stage, mirroring moveDealStageBackward's own isBackwardMove check", () => {
+  expect(getValidBackwardStages("sourced")).toEqual([]);
+  expect(getValidBackwardStages("demo")).toEqual(["sourced"]);
+  expect(getValidBackwardStages("negotiation")).toEqual([
+    "sourced",
+    "demo",
+    "testing",
+    "qualified",
+    "proposal",
+  ]);
+  // Terminal stages have no valid backward target through this helper —
+  // moveDealStageBackward itself also rejects moves into/out of won/lost.
+  expect(getValidBackwardStages("won")).toEqual([]);
+  expect(getValidBackwardStages("lost")).toEqual([]);
 });

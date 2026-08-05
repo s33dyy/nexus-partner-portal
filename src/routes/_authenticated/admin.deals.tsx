@@ -24,6 +24,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { supabase } from "@/integrations/local/client";
+import { reviewDealRegistration } from "@/integrations/local/deal-commands";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -255,12 +256,60 @@ function AdminDealsPage() {
     return <AccessDeniedPage title="Deal approvals" roleLabel="Super Admin" />;
   }
 
-  const saveReview = async (
-    status?: "approved" | "need_more_info" | "rejected" | "won" | "lost",
-  ) => {
+  const saveReview = async (status?: "approved" | "need_more_info" | "rejected") => {
     if (!selectedDeal || !reviewDraft) return;
     setSaving(true);
     try {
+      if (status) {
+        // §2.5 path 2: the registration decision (Approve/Request changes/
+        // Reject) now goes through the governed `reviewDealRegistration`
+        // command instead of a raw client write — it checks
+        // authorizeDealActor, optimistic concurrency (expectedVersion), and
+        // records a real deal_transitions/domain_activity_events/outbox
+        // audit trail. It also NEVER touches `stage` (registration status
+        // and pipeline stage are independent dimensions — §9.1/§9.2), which
+        // is the exact bug this replaces: the old raw write set
+        // stage: "negotiation" directly on Approve.
+        const result = await reviewDealRegistration({
+          dealId: selectedDeal.id,
+          expectedVersion: selectedDeal.version,
+          decision: status,
+          reason: note.trim() || null,
+        });
+        if (!result.ok) {
+          toast.error(result.failure.message);
+          return;
+        }
+        if (!reviewCollaboratorEditingLocked) {
+          await persistCollaboratorsSafely(selectedDeal.id, reviewCollaborators);
+        }
+        await publishDealNotification(
+          selectedDeal,
+          `deal_${status}`,
+          `Deal ${status.replace("_", " ")}`,
+          `${selectedDeal.account_name} was marked ${status.replace("_", " ")} by admin.`,
+        );
+        const reviewer = (await supabase.auth.getUser()).data.user;
+        await recordAuditEvent(supabase, {
+          actorName: reviewer?.email ?? "LIVEY Admin",
+          actorRole: "super_admin",
+          action: `deal_${status}`,
+          targetType: "deal",
+          targetName: selectedDeal.account_name,
+          outcome: status,
+          details: `Admin reviewed ${selectedDeal.product} and set status to ${status.replace("_", " ")}`,
+          severity: "low",
+        });
+        toast.success(`Deal marked ${status.replace("_", " ")}`);
+        setNote("");
+        await load();
+        return;
+      }
+
+      // General field-edit save (no registration decision attached) — still
+      // a raw client write, unchanged. `status`/`commercial_approved`/
+      // `stage` are deliberately absent from this payload now: those are
+      // exclusively owned by reviewDealRegistration above.
       const { error } = await supabase
         .from("portal_deals")
         .update({
@@ -284,17 +333,7 @@ function AdminDealsPage() {
           notes: note.trim() || reviewDraft.notes,
           is_hidden_to_team: reviewDraft.is_hidden_to_team,
           reward_rate_percent: Number(reviewDraft.reward_rate_percent) || 5,
-          status: status ?? reviewDraft.status,
-          commercial_approved: status === "approved" ? true : reviewDraft.commercial_approved,
-          stage:
-            status === "approved"
-              ? "negotiation"
-              : status === "won"
-                ? "won"
-                : status === "lost"
-                  ? "lost"
-                  : reviewDraft.stage,
-          last_touch: status ? `Admin set status to ${status}` : "Admin updated the deal",
+          last_touch: "Admin updated the deal",
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedDeal.id);
@@ -302,31 +341,7 @@ function AdminDealsPage() {
       if (!reviewCollaboratorEditingLocked) {
         await persistCollaboratorsSafely(selectedDeal.id, reviewCollaborators);
       }
-      if (status) {
-        await publishDealNotification(
-          selectedDeal,
-          `deal_${status}`,
-          `Deal ${status.replace("_", " ")}`,
-          `${selectedDeal.account_name} was marked ${status.replace("_", " ")} by admin.`,
-        );
-        const reviewer = (await supabase.auth.getUser()).data.user;
-        await recordAuditEvent(supabase, {
-          actorName: reviewer?.email ?? "LIVEY Admin",
-          actorRole: "super_admin",
-          action: `deal_${status}`,
-          targetType: "deal",
-          targetName: selectedDeal.account_name,
-          outcome: status,
-          details: `Admin reviewed ${selectedDeal.product} and set status to ${status.replace("_", " ")}`,
-          severity: status === "won" ? "medium" : "low",
-        });
-        // Reward points are awarded when the PO review reaches its approved
-        // terminal state (outcome-review-commands.server.ts's approvePO),
-        // not when a deal is marked won here — product.md §15.11.
-        toast.success(`Deal marked ${status.replace("_", " ")}`);
-      } else {
-        toast.success("Deal updated");
-      }
+      toast.success("Deal updated");
       setNote("");
       await load();
     } catch (error) {

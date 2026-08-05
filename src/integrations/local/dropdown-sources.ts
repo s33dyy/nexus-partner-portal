@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { CatalogKind } from "@/lib/catalog";
 import type { DropdownOption, DropdownSourceKey } from "@/lib/dropdown-sources";
 import type { CustomerRecord } from "@/lib/portal-records";
+import type { LineItemCatalogOption } from "@/server/dropdown-sources.server";
 
 const listDropdownSourceValuesFn = createServerFn({ method: "GET" })
   .validator(
@@ -59,6 +60,13 @@ const updateDropdownCatalogItemFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { updateCatalogItemFromDropdown } = await import("@/server/dropdown-sources.server");
     return updateCatalogItemFromDropdown(data);
+  });
+
+const listLineItemCatalogOptionsFn = createServerFn({ method: "GET" })
+  .validator((input: { q?: string }) => input)
+  .handler(async ({ data }) => {
+    const { listLineItemCatalogOptions } = await import("@/server/dropdown-sources.server");
+    return listLineItemCatalogOptions(data);
   });
 
 const createDropdownCustomerFn = createServerFn({ method: "POST" })
@@ -123,6 +131,12 @@ export async function updateDropdownCatalogItem(input: {
   catalog_kind?: CatalogKind;
 }) {
   return updateDropdownCatalogItemFn({ data: input });
+}
+
+export async function listLineItemCatalogOptions(input: {
+  q?: string;
+}): Promise<LineItemCatalogOption[]> {
+  return listLineItemCatalogOptionsFn({ data: input });
 }
 
 export async function createDropdownCustomer(input: {

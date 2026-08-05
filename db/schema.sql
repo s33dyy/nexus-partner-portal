@@ -1905,3 +1905,47 @@ CREATE INDEX IF NOT EXISTS call_logs_created_at_idx ON call_logs (created_at DES
 -- TABLE IF NOT EXISTS profiles block near the top of this file would
 -- silently never apply here.
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS call_ready BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- §2.6/§9.15 (Deals Phase 3): Won's PO Upload-Now-or-Submit-Later choice.
+-- markDealWon already writes `close_date` (the outcome date — no new column
+-- needed for that, just accepting a caller-supplied value instead of always
+-- defaulting to today) but had nowhere to record which PO path the reviewer
+-- picked. portal_deals is an existing production table, so — same trap as
+-- every ALTER above — this MUST land as an idempotent ADD COLUMN, never
+-- edited into the CREATE TABLE IF NOT EXISTS portal_deals block near the
+-- top of this file. Nullable: existing rows and deals closed Won before
+-- this column existed have no value to backfill.
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS po_choice TEXT;
+
+-- 9g (§9.11/§23's Coverage Exception dictionary, product.md lines 214/681-
+-- 699): "A governed work item created when a required RM, ISR, PAM, or KAM
+-- cannot be resolved. It blocks the protected Deal action until the missing
+-- Assignment is corrected and reconciliation succeeds." Brand-new table (no
+-- previously-migrated database has it), so plain CREATE TABLE IF NOT EXISTS
+-- is correct here — same as call_logs above, unlike every ALTER on this
+-- page. Minimal, bounded implementation: the full Open -> In Remediation ->
+-- Resolved/Cancelled workflow (queue UI, reconciliation retry, SLA
+-- countdown) is NOT built — only Open is ever written by moveDealStageForward's
+-- Testing -> Qualified handoff check, which blocks the transition outright
+-- whenever a required PAM/KAM mapping can't be resolved. status/resolution/
+-- resolved_at exist so a future remediation UI has somewhere to write, but
+-- nothing reads or transitions them yet.
+CREATE TABLE IF NOT EXISTS coverage_exceptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  required_role TEXT NOT NULL,              -- 'pam' | 'kam' | 'rm' | 'isr'
+  coverage_key TEXT NOT NULL,                -- the partner_id/customer_id the mapping was missing for
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,                      -- the protected action this blocked, e.g. 'deal.testing_to_qualified'
+  status TEXT NOT NULL DEFAULT 'open',       -- open | in_remediation | resolved | cancelled
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sla_target_at TIMESTAMPTZ,
+  responsible_role TEXT,                     -- who owns resolving it (product.md: Super Admin Assignment Operations)
+  resolution TEXT,
+  resolved_at TIMESTAMPTZ,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS coverage_exceptions_deal_id_idx ON coverage_exceptions (deal_id);
+CREATE INDEX IF NOT EXISTS coverage_exceptions_status_idx ON coverage_exceptions (status);

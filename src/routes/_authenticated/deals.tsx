@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Download,
@@ -47,6 +48,7 @@ import {
   createDeal as createDealCommand,
   markDealLost,
   markDealWon,
+  moveDealStageBackward,
   moveDealStageForward,
 } from "@/integrations/local/deal-commands";
 import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
@@ -83,6 +85,7 @@ import {
   DEAL_CURRENCY_OPTIONS,
   DEAL_STAGE_ORDER,
   getDealUsdAmount,
+  getValidBackwardStages,
   nextDealStage,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -305,6 +308,21 @@ function DealsPage() {
   const [draftCollaborators, setDraftCollaborators] = useState<DealCollaboratorDraft[]>([]);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  // §9b/§9.15: outcome date + PO Upload-Now-or-Submit-Later choice on Won,
+  // and a mandatory loss reason on Lost — captured through a small dialog
+  // instead of the old one-click "Mark won"/"Mark lost" buttons that sent
+  // neither.
+  const [closeDialogStatus, setCloseDialogStatus] = useState<"won" | "lost" | null>(null);
+  const [closeOutcomeDate, setCloseOutcomeDate] = useState("");
+  const [closePoChoice, setClosePoChoice] = useState<"now" | "later">("later");
+  const [closeReason, setCloseReason] = useState("");
+  // 9e: backward movement has zero UI entry points anywhere in the shipped
+  // product even though moveDealStageBackward is fully implemented and
+  // tested server-side — this dialog is the first one. Mirrors the
+  // close-deal dialog's reason-capture shape above.
+  const [backwardDialogOpen, setBackwardDialogOpen] = useState(false);
+  const [backwardTargetStage, setBackwardTargetStage] = useState<DealStage | "">("");
+  const [backwardReason, setBackwardReason] = useState("");
   const [selectedDealOpen, setSelectedDealOpen] = useState(false);
   const [selectedDealEditing, setSelectedDealEditing] = useState(false);
   const [selectedDealDraft, setSelectedDealDraft] = useState<DealEditForm | null>(null);
@@ -1496,8 +1514,25 @@ function DealsPage() {
     // when the pipeline stage merely reaches "won" — product.md §15.11.
   };
 
-  const closeAs = async (status: "won" | "lost") => {
+  // §9b/§9.15: "Mark won"/"Mark lost" now open a small dialog first instead
+  // of firing the command immediately — Won captures an outcome date and a
+  // PO Upload-Now-or-Submit-Later choice, Lost requires a reason (the server
+  // enforces this too; the dialog just gives it a real place to be typed).
+  const openCloseDialog = (status: "won" | "lost") => {
     if (!selectedDeal) return;
+    setCloseDialogStatus(status);
+    setCloseOutcomeDate(toDateInputValue(new Date().toISOString()) || "");
+    setClosePoChoice("later");
+    setCloseReason("");
+  };
+
+  const closeAs = async () => {
+    const status = closeDialogStatus;
+    if (!selectedDeal || !status) return;
+    if (status === "lost" && !closeReason.trim()) {
+      toast.error("A reason is required to mark this deal lost");
+      return;
+    }
 
     const trimmedNote = note.trim();
     if (trimmedNote && trimmedNote !== selectedDeal.notes) {
@@ -1506,22 +1541,33 @@ function DealsPage() {
 
     const result =
       status === "won"
-        ? await markDealWon({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version })
-        : await markDealLost({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version });
+        ? await markDealWon({
+            dealId: selectedDeal.id,
+            expectedVersion: selectedDeal.version,
+            reason: closeReason.trim() || null,
+            outcomeDate: closeOutcomeDate || null,
+            poChoice: closePoChoice,
+          })
+        : await markDealLost({
+            dealId: selectedDeal.id,
+            expectedVersion: selectedDeal.version,
+            reason: closeReason.trim(),
+          });
 
     if (!result.ok) {
       toast.error(result.failure.message);
       return;
     }
 
+    setCloseDialogStatus(null);
     await load();
 
     await publishDealNotification({
       notificationTitle: status === "won" ? "Deal won" : "Deal lost",
       notificationMessage:
         status === "won"
-          ? `${selectedDeal.account_name} closed won and is ready for PO submission.`
-          : `${selectedDeal.account_name} was closed as lost.`,
+          ? `${selectedDeal.account_name} closed won (PO ${closePoChoice === "now" ? "uploading now" : "to follow"}) and is ready for PO submission.`
+          : `${selectedDeal.account_name} was closed as lost: ${closeReason.trim()}`,
       type: `deal_${status}`,
     });
     await recordAuditEvent(supabase, {
@@ -1537,13 +1583,64 @@ function DealsPage() {
       outcome: status,
       details:
         status === "won"
-          ? `${selectedDeal.product} closed won and prepared for PO submission`
-          : `${selectedDeal.product} closed lost`,
+          ? `${selectedDeal.product} closed won and prepared for PO submission (PO ${closePoChoice})`
+          : `${selectedDeal.product} closed lost: ${closeReason.trim()}`,
       severity: status === "won" ? "medium" : "low",
     });
     // Reward points are awarded when the PO review reaches its approved
     // terminal state (outcome-review-commands.server.ts's approvePO), not
     // when the deal is merely closed won — product.md §15.11.
+  };
+
+  // 9e (§9.10/§9.19): "Any active tagged participant may request and perform
+  // a permitted backward movement through a dialog requiring destination
+  // stage [and] mandatory reason." moveDealStageBackward already enforces
+  // the reason server-side; this is that dialog's first real caller.
+  const openBackwardDialog = () => {
+    if (!selectedDeal) return;
+    const options = getValidBackwardStages(selectedDeal.stage);
+    setBackwardTargetStage(options[options.length - 1] ?? "");
+    setBackwardReason("");
+    setBackwardDialogOpen(true);
+  };
+
+  const confirmMoveBackward = async () => {
+    if (!selectedDeal || !backwardTargetStage) return;
+    if (!backwardReason.trim()) {
+      toast.error("A reason is required to move this deal backward");
+      return;
+    }
+    const result = await moveDealStageBackward({
+      dealId: selectedDeal.id,
+      expectedVersion: selectedDeal.version,
+      toStage: backwardTargetStage,
+      reason: backwardReason.trim(),
+    });
+    if (!result.ok) {
+      toast.error(result.failure.message);
+      return;
+    }
+    setBackwardDialogOpen(false);
+    await load();
+    await publishDealNotification({
+      notificationTitle: `${selectedDeal.account_name} moved back to ${backwardTargetStage}`,
+      notificationMessage: `${selectedDeal.account_name} was moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,
+      type: "deal_stage_change",
+    });
+    await recordAuditEvent(supabase, {
+      actorName: profile?.full_name ?? "LIVEY",
+      actorRole: hasRole("super_admin")
+        ? "super_admin"
+        : hasRole("partner_admin")
+          ? "partner_admin"
+          : "partner_user",
+      action: "deal_stage_backward",
+      targetType: "deal",
+      targetName: selectedDeal.account_name,
+      outcome: backwardTargetStage,
+      details: `${selectedDeal.product} moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,
+      severity: "low",
+    });
   };
 
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);
@@ -2442,9 +2539,15 @@ function DealsPage() {
                         )}
                         Advance stage
                       </Button>
+                      {getValidBackwardStages(selectedDeal.stage).length > 0 ? (
+                        <Button variant="outline" onClick={openBackwardDialog} disabled={saving}>
+                          <ArrowLeft className="mr-2 h-4 w-4" />
+                          Move backward
+                        </Button>
+                      ) : null}
                       <Button
                         variant="outline"
-                        onClick={() => void closeAs("won")}
+                        onClick={() => openCloseDialog("won")}
                         disabled={saving}
                       >
                         <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -2452,7 +2555,7 @@ function DealsPage() {
                       </Button>
                       <Button
                         variant="destructive"
-                        onClick={() => void closeAs("lost")}
+                        onClick={() => openCloseDialog("lost")}
                         disabled={saving}
                       >
                         <XCircle className="mr-2 h-4 w-4" />
@@ -2504,6 +2607,155 @@ function DealsPage() {
                 Cancel
               </Button>
               <Button onClick={() => void saveNote()}>Save note</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={closeDialogStatus !== null}
+        onOpenChange={(open) => {
+          if (!open) setCloseDialogStatus(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {closeDialogStatus === "won" ? "Mark deal won" : "Mark deal lost"}
+            </DialogTitle>
+            <DialogDescription>
+              {closeDialogStatus === "won"
+                ? "Record the outcome date and whether the PO is ready now or will follow (product.md §9.15)."
+                : "A reason is required so the pipeline keeps a real record of why this deal was lost."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 text-sm">
+              <div className="font-medium">{selectedDeal?.account_name ?? "Selected deal"}</div>
+              <div className="text-muted-foreground">
+                {selectedDeal?.product ?? "Deal"} · {selectedDeal?.stage ?? "stage"}
+              </div>
+            </div>
+            {closeDialogStatus === "won" ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="close_outcome_date">Outcome date</Label>
+                  <Input
+                    id="close_outcome_date"
+                    type="date"
+                    value={closeOutcomeDate}
+                    onChange={(e) => setCloseOutcomeDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Purchase order</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={closePoChoice === "now" ? "default" : "outline"}
+                      onClick={() => setClosePoChoice("now")}
+                    >
+                      Upload now
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={closePoChoice === "later" ? "default" : "outline"}
+                      onClick={() => setClosePoChoice("later")}
+                    >
+                      Submit later
+                    </Button>
+                  </div>
+                  {closePoChoice === "now" ? (
+                    <p className="text-xs text-muted-foreground">
+                      The deal closes Won now; submit the PO in the Outcome Review panel below right
+                      after.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      The deal closes Won now; the PO can be submitted any time from the Outcome
+                      Review panel.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="close_lost_reason">Loss reason (required)</Label>
+                <Textarea
+                  id="close_lost_reason"
+                  value={closeReason}
+                  onChange={(e) => setCloseReason(e.target.value)}
+                  placeholder="e.g. Partner went with a competitor, budget cut, project cancelled..."
+                  rows={4}
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCloseDialogStatus(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant={closeDialogStatus === "lost" ? "destructive" : "default"}
+                onClick={() => void closeAs()}
+                disabled={closeDialogStatus === "lost" && !closeReason.trim()}
+              >
+                {closeDialogStatus === "won" ? "Confirm won" : "Confirm lost"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={backwardDialogOpen} onOpenChange={setBackwardDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Move deal backward</DialogTitle>
+            <DialogDescription>
+              Destination stage and a reason are both required (product.md §9.10/§9.19).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 text-sm">
+              <div className="font-medium">{selectedDeal?.account_name ?? "Selected deal"}</div>
+              <div className="text-muted-foreground">
+                Currently at <span className="capitalize">{selectedDeal?.stage ?? "stage"}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="backward_target_stage">Destination stage</Label>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.dealStage}
+                label="Destination stage"
+                value={backwardTargetStage}
+                onValueChange={(value) => setBackwardTargetStage(value as DealStage)}
+                placeholder="Select a stage"
+                options={selectedDeal ? getValidBackwardStages(selectedDeal.stage) : []}
+                allowCreate={false}
+                triggerClassName="w-full"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="backward_reason">Reason (required)</Label>
+              <Textarea
+                id="backward_reason"
+                value={backwardReason}
+                onChange={(e) => setBackwardReason(e.target.value)}
+                placeholder="e.g. Customer needs another demo before testing can start..."
+                rows={4}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setBackwardDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void confirmMoveBackward()}
+                disabled={!backwardTargetStage || !backwardReason.trim()}
+              >
+                Confirm move backward
+              </Button>
             </div>
           </div>
         </DialogContent>

@@ -105,6 +105,21 @@ export const PO_REVIEW_STATUSES = [
 
 export type PoReviewStatus = (typeof PO_REVIEW_STATUSES)[number];
 
+// §23.4's Coverage Exception workflow dictionary (open/in_remediation/
+// resolved/cancelled) — previously absent from this file entirely (§2's
+// §23a/§23b findings). coverage_exceptions.status (db/schema.sql, added
+// 2026-08-06 alongside the 9g Testing->Qualified handoff fix) uses these
+// exact keys; only "open" is ever written by that fix today — the
+// remediation workflow that would transition through the rest isn't built.
+export const COVERAGE_EXCEPTION_STATUSES = [
+  "open",
+  "in_remediation",
+  "resolved",
+  "cancelled",
+] as const;
+
+export type CoverageExceptionStatus = (typeof COVERAGE_EXCEPTION_STATUSES)[number];
+
 export const TASK_STATUSES = [
   "draft",
   "queued",

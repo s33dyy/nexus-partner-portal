@@ -267,6 +267,21 @@ export function nextDealStatus(currentStatus: string, stage: DealStage): string 
   return currentStatus;
 }
 
+// 9e: the set of stages moveDealStageBackward (deal-commands.server.ts)
+// would actually accept as a target from the given current stage — every
+// earlier non-terminal stage. Mirrors that command's own isBackwardMove
+// check exactly (including its "a terminal `from` stage is never a valid
+// backward move, regardless of target" rule) so the UI never offers a move
+// the server would reject.
+export function getValidBackwardStages(stage: DealStage): DealStage[] {
+  if (stage === "won" || stage === "lost") return [];
+  const index = DEAL_STAGE_ORDER.indexOf(stage);
+  if (index <= 0) return [];
+  return DEAL_STAGE_ORDER.slice(0, index).filter(
+    (candidate) => candidate !== "won" && candidate !== "lost",
+  );
+}
+
 export function parseDealAmount(amount: string | number): number {
   const numeric =
     typeof amount === "number" ? amount : Number.parseFloat(String(amount).replace(/[^0-9.]/g, ""));

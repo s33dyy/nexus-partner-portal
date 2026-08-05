@@ -67,6 +67,7 @@ export type DealSnapshot = {
   stage: DealStage;
   status: string;
   partner_id: string | null;
+  customer_id: string | null;
   country: string | null;
   region: string | null;
   version: number;
@@ -179,7 +180,7 @@ export async function loadDealForUpdate(
   dealId: string,
 ): Promise<DealSnapshot | null> {
   const { rows } = await tx.query(
-    `SELECT id, stage, status, partner_id, version, account_name
+    `SELECT id, stage, status, partner_id, customer_id, version, account_name
             , country, region, commercial_approved
      FROM portal_deals WHERE id = $1 FOR UPDATE`,
     [dealId],
@@ -190,6 +191,7 @@ export async function loadDealForUpdate(
         stage: string;
         status: string;
         partner_id: string | null;
+        customer_id: string | null;
         country: string | null;
         region: string | null;
         version: number;
@@ -203,6 +205,7 @@ export async function loadDealForUpdate(
     stage: row.stage as DealStage,
     status: row.status,
     partner_id: row.partner_id,
+    customer_id: row.customer_id ?? null,
     country: row.country ?? null,
     region: row.region ?? null,
     version: Number(row.version),
@@ -299,10 +302,17 @@ async function runDealTransitionCommand(input: {
   commandName: string;
   eventName: string;
   reason: string | null;
+  // Async (not just sync-returning) so a transition's own resolveTarget can
+  // run further DB checks inside the same transaction before deciding the
+  // target — see moveDealStageForward's Testing->Qualified handoff check
+  // below, which resolves PAM/KAM coverage and can write a
+  // coverage_exceptions row before blocking.
   resolveTarget: (
     deal: DealSnapshot,
-  ) => { toStage: DealStage; toStatus: string } | CommandFailureContract;
+    tx: PoolClient,
+  ) => Promise<{ toStage: DealStage; toStatus: string } | CommandFailureContract>;
   extraSet?: (deal: DealSnapshot, toStage: DealStage) => { sql: string; values: unknown[] };
+  extraPayload?: Record<string, unknown>;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
 
@@ -329,7 +339,7 @@ async function runDealTransitionCommand(input: {
       };
     }
 
-    const target = input.resolveTarget(deal);
+    const target = await input.resolveTarget(deal, tx);
     if ("code" in target) {
       return { ok: false, failure: target, correlationId };
     }
@@ -369,6 +379,7 @@ async function runDealTransitionCommand(input: {
         fromStatus: deal.status,
         toStatus: target.toStatus,
         reason: input.reason,
+        ...input.extraPayload,
       },
     });
 
@@ -391,6 +402,149 @@ function nextAuthorisedActions(stage: DealStage): readonly string[] {
   return actions;
 }
 
+/** §9.11 rule 3/§9g: "PAM assigned to the Partner." The assignment engine's
+ * only existing partner-scoped column is `assignments.partner_id` — already
+ * the exact mechanism partner_admin/partner_user/restricted_distributor use
+ * to mean "this assignment belongs to this partner tenant." Reusing it here
+ * (a `pam`-role assignment scoped to this deal's partner) rather than
+ * inventing a new coverage-mapping table. No admin surface currently sets a
+ * PAM assignment's partner_id, so this resolves to nothing on every real
+ * environment today — which is the honest, correct input for rule 6 below. */
+async function resolvePamForPartner(tx: PoolClient, partnerId: string): Promise<string | null> {
+  const { rows } = await tx.query(
+    `SELECT user_id FROM assignments
+     WHERE role_key = 'pam' AND partner_id = $1 AND status = 'active'
+     ORDER BY created_at ASC LIMIT 1`,
+    [partnerId],
+  );
+  return (rows[0] as { user_id: string } | undefined)?.user_id ?? null;
+}
+
+/** §9.11 rule 4/§9g: "KAM assigned to the Customer." Unlike PAM/Partner,
+ * `assignments` has no customer-scoped column at all — `customer_participants`
+ * is this codebase's one existing mechanism for "a specific user holds a
+ * named role against a specific Customer" (already used identically for
+ * Distributor-to-Customer tagging, §8.7), so an active KAM tag on the
+ * Customer record itself is reused as the "KAM assigned to Customer"
+ * mapping rather than inventing a second one. */
+async function resolveKamForCustomer(tx: PoolClient, customerId: string): Promise<string | null> {
+  const { rows } = await tx.query(
+    `SELECT participant_user_id FROM customer_participants
+     WHERE customer_id = $1 AND lower(participant_type) = 'kam'
+       AND valid_to IS NULL AND participant_user_id IS NOT NULL
+     ORDER BY created_at ASC LIMIT 1`,
+    [customerId],
+  );
+  return (rows[0] as { participant_user_id: string } | undefined)?.participant_user_id ?? null;
+}
+
+async function hasActiveParticipant(
+  tx: PoolClient,
+  dealId: string,
+  participantType: string,
+): Promise<boolean> {
+  const { rows } = await tx.query(
+    `SELECT 1 FROM deal_participants
+     WHERE deal_id = $1 AND lower(participant_type) = lower($2) AND valid_to IS NULL
+     LIMIT 1`,
+    [dealId, participantType],
+  );
+  return rows.length > 0;
+}
+
+async function addAutomaticParticipant(
+  tx: PoolClient,
+  input: {
+    dealId: string;
+    partnerId: string | null;
+    participantType: string;
+    userId: string;
+    reason: string;
+  },
+): Promise<void> {
+  if (await hasActiveParticipant(tx, input.dealId, input.participantType)) return;
+  await tx.query(
+    `INSERT INTO deal_participants (
+       id, deal_id, partner_id, participant_type, source, actor_id, participant_user_id, reason
+     ) VALUES ($1, $2, $3, $4, 'automatic', $5, $5, $6)`,
+    [
+      randomUUID(),
+      input.dealId,
+      input.partnerId,
+      input.participantType,
+      input.userId,
+      input.reason,
+    ],
+  );
+}
+
+async function openCoverageException(
+  tx: PoolClient,
+  input: { dealId: string; requiredRole: "pam" | "kam"; coverageKey: string | null },
+): Promise<void> {
+  await tx.query(
+    `INSERT INTO coverage_exceptions (
+       id, required_role, coverage_key, deal_id, action, status, responsible_role
+     ) VALUES ($1, $2, $3, $4, 'deal.testing_to_qualified', 'open', 'super_admin')`,
+    [randomUUID(), input.requiredRole, input.coverageKey ?? "", input.dealId],
+  );
+}
+
+/** §9.11: "On the successful forward transition Testing -> Qualified, the
+ * engine must add the effective PAM for the Partner and KAM for the
+ * Customer in the same transaction... Missing PAM or KAM coverage always
+ * blocks Testing -> Qualified; it creates a Coverage Exception rather than
+ * a partially tagged Deal." Runs inside moveDealStageForward's own
+ * transaction (via resolveTarget's new tx parameter) so the participant
+ * adds and the stage move commit or fail together. Both PAM and KAM are
+ * resolved (read-only) FIRST, before either is written — writing one the
+ * moment it resolves would tag the deal with e.g. a KAM while PAM is still
+ * missing, exactly the "partially tagged Deal" the spec says a Coverage
+ * Exception exists to prevent instead of. RM/ISR are deliberately
+ * untouched here ("remain tagged"): this only adds PAM/KAM. */
+async function resolveTestingToQualifiedHandoff(
+  tx: PoolClient,
+  deal: DealSnapshot,
+): Promise<CommandFailureContract | null> {
+  const pamUserId = deal.partner_id ? await resolvePamForPartner(tx, deal.partner_id) : null;
+  const kamUserId = deal.customer_id ? await resolveKamForCustomer(tx, deal.customer_id) : null;
+
+  const missing: Array<{ role: "pam" | "kam"; coverageKey: string | null }> = [];
+  if (!pamUserId || !deal.partner_id) missing.push({ role: "pam", coverageKey: deal.partner_id });
+  if (!kamUserId || !deal.customer_id) missing.push({ role: "kam", coverageKey: deal.customer_id });
+
+  if (missing.length > 0) {
+    for (const entry of missing) {
+      await openCoverageException(tx, {
+        dealId: deal.id,
+        requiredRole: entry.role,
+        coverageKey: entry.coverageKey,
+      });
+    }
+    const missingLabel = missing.map((entry) => entry.role.toUpperCase()).join(" and ");
+    return validationFailure(
+      `Testing → Qualified is blocked: no ${missingLabel} coverage could be resolved for this deal. A Coverage Exception has been opened for Super Admin Assignment Operations.`,
+    );
+  }
+
+  // Both resolved — safe to write both now, atomically, before returning.
+  await addAutomaticParticipant(tx, {
+    dealId: deal.id,
+    partnerId: deal.partner_id,
+    participantType: "PAM",
+    userId: pamUserId as string,
+    reason: "Post-Testing handoff (automatic)",
+  });
+  await addAutomaticParticipant(tx, {
+    dealId: deal.id,
+    partnerId: deal.partner_id,
+    participantType: "KAM",
+    userId: kamUserId as string,
+    reason: "Post-Testing handoff (automatic)",
+  });
+  return null;
+}
+
 export async function moveDealStageForward(input: {
   actor: DealCommandActor;
   dealId: string;
@@ -404,7 +558,7 @@ export async function moveDealStageForward(input: {
     commandName: "deal.move_stage_forward",
     eventName: "deal.stage_advanced",
     reason: input.note ?? null,
-    resolveTarget: (deal) => {
+    resolveTarget: async (deal, tx) => {
       // §2.5/§9.8/§9.9: "Forward movement is available only on approved or
       // auto-approved active Deals" — every stage row in §9.8's table lists
       // "Approved/auto-approved registration" as a minimum forward
@@ -413,13 +567,15 @@ export async function moveDealStageForward(input: {
       // deal that had never even been submitted for registration could be
       // forward-clicked all the way to Negotiation.
       if (!deal.commercial_approved) {
-        return validationFailure(
-          "Deal must complete registration approval before moving forward",
-        );
+        return validationFailure("Deal must complete registration approval before moving forward");
       }
       const toStage = FORWARD_NEXT_STAGE[deal.stage];
       if (!toStage) {
         return validationFailure(`Deal cannot move forward from stage "${deal.stage}"`);
+      }
+      if (deal.stage === "testing" && toStage === "qualified") {
+        const blocked = await resolveTestingToQualifiedHandoff(tx, deal);
+        if (blocked) return blocked;
       }
       return { toStage, toStatus: deal.status };
     },
@@ -449,7 +605,7 @@ export async function moveDealStageBackward(input: {
     commandName: "deal.move_stage_backward",
     eventName: "deal.stage_reverted",
     reason,
-    resolveTarget: (deal) => {
+    resolveTarget: async (deal) => {
       if (!isBackwardMove(deal.stage, input.toStage)) {
         return validationFailure(
           `"${input.toStage}" is not a valid backward stage from "${deal.stage}"`,
@@ -460,20 +616,34 @@ export async function moveDealStageBackward(input: {
   });
 }
 
+// §9b/§9.15: "Ordinary Lost requires a loss reason." Previously `reason` was
+// optional and silently defaulted to null — a deal could be closed lost with
+// no record of why. Now mandatory, validated the same way
+// moveDealStageBackward already validates its own required reason (trim,
+// reject blank) before the transaction even opens.
 export async function markDealLost(input: {
   actor: DealCommandActor;
   dealId: string;
   expectedVersion: number;
-  reason?: string | null;
+  reason: string;
 }): Promise<CommandExecutionResult> {
+  const reason = input.reason.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      failure: validationFailure("A reason is required to mark a deal lost", "reason"),
+      correlationId: createCorrelationId(),
+    };
+  }
+
   return runDealTransitionCommand({
     actor: input.actor,
     dealId: input.dealId,
     expectedVersion: input.expectedVersion,
     commandName: "deal.mark_lost",
     eventName: "deal.lost",
-    reason: input.reason ?? null,
-    resolveTarget: (deal) => {
+    reason,
+    resolveTarget: async (deal) => {
       if (TERMINAL_STAGES.has(deal.stage)) {
         return validationFailure(`Deal is already closed as "${deal.stage}"`);
       }
@@ -486,12 +656,30 @@ export async function markDealLost(input: {
   });
 }
 
+export type DealWonPoChoice = "now" | "later";
+
+// §9b/§9.15: "Selecting Won requires an outcome date, a PO
+// Upload-Now-or-Submit-Later choice... before the deal can leave
+// Negotiation." Full re-implementation of the confirmed-lines/DTP/
+// contributor-split capture the same spec paragraph also requires is a
+// separate, much larger piece of work (needs deal_line_items to be
+// populated at all first — see 9f/18d) and is deliberately not attempted
+// here. This adds the two inputs that fit this command's existing shape:
+// `outcomeDate` overrides the close date that was previously always hardcoded
+// to today; `poChoice` is recorded on the deal so the outcome-review UI/PO
+// flow can show which path the closer intended (Upload Now vs Submit Later),
+// even though the command doesn't yet branch behavior on it.
 export async function markDealWon(input: {
   actor: DealCommandActor;
   dealId: string;
   expectedVersion: number;
   reason?: string | null;
+  outcomeDate?: string | null;
+  poChoice?: DealWonPoChoice | null;
 }): Promise<CommandExecutionResult> {
+  const outcomeDate = input.outcomeDate?.trim() || todayIsoDate();
+  const poChoice = input.poChoice === "now" || input.poChoice === "later" ? input.poChoice : null;
+
   return runDealTransitionCommand({
     actor: input.actor,
     dealId: input.dealId,
@@ -499,16 +687,17 @@ export async function markDealWon(input: {
     commandName: "deal.mark_won",
     eventName: "deal.won",
     reason: input.reason ?? null,
-    resolveTarget: (deal) => {
+    resolveTarget: async (deal) => {
       if (TERMINAL_STAGES.has(deal.stage)) {
         return validationFailure(`Deal is already closed as "${deal.stage}"`);
       }
       return { toStage: "won", toStatus: "won" };
     },
     extraSet: () => ({
-      sql: "probability = $6, close_date = $7",
-      values: [100, todayIsoDate()],
+      sql: "probability = $6, close_date = $7, po_choice = $8",
+      values: [100, outcomeDate, poChoice],
     }),
+    extraPayload: { outcomeDate, poChoice },
   });
 }
 
@@ -659,6 +848,26 @@ export async function createDeal(input: {
         data.pocProfileId ?? null,
       ],
     );
+
+    // §9.3 Section 4/§9g: "assigned RM, automatic; ISR, automatic or
+    // routed." The only context this command has to determine either
+    // without a real routing/region-assignment engine (which doesn't exist
+    // in this codebase yet) is the creating actor's own role — when an rm
+    // or isr creates a deal, they are automatically tagged as that
+    // participant on it. A deal created by any other role (partner_admin,
+    // pam, super_admin, ...) gets no automatic RM/ISR tag from this step;
+    // "RM tagged on all deals in the RM's effective regional scope" and
+    // ISR routing both require a real assignment-resolution engine this
+    // codebase doesn't have — not attempted here.
+    if (input.actor.assignment.roleKey === "rm" || input.actor.assignment.roleKey === "isr") {
+      await addAutomaticParticipant(tx, {
+        dealId,
+        partnerId: resolvedPartnerId,
+        participantType: input.actor.assignment.roleKey === "rm" ? "RM" : "ISR",
+        userId: input.actor.userId,
+        reason: "Deal creator (automatic)",
+      });
+    }
 
     const creationPayload = {
       accountName,
@@ -812,6 +1021,124 @@ export async function submitDealForRegistration(input: {
       commandName: "deal.submitRegistration",
       subjectId: deal.id,
       newVersion: deal.version + 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
+  });
+}
+
+export type DealRegistrationDecision = "approved" | "need_more_info" | "rejected";
+
+export type ReviewDealRegistrationInput = {
+  dealId: string;
+  decision: DealRegistrationDecision;
+  reason?: string | null;
+};
+
+const REGISTRATION_DECISION_EVENT_NAME: Record<DealRegistrationDecision, string> = {
+  approved: "DealRegistrationApproved",
+  rejected: "DealRegistrationRejected",
+  need_more_info: "DealRegistrationChangesRequested",
+};
+
+const REGISTRATION_STATUSES_FOR_DECISION = new Set<DealRegistrationDecision>([
+  "approved",
+  "need_more_info",
+  "rejected",
+]);
+
+// §2.5 path 2 (§9.1/§9.2/§9.7/§9.9): admin.deals.tsx's Approve/Request
+// changes/Reject buttons previously called a raw client-side
+// `supabase.from("portal_deals").update(...)` that set `stage` directly on
+// Approve (bypassing authorizeDealActor, optimistic concurrency, and the
+// deal_transitions/domain_activity_events/outbox audit trail entirely) — the
+// exact same registration/stage collapse this session already fixed in
+// submitDealForRegistration and moveDealStageForward (paths 1 and 3 of the
+// same finding). This command is the third and last piece: it records the
+// registration decision (status/commercial_approved) and NEVER writes
+// `stage`, matching the invariant those two fixes already established.
+export async function reviewDealRegistration(input: {
+  actor: DealCommandActor;
+  expectedVersion: number;
+  data: ReviewDealRegistrationInput;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  return withTransaction(async (tx) => {
+    const deal = await loadDealForUpdate(tx, input.data.dealId);
+    if (!deal) {
+      return { ok: false, failure: validationFailure("Deal not found"), correlationId };
+    }
+
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    // admin.deals.tsx has always gated this entire surface to super_admin
+    // only (its own `hasRole("super_admin")` guard at the top of the route)
+    // — this command preserves that exact ceiling rather than widening it.
+    // Unlike §2.7's PO/outcome-review authority (tagged PAM/RM or Super
+    // Admin), §9.7's registration-review authority was never extended past
+    // Super Admin in the shipped product, so there is no existing UI grant
+    // to match beyond it.
+    if (input.actor.assignment.roleKey !== "super_admin") {
+      return {
+        ok: false,
+        failure: validationFailure("Only Super Admin can review deal registration"),
+        correlationId,
+      };
+    }
+
+    if (deal.version !== input.expectedVersion) {
+      return {
+        ok: false,
+        failure: makeConcurrencyError(deal.id, input.expectedVersion, deal.version),
+        correlationId,
+      };
+    }
+
+    const decision = input.data.decision;
+    if (!REGISTRATION_STATUSES_FOR_DECISION.has(decision)) {
+      return {
+        ok: false,
+        failure: validationFailure("Unrecognised registration decision", "decision"),
+        correlationId,
+      };
+    }
+
+    const newStatus = decision;
+    const newCommercialApproved = decision === "approved" ? true : deal.commercial_approved;
+    const newVersion = deal.version + 1;
+    const reason = input.data.reason?.trim() || null;
+
+    await tx.query(
+      `UPDATE portal_deals
+       SET status = $1, commercial_approved = $2, version = $3, updated_at = now()
+       WHERE id = $4`,
+      [newStatus, newCommercialApproved, newVersion, deal.id],
+    );
+
+    await recordTransitionAndOutbox({
+      tx,
+      actor: input.actor,
+      correlationId,
+      commandName: "deal.reviewRegistration",
+      eventName: REGISTRATION_DECISION_EVENT_NAME[decision],
+      deal,
+      // Deliberately the deal's own current stage, unchanged — a
+      // registration decision records status only, it never itself moves
+      // the pipeline (§9.1/§9.2's "these are independent dimensions").
+      toStage: deal.stage,
+      toStatus: newStatus,
+      reason,
+      payload: { decision, reason },
+    });
+
+    return {
+      ok: true,
+      commandName: "deal.reviewRegistration",
+      subjectId: deal.id,
+      newVersion,
       nextAuthorisedActions: [],
       correlationId,
     };

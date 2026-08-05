@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, MoveRight, Search, Target } from "lucide-react";
+import { Loader2, MoveLeft, RefreshCw, MoveRight, Search, Target } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -19,13 +19,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
-import { markDealWon, moveDealStageForward } from "@/integrations/local/deal-commands";
+import {
+  markDealWon,
+  moveDealStageBackward,
+  moveDealStageForward,
+} from "@/integrations/local/deal-commands";
+import { loadDashboardPipeline } from "@/integrations/local/dashboard-metrics";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
-  getDealUsdAmount,
   DEAL_STAGE_ORDER,
+  getValidBackwardStages,
   nextDealStage,
   type DealRecord,
+  type DealStage,
 } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
@@ -75,6 +81,19 @@ function PipelinePage() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
+  // 9e: backward movement had zero UI callers anywhere in the shipped
+  // product — this board-card dialog mirrors deals.tsx's own "Move
+  // backward" dialog (same fields, same required-reason behaviour the
+  // server already enforces).
+  const [backwardOpen, setBackwardOpen] = useState(false);
+  const [backwardDeal, setBackwardDeal] = useState<DealRecord | null>(null);
+  const [backwardTargetStage, setBackwardTargetStage] = useState<DealStage | "">("");
+  const [backwardReason, setBackwardReason] = useState("");
+  const [pipelineMetric, setPipelineMetric] = useState<{
+    pipelineValueUsd: number;
+    openDealCount: number;
+    missingDtpCount: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,12 +110,17 @@ function PipelinePage() {
         bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
-      const [dealRes, collaboratorRes] = await Promise.all([
+      const [dealRes, collaboratorRes, pipelineMetricRes] = await Promise.all([
         queryBuilder,
         supabase
           .from("portal_deal_collaborators")
           .select("*")
           .order("sort_order", { ascending: true }),
+        // Reuses the exact same server-side canonical metric the dashboard
+        // shows — open stages (Sourced..Negotiation) only, priced from
+        // effective DTP, never the free-text amount — instead of
+        // maintaining a third, divergent client-side sum here.
+        loadDashboardPipeline(selectedRegion),
       ]);
       if (dealRes.error || collaboratorRes.error) throw dealRes.error ?? collaboratorRes.error;
       const collaboratorRows =
@@ -126,14 +150,16 @@ function PipelinePage() {
       );
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
+      setPipelineMetric(pipelineMetricRes.ok ? pipelineMetricRes.metrics : null);
     } catch {
       setDeals([]);
       setSource("empty");
+      setPipelineMetric(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id, roleKey]);
+  }, [hasRole, profile?.id, profile?.partner_id, roleKey, selectedRegion]);
 
   useEffect(() => {
     void load();
@@ -188,16 +214,13 @@ function PipelinePage() {
   );
 
   const totals = useMemo(() => {
-    const pipeline = regionScopedDeals.reduce((sum, deal) => {
-      return sum + getDealUsdAmount(deal);
-    }, 0);
     const weighted = regionScopedDeals.length
       ? Math.round(
           regionScopedDeals.reduce((sum, deal) => sum + deal.probability, 0) /
             regionScopedDeals.length,
         )
       : 0;
-    return { pipeline, weighted, count: regionScopedDeals.length };
+    return { weighted, count: regionScopedDeals.length };
   }, [regionScopedDeals]);
 
   const moveDeal = async (deal: DealRecord) => {
@@ -294,6 +317,60 @@ function PipelinePage() {
     }
   };
 
+  const openBackward = (deal: DealRecord) => {
+    setBackwardDeal(deal);
+    const options = getValidBackwardStages(deal.stage);
+    setBackwardTargetStage(options[options.length - 1] ?? "");
+    setBackwardReason("");
+    setBackwardOpen(true);
+  };
+
+  const confirmBackward = async () => {
+    if (!backwardDeal || !backwardTargetStage) return;
+    if (!backwardReason.trim()) {
+      toast.error("A reason is required to move this deal backward");
+      return;
+    }
+    try {
+      const result = await moveDealStageBackward({
+        dealId: backwardDeal.id,
+        expectedVersion: backwardDeal.version,
+        toStage: backwardTargetStage,
+        reason: backwardReason.trim(),
+      });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success(`${backwardDeal.account_name} moved back to ${backwardTargetStage}`);
+      await publishDealNotification(
+        "deal_stage_change",
+        `${backwardDeal.account_name} moved back to ${backwardTargetStage}`,
+        `${backwardDeal.account_name} moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,
+      );
+      await recordAuditEvent(supabase, {
+        actorName: "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: "pipeline_stage_backward",
+        targetType: "deal",
+        targetName: backwardDeal.account_name,
+        outcome: backwardTargetStage,
+        details: `${backwardDeal.product} moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,
+        severity: "low",
+      });
+      setBackwardOpen(false);
+      setBackwardDeal(null);
+      setBackwardReason("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to move deal backward");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -360,12 +437,22 @@ function PipelinePage() {
       <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Pipeline value"
-          value={new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-            maximumFractionDigits: 2,
-          }).format(totals.pipeline)}
-          hint="Visible USD-equivalent queue value"
+          value={
+            pipelineMetric
+              ? new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                  maximumFractionDigits: 2,
+                }).format(pipelineMetric.pipelineValueUsd)
+              : "Unavailable"
+          }
+          hint={
+            pipelineMetric
+              ? pipelineMetric.missingDtpCount > 0
+                ? `Open (Sourced–Negotiation) at current DTP · ${pipelineMetric.missingDtpCount} missing DTP`
+                : "Open (Sourced–Negotiation) at current DTP"
+              : "Unable to load scoped pipeline"
+          }
         />
         <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
         <MetricCard
@@ -465,6 +552,17 @@ function PipelinePage() {
                                 Move forward
                                 <MoveRight className="ml-2 h-4 w-4" />
                               </Button>
+                              {getValidBackwardStages(deal.stage).length > 0 ? (
+                                <Button
+                                  className="w-full"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openBackward(deal)}
+                                >
+                                  <MoveLeft className="mr-2 h-4 w-4" />
+                                  Move backward
+                                </Button>
+                              ) : null}
                               <Button
                                 className="w-full"
                                 size="sm"
@@ -516,6 +614,59 @@ function PipelinePage() {
                 Cancel
               </Button>
               <Button onClick={() => void saveNote()}>Save note</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={backwardOpen} onOpenChange={setBackwardOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Move deal backward</DialogTitle>
+            <DialogDescription>
+              Destination stage and a reason are both required (product.md §9.10/§9.19).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 text-sm">
+              <div className="font-medium">{backwardDeal?.account_name ?? "Selected deal"}</div>
+              <div className="text-muted-foreground">
+                Currently at <span className="capitalize">{backwardDeal?.stage ?? "stage"}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pipeline-backward-stage">Destination stage</Label>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.dealStage}
+                label="Destination stage"
+                value={backwardTargetStage}
+                onValueChange={(value) => setBackwardTargetStage(value as DealStage)}
+                placeholder="Select a stage"
+                options={backwardDeal ? getValidBackwardStages(backwardDeal.stage) : []}
+                allowCreate={false}
+                triggerClassName="w-full"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pipeline-backward-reason">Reason (required)</Label>
+              <Textarea
+                id="pipeline-backward-reason"
+                value={backwardReason}
+                onChange={(e) => setBackwardReason(e.target.value)}
+                placeholder="e.g. Customer needs another demo before testing can start..."
+                rows={4}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setBackwardOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void confirmBackward()}
+                disabled={!backwardTargetStage || !backwardReason.trim()}
+              >
+                Confirm move backward
+              </Button>
             </div>
           </div>
         </DialogContent>
