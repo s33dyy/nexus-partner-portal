@@ -248,11 +248,15 @@ Verified again with the same rigor: `tsc --noEmit`, `eslint`, full suite (387 pa
 
 ---
 
-### 2.16 Ch.15 15b (§15.1/§15.3) — Any deal creator (LIVEY-internal or Distributor) can be awarded 100% of Won rewards with no eligible partner contributor
+### 2.16 Ch.15 15b (§15.1/§15.3) — Any deal creator (LIVEY-internal or Distributor) can be awarded 100% of Won rewards with no eligible partner contributor — **fixed 2026-08-05**
 
 **Spec (§15.1/§15.3):** LIVEY internal roles and Distributor must never receive Partner reward points; if a LIVEY user (or Auto CRM) created the Deal and no eligible Partner contributor exists, Won approval must be blocked until one is assigned.
 
-**Shipped:** awardApprovedWinRewards (src/server/outcome-review-commands.server.ts:64-89) falls back to `[{ userId: deal.user_id, splitPercent: 100, sortOrder: 0 }]` whenever portal_deal_collaborators is empty, with no check on the creator's role. Since rm/pam/kam/isr and restricted_distributor can all create deals (db/schema.sql:1423,1437,1451,1465,1493 — create=true), and approvePO (outcome-review-commands.server.ts:193-234) never blocks on missing eligible contributors, a LIVEY or Distributor deal creator who never tags a partner collaborator is awarded 100% of the deal's reward points instead of Won approval being blocked.
+**Shipped (as of the original audit):** awardApprovedWinRewards (src/server/outcome-review-commands.server.ts:64-89) falls back to `[{ userId: deal.user_id, splitPercent: 100, sortOrder: 0 }]` whenever portal_deal_collaborators is empty, with no check on the creator's role. Since rm/pam/kam/isr and restricted_distributor can all create deals (db/schema.sql:1423,1437,1451,1465,1493 — create=true), and approvePO (outcome-review-commands.server.ts:193-234) never blocks on missing eligible contributors, a LIVEY or Distributor deal creator who never tags a partner collaborator is awarded 100% of the deal's reward points instead of Won approval being blocked.
+
+**Fix:** added `hasEligiblePartnerContributor(tx, dealId)` — one query checking whether the deal's creator (`portal_deals.user_id`) or any tagged `portal_deal_collaborators` row belongs to a real `partner_admin`/`partner_user`. `approvePO` now calls this before doing anything else and returns a validation failure (no `deal_outcome_reviews`/`portal_deals` update, no reward insert — verified directly against the update-call log, not just the return value) whenever it's false, matching §15.3's literal text: "Won approval is blocked until an eligible contributor is assigned." This blocks the whole approval, not just the reward — an ineligible-creator deal can't reach Approved Won at all until a real Partner contributor is tagged.
+
+**Verification:** `tsc --noEmit`, `eslint` clean. 2 new tests (blocks with no eligible contributor and awards nothing; proceeds normally when one exists). Had to extend the shared `installFakePool` test harness in the same file: the new query's SQL text contains `FROM portal_deal_collaborators` as a substring (inside a nested subquery), which the harness's existing generic matcher would have intercepted first and silently returned `[]` for every pre-existing test that doesn't explicitly set `collaborators` — added a more specific, earlier-checked branch plus a `hasEligiblePartnerContributor` test option defaulting to `true`, so none of the 12 pre-existing tests needed to change and all still pass. Full suite 403 pass (+2), same 3 pre-existing unrelated failures, `bun run build` clean. Not browser-verified.
 
 ---
 
@@ -730,13 +734,14 @@ discount workflow are reachable through the shipped UI, not just the command lay
 
 ### Phase 4 — Support and Rewards integrity
 
-**Status as of 2026-08-05: the four live-correctness S1s are done.** §2.13 (ticket creation
+**Status as of 2026-08-05: all five live-correctness S1s are done.** §2.13 (ticket creation
 crash), §2.14 (livey_support ticket-action lockout), §2.15 (redemption reservation/double-spend),
-and §2.18 (reward catalog hard-delete) were all fixed 2026-08-02 — see each entry above for
-detail. §2.16 (contributor-eligibility gate) is re-confirmed still open: `awardApprovedWinRewards`
-still falls back to 100%-to-creator with no role check.
+and §2.18 (reward catalog hard-delete) were fixed 2026-08-02; §2.16 (contributor-eligibility
+gate) was fixed 2026-08-05 — `approvePO` now blocks Won approval outright via
+`hasEligiblePartnerContributor` when no real Partner user/admin is the creator or a tagged
+collaborator. See each entry above for detail.
 
-**Scope still open:** §2.16, plus module completeness: 13c/13d/13e/13f (ticket product/serial
+**Scope still open:** module completeness: 13c/13d/13e/13f (ticket product/serial
 model, real SLA policy, ticket notifications, human-readable ID format), 15c (reward
 calculation's two-step USD→points conversion, currently collapsed into one ad hoc rate — not
 re-verified against the new `reward-commands.server.ts`, worth a fresh check before assuming
@@ -753,7 +758,7 @@ assuming it doesn't.
 **Exit criterion:** ticket creation never fails (met); `livey_support` can accept/close/wait a
 ticket through the product's own UI (met); a redemption cannot be approved past the requester's
 actual balance or the item's actual stock (met); a LIVEY/Distributor-created deal with no
-tagged partner collaborator blocks Won approval instead of awarding the creator (open); at
+tagged partner collaborator blocks Won approval instead of awarding the creator (met); at
 least one redemption has been taken end-to-end through GyFTR to `fulfilled` (unverified either
 way, re-check before assuming).
 

@@ -20,6 +20,31 @@ import {
  * approvePO can't double-award if ever re-invoked. Basis prefers the final
  * frozen Pricing Revision's DTP total over the free-text deal amount when
  * one exists (product.md's "final approved reward-eligible DTP total"). */
+/** §2.16/§15.1/§15.3: "If Auto CRM or a LIVEY user created the Deal and no
+ * eligible Partner contributor exists, Won approval is blocked until an
+ * eligible contributor is assigned" — "LIVEY and Distributor participants
+ * are excluded from the selector." Checks the deal creator (portal_deals.
+ * user_id) and every tagged portal_deal_collaborators row in one query;
+ * true as soon as any of them holds a real partner_admin/partner_user role.
+ * Without this, awardApprovedWinRewards's own fallback-to-creator logic
+ * (used whenever no collaborators are tagged) would award 100% of a Won
+ * deal's reward points to a LIVEY or Distributor creator instead of the
+ * approval being blocked. */
+async function hasEligiblePartnerContributor(tx: PoolClient, dealId: string): Promise<boolean> {
+  const { rows } = await tx.query(
+    `SELECT 1
+     FROM user_roles ur
+     WHERE ur.role IN ('partner_admin', 'partner_user')
+       AND ur.user_id = ANY(
+         ARRAY(SELECT user_id FROM portal_deal_collaborators WHERE deal_id = $1)
+         || ARRAY(SELECT user_id FROM portal_deals WHERE id = $1)
+       )
+     LIMIT 1`,
+    [dealId],
+  );
+  return rows.length > 0;
+}
+
 async function awardApprovedWinRewards(tx: PoolClient, dealId: string, approverId: string | null) {
   const { rows: existingRows } = await tx.query(
     `SELECT 1 FROM reward_point_events WHERE source_type = 'deal_win' AND source_id = $1 LIMIT 1`,
@@ -239,6 +264,16 @@ export async function approvePO(input: {
       return {
         ok: false,
         failure: validationFailure("Only a tagged PAM/RM or Super Admin can approve POs"),
+        correlationId,
+      };
+    }
+
+    if (!(await hasEligiblePartnerContributor(tx, input.data.dealId))) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          "Won approval requires at least one eligible Partner contributor tagged on this deal",
+        ),
         correlationId,
       };
     }

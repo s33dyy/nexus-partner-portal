@@ -132,6 +132,10 @@ function installFakePool(options: {
   finalRevisionTotal?: number | null;
   collaborators?: Array<{ user_id: string; split_percent: number; sort_order: number }>;
   existingRewardEvent?: boolean;
+  // §2.16: defaults to true so every pre-existing test in this file (written
+  // before hasEligiblePartnerContributor's gate existed) keeps exercising
+  // what it actually intends to test; set false to prove the gate itself.
+  hasEligiblePartnerContributor?: boolean;
 }) {
   return async () => {
     const { pool } = await import("@/server/postgres.server");
@@ -143,6 +147,13 @@ function installFakePool(options: {
         const s = sql.trim();
         if (s.startsWith("BEGIN") || s.startsWith("COMMIT") || s.startsWith("ROLLBACK")) {
           return { rows: [], rowCount: 0 };
+        }
+        // Checked before the FROM portal_deal_collaborators branch below —
+        // this query's text contains that same substring in a nested
+        // subquery, so order matters here.
+        if (s.startsWith("SELECT 1") && s.includes("FROM user_roles")) {
+          const eligible = options.hasEligiblePartnerContributor ?? true;
+          return { rows: eligible ? [{ "?column?": 1 }] : [], rowCount: eligible ? 1 : 0 };
         }
         if (s.includes("FROM portal_deals") && s.includes("FOR UPDATE")) {
           return { rows: [options.dealRow], rowCount: 1 };
@@ -367,6 +378,56 @@ test("§2.6/§9.15: submitPO is still denied outside negotiation/won (e.g. quali
       },
     });
     expect(result.ok).toBe(false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.16/§15.3: approvePO blocks Won approval with no eligible Partner contributor, and awards nothing", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow(),
+    rewardDealInfo: baseRewardDealInfo(),
+    hasEligiblePartnerContributor: false,
+  })();
+  try {
+    const { approvePO } = await import("@/server/outcome-review-commands.server");
+    const result = await approvePO({
+      actor: buildActor(),
+      data: { dealId: "deal-1", reason: "PO verified" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.message).toContain("eligible Partner contributor");
+    }
+    expect(harness.insertedRewardEvents).toHaveLength(0);
+    expect(
+      harness.updateCalls.some(
+        (c) =>
+          c.sql.includes("UPDATE portal_deals SET stage") ||
+          c.sql.includes("UPDATE deal_outcome_reviews"),
+      ),
+    ).toBe(false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.16/§15.3: approvePO proceeds when an eligible Partner contributor exists", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow(),
+    rewardDealInfo: baseRewardDealInfo(),
+    hasEligiblePartnerContributor: true,
+  })();
+  try {
+    const { approvePO } = await import("@/server/outcome-review-commands.server");
+    const result = await approvePO({
+      actor: buildActor(),
+      data: { dealId: "deal-1", reason: "PO verified" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(harness.insertedRewardEvents).toHaveLength(1);
   } finally {
     harness.restore();
   }
