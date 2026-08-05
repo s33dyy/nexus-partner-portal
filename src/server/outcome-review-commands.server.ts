@@ -128,15 +128,24 @@ export async function submitPO(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
 
-    if (deal.stage !== "negotiation") {
+    // §2.6/§9.15: markDealWon flips stage straight to "won" (matching the
+    // spec's "Negotiation → Won with Submit Later" / "...with valid PO
+    // Upload Now" transitions — Won itself is reachable immediately, with
+    // or without a PO in hand). Previously this check only ever accepted
+    // "negotiation", so the moment a deal was marked Won it could *never*
+    // submit a PO again — permanently locking it out of outcome review and
+    // the reward it's supposed to trigger. A deal can only reach "won" via
+    // markDealWon's own terminal-stage guard, so accepting it here doesn't
+    // open any new way to submit a PO on a deal that was never negotiated.
+    if (deal.stage !== "negotiation" && deal.stage !== "won") {
       return {
         ok: false,
-        failure: validationFailure("Can only submit PO when deal is in negotiation"),
+        failure: validationFailure("Can only submit PO when deal is in negotiation or won"),
         correlationId,
       };
     }
@@ -190,6 +199,20 @@ export type ReviewOutcomeInput = {
   reason: string;
 };
 
+// §9.7/§9.15: "Tagged PAM/RM or Super Admin" may approve/request-changes/
+// reject a claimed Won outcome. The full participant-tag model (§5.7/§9g —
+// automatic PAM/KAM tagging on Testing→Qualified) isn't built yet, so a
+// literal tag check would currently block every real PAM/RM outright; this
+// is the same deliberate interim step already used for LIVEY-internal deal
+// visibility elsewhere in this codebase (see isLiveyInternalRole in
+// table-policy.server.ts) — authorizeDealActor's existing geography-ceiling/
+// partner scoping stands in for "tagged" until that engine exists.
+const PO_REVIEW_ROLES = new Set(["super_admin", "pam", "rm"]);
+
+function authorizePoReviewer(actor: DealCommandActor): boolean {
+  return PO_REVIEW_ROLES.has(actor.assignment.roleKey);
+}
+
 export async function approvePO(input: {
   actor: DealCommandActor;
   data: ReviewOutcomeInput;
@@ -201,11 +224,21 @@ export async function approvePO(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    // Only super_admin or designated reviewer can approve POs
-    if (input.actor.assignment.roleKey !== "super_admin") {
+    // §2.7: previously only ever accepted literal super_admin (so the
+    // PAM/RM buttons the UI shows always failed) and never called
+    // authorizeDealActor at all (so loosening the role check alone would
+    // have let any pam/rm system-wide act on any deal, not just ones in
+    // their own scope — the same vulnerability class already closed for
+    // approveDiscount in pricing-commands.server.ts).
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (!authorizePoReviewer(input.actor)) {
       return {
         ok: false,
-        failure: validationFailure("Only super_admin can approve POs"),
+        failure: validationFailure("Only a tagged PAM/RM or Super Admin can approve POs"),
         correlationId,
       };
     }
@@ -244,10 +277,15 @@ export async function requestChanges(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    if (input.actor.assignment.roleKey !== "super_admin") {
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (!authorizePoReviewer(input.actor)) {
       return {
         ok: false,
-        failure: validationFailure("Only super_admin can request changes to PO"),
+        failure: validationFailure("Only a tagged PAM/RM or Super Admin can request changes to PO"),
         correlationId,
       };
     }
@@ -280,10 +318,15 @@ export async function rejectOutcome(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    if (input.actor.assignment.roleKey !== "super_admin") {
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (!authorizePoReviewer(input.actor)) {
       return {
         ok: false,
-        failure: validationFailure("Only super_admin can reject POs"),
+        failure: validationFailure("Only a tagged PAM/RM or Super Admin can reject POs"),
         correlationId,
       };
     }

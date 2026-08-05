@@ -64,6 +64,7 @@ export function toDropdownCallerAuth(authContext: AuthContext): DropdownCallerAu
     userId,
     partnerId: authContext.profile?.partner_id ?? null,
     isSuperAdmin: authContext.roles.includes("super_admin"),
+    isDistributor: authContext.roles.includes("restricted_distributor"),
   };
 }
 

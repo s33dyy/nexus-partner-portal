@@ -190,6 +190,78 @@ test("tagDealParticipant denies when a partner-scoped actor doesn't match the de
   }
 });
 
+test("§8.7: tagDealParticipant denies a restricted_distributor from invoking the command at all", async () => {
+  const harness = await installFakePool({ dealRow: baseDealRow({ partner_id: "partner-1" }) })();
+  try {
+    const { tagDealParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await tagDealParticipant({
+      actor,
+      data: {
+        dealId: "deal-1",
+        participantUserId: "user-9",
+        participantType: "collaborator",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("cannot invoke");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: tagDealParticipant denies a non-RM/PAM actor from creating a distributor-typed tag", async () => {
+  const harness = await installFakePool({ dealRow: baseDealRow({ partner_id: "partner-1" }) })();
+  try {
+    const { tagDealParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({
+      roleKey: "kam",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    });
+    const result = await tagDealParticipant({
+      actor,
+      data: {
+        dealId: "deal-1",
+        participantUserId: "user-9",
+        participantType: "Distributor",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("RM or PAM");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: tagDealParticipant allows an RM to create a distributor-typed tag", async () => {
+  const harness = await installFakePool({ dealRow: baseDealRow({ partner_id: "partner-1" }) })();
+  try {
+    const { tagDealParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({
+      roleKey: "rm",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    });
+    const result = await tagDealParticipant({
+      actor,
+      data: {
+        dealId: "deal-1",
+        participantUserId: "user-9",
+        participantType: "Distributor",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("tagDealParticipant persists participant_user_id and creates a task for the tagged person", async () => {
   const harness = await installFakePool({ dealRow: baseDealRow() })();
   try {
@@ -289,6 +361,81 @@ test("tagCustomerParticipant denies when a partner-scoped actor doesn't match th
   }
 });
 
+test("§8.7: tagCustomerParticipant denies a restricted_distributor from invoking the command at all", async () => {
+  const harness = await installFakePool({
+    customerRow: baseCustomerRow({ partner_id: "partner-1" }),
+  })();
+  try {
+    const { tagCustomerParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await tagCustomerParticipant({
+      actor,
+      data: {
+        customerId: "customer-1",
+        participantUserId: "user-9",
+        participantType: "collaborator",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("cannot invoke");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: tagCustomerParticipant denies a Partner Admin from creating a distributor-typed tag (RM/PAM only)", async () => {
+  const harness = await installFakePool({
+    customerRow: baseCustomerRow({ partner_id: "partner-1" }),
+  })();
+  try {
+    const { tagCustomerParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({ roleKey: "partner_admin", partnerId: "partner-1" });
+    const result = await tagCustomerParticipant({
+      actor,
+      data: {
+        customerId: "customer-1",
+        participantUserId: "user-9",
+        participantType: "distributor",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("RM or PAM");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: tagCustomerParticipant allows a PAM to create a distributor-typed tag", async () => {
+  const harness = await installFakePool({
+    customerRow: baseCustomerRow({ partner_id: "partner-1" }),
+  })();
+  try {
+    const { tagCustomerParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({
+      roleKey: "pam",
+      geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    });
+    const result = await tagCustomerParticipant({
+      actor,
+      data: {
+        customerId: "customer-1",
+        participantUserId: "user-9",
+        participantType: "distributor",
+        reason: "coverage",
+      },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("tagCustomerParticipant persists participant_user_id and creates a task for the tagged person", async () => {
   const harness = await installFakePool({ customerRow: baseCustomerRow() })();
   try {
@@ -334,6 +481,44 @@ test("tagCustomerParticipant skips task creation when no specific person is tagg
     });
     expect(result.ok).toBe(true);
     expect(insertsInto(harness.queries, "tasks")).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: untagDealParticipant denies a restricted_distributor from invoking the command at all", async () => {
+  const harness = await installFakePool({ dealRow: baseDealRow({ partner_id: "partner-1" }) })();
+  try {
+    const { untagDealParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await untagDealParticipant({
+      actor,
+      data: { dealId: "deal-1", participantId: "participant-1" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("cannot invoke");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§8.7: untagCustomerParticipant denies a restricted_distributor from invoking the command at all", async () => {
+  const harness = await installFakePool({
+    customerRow: baseCustomerRow({ partner_id: "partner-1" }),
+  })();
+  try {
+    const { untagCustomerParticipant } = await import("@/server/participant-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await untagCustomerParticipant({
+      actor,
+      data: { customerId: "customer-1", participantId: "participant-1" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("cannot invoke");
+    }
   } finally {
     harness.restore();
   }

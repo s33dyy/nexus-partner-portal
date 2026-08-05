@@ -85,6 +85,7 @@ type DealRow = {
   region: string | null;
   version: number;
   account_name: string;
+  commercial_approved?: boolean;
 };
 
 function installFakePool(dealRow: DealRow | null) {
@@ -137,9 +138,145 @@ function baseDealRow(overrides: Partial<DealRow> = {}): DealRow {
     region: "India West",
     version: 3,
     account_name: "Acme Co",
+    // §2.5: forward movement now requires registration approval — default
+    // to already-approved so every pre-existing test in this file (written
+    // before that gate existed) keeps exercising what it actually intends
+    // to test, unless a test deliberately overrides this to prove the gate.
+    commercial_approved: true,
     ...overrides,
   };
 }
+
+// Unlike installFakePool (which returns the deal row for every SELECT
+// regardless of target table — fine when a test never issues a second kind
+// of SELECT, but wrong for the §2.4 Distributor tag check, which runs its
+// own `SELECT 1 FROM deal_participants ...`), this discriminates by SQL
+// text so a distributor-tag test can control that query's result
+// independently of the deal-row SELECT.
+function installFakePoolWithParticipants(dealRow: DealRow | null, isTagged: boolean) {
+  return async () => {
+    const { pool } = await import("@/server/postgres.server");
+    const calls: string[] = [];
+
+    const fakeClient = {
+      query: async (sql: string, _params?: unknown[]) => {
+        const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
+        calls.push(verb);
+        if (verb === "SELECT" && sql.includes("deal_participants")) {
+          return { rows: isTagged ? [{ "?column?": 1 }] : [], rowCount: isTagged ? 1 : 0 };
+        }
+        if (verb === "SELECT") {
+          return { rows: dealRow ? [dealRow] : [], rowCount: dealRow ? 1 : 0 };
+        }
+        return { rows: [], rowCount: 1 };
+      },
+      release: () => undefined,
+    };
+
+    const originalConnect = pool.connect.bind(pool);
+    pool.connect = (async () => fakeClient) as typeof pool.connect;
+
+    return {
+      calls,
+      restore: () => {
+        pool.connect = originalConnect as typeof pool.connect;
+      },
+    };
+  };
+}
+
+// Discriminates by SQL text (unlike installFakePool, which returns the same
+// deal row for every SELECT) so a submitDealForRegistration test can control
+// the pricing_revisions lookup independently of the deal row.
+function installFakePoolForRegistration(dealRow: DealRow, finalRevisionTotalDtpUsd: number | null) {
+  return async () => {
+    const { pool } = await import("@/server/postgres.server");
+    const updateCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+    const fakeClient = {
+      query: async (sql: string, params?: unknown[]) => {
+        const s = sql.trim();
+        if (s.startsWith("BEGIN") || s.startsWith("COMMIT") || s.startsWith("ROLLBACK")) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (s.includes("FROM pricing_revisions")) {
+          return {
+            rows: finalRevisionTotalDtpUsd != null ? [{ total_dtp_usd: finalRevisionTotalDtpUsd }] : [],
+            rowCount: finalRevisionTotalDtpUsd != null ? 1 : 0,
+          };
+        }
+        if (s.includes("SELECT amount_usd, amount_value")) {
+          return { rows: [{ amount_usd: null, amount_value: 0 }], rowCount: 1 };
+        }
+        if (s.includes("FROM portal_deals") && s.includes("FOR UPDATE")) {
+          return { rows: [dealRow], rowCount: 1 };
+        }
+        if (s.startsWith("UPDATE")) {
+          updateCalls.push({ sql: s, params: params ?? [] });
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      },
+      release: () => undefined,
+    };
+
+    const originalConnect = pool.connect.bind(pool);
+    pool.connect = (async () => fakeClient) as typeof pool.connect;
+
+    return {
+      updateCalls,
+      restore: () => {
+        pool.connect = originalConnect as typeof pool.connect;
+      },
+    };
+  };
+}
+
+test("§2.5/§9.1/§9.7: submitDealForRegistration auto-approves without touching stage", async () => {
+  const harness = await installFakePoolForRegistration(
+    baseDealRow({ stage: "sourced", status: "draft" }),
+    2000,
+  )();
+  try {
+    const { submitDealForRegistration } = await import("@/server/deal-commands.server");
+    const result = await submitDealForRegistration({
+      actor: buildActor(),
+      data: { dealId: "deal-1" },
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.updateCalls).toHaveLength(1);
+    const sql = harness.updateCalls[0]?.sql ?? "";
+    expect(sql).not.toContain("stage");
+    expect(sql).toContain("status");
+    expect(sql).toContain("commercial_approved");
+    // status=$1, commercial_approved=$2 — approved + true for a $2,000 deal (below the $5,000 threshold).
+    expect(harness.updateCalls[0]?.params[0]).toBe("approved");
+    expect(harness.updateCalls[0]?.params[1]).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.5/§9.1/§9.7: submitDealForRegistration requires manual review above the threshold, still without touching stage", async () => {
+  const harness = await installFakePoolForRegistration(
+    baseDealRow({ stage: "sourced", status: "draft" }),
+    50000,
+  )();
+  try {
+    const { submitDealForRegistration } = await import("@/server/deal-commands.server");
+    const result = await submitDealForRegistration({
+      actor: buildActor(),
+      data: { dealId: "deal-1" },
+    });
+    expect(result.ok).toBe(true);
+    const sql = harness.updateCalls[0]?.sql ?? "";
+    expect(sql).not.toContain("stage");
+    expect(harness.updateCalls[0]?.params[0]).toBe("submitted");
+    expect(harness.updateCalls[0]?.params[1]).toBe(false);
+  } finally {
+    harness.restore();
+  }
+});
 
 test("moveDealStageForward denies when assignment is not active", async () => {
   const harness = await installFakePool(baseDealRow())();
@@ -178,6 +315,85 @@ test("moveDealStageForward denies when partner-scoped assignment does not match 
     if (!result.ok) {
       expect(result.failure.code).toBe("POLICY_DENIED");
     }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4/§8.7a: moveDealStageForward denies a restricted_distributor whose own partner matches but who is not a tagged participant on the deal", async () => {
+  const harness = await installFakePoolWithParticipants(
+    baseDealRow({ partner_id: "partner-1" }),
+    false,
+  )();
+  try {
+    const { moveDealStageForward } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "restricted_distributor",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
+    const result = await moveDealStageForward({
+      actor,
+      dealId: "deal-1",
+      expectedVersion: 3,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.failure.code === "POLICY_DENIED") {
+      expect(result.failure.reason).toContain("not tagged");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4/§8.7a: moveDealStageForward allows a restricted_distributor who is an active tagged participant on the deal", async () => {
+  const harness = await installFakePoolWithParticipants(
+    baseDealRow({ partner_id: "partner-1" }),
+    true,
+  )();
+  try {
+    const { moveDealStageForward } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "restricted_distributor",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
+    const result = await moveDealStageForward({
+      actor,
+      dealId: "deal-1",
+      expectedVersion: 3,
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4/§8.7a: createDeal never runs the participant-tag check (nothing to tag yet on a brand-new deal)", async () => {
+  const harness = await installFakePoolWithParticipants(null, false)();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const actor = buildActor({
+      roleKey: "restricted_distributor",
+      teamDomain: "partner_success",
+      partnerId: "partner-1",
+    });
+    const result = await createDeal({
+      actor,
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        product: "Widget",
+        amount: "1000",
+        partnerId: "partner-1",
+        source: "manual",
+      },
+    });
+    // isTagged is deliberately false in this harness — if createDeal's new
+    // actor/deal literal (no `id` yet) ever started running the tag check
+    // against a not-yet-created deal, this would fail closed and the
+    // assertion below would catch it.
+    expect(result.ok).toBe(true);
   } finally {
     harness.restore();
   }
@@ -276,6 +492,45 @@ test("moveDealStageForward advances exactly one stage and bumps the version", as
       "INSERT",
       "COMMIT",
     ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.5/§9.9: moveDealStageForward denies a deal that has never been approved for registration", async () => {
+  const harness = await installFakePool(
+    baseDealRow({ stage: "sourced", version: 3, commercial_approved: false }),
+  )();
+  try {
+    const { moveDealStageForward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageForward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.message).toContain("registration approval");
+    }
+    expect(harness.updateCalls).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.5/§9.9: moveDealStageForward allows a deal already approved for registration, at any pre-negotiation stage", async () => {
+  const harness = await installFakePool(
+    baseDealRow({ stage: "qualified", version: 3, commercial_approved: true }),
+  )();
+  try {
+    const { moveDealStageForward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageForward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.updateCalls[0]?.params[1]).toBe("proposal");
   } finally {
     harness.restore();
   }

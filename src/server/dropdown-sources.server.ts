@@ -35,7 +35,16 @@ import type { DropdownOption, DropdownSourceKey } from "@/lib/dropdown-sources";
  * remain intentionally open to any authenticated-or-not caller, matching
  * table-policy.server.ts's PUBLIC_READ_TABLES precedent for those same two
  * tables (lookup_values, portal_catalog_items). */
-export type DropdownCallerAuth = { userId: string; partnerId: string | null; isSuperAdmin: boolean };
+export type DropdownCallerAuth = {
+  userId: string;
+  partnerId: string | null;
+  isSuperAdmin: boolean;
+  // §2.4/§8.7a/§8.8: "Distributor cannot discover an untagged Customer" —
+  // this lookup runs its own raw SQL rather than going through
+  // table-policy.server.ts's applyTablePolicy, so the tag-only scoping
+  // added there for restricted_distributor has to be re-applied here too.
+  isDistributor: boolean;
+};
 
 async function requireAuthenticatedCaller(): Promise<DropdownCallerAuth> {
   const ctx = await getAuthContext();
@@ -47,6 +56,7 @@ async function requireAuthenticatedCaller(): Promise<DropdownCallerAuth> {
     userId,
     partnerId: (ctx.profile as { partner_id?: string | null } | null)?.partner_id ?? null,
     isSuperAdmin: ctx.roles.includes("super_admin"),
+    isDistributor: ctx.roles.includes("restricted_distributor"),
   };
 }
 
@@ -243,6 +253,12 @@ export async function listDropdownSourceValues(input: {
     } else if (scopedUserId) {
       values.push(scopedUserId);
       where.push(`user_id = $${values.length}`);
+    }
+    if (auth.isDistributor && auth.userId) {
+      values.push(auth.userId);
+      where.push(
+        `id IN (SELECT customer_id FROM customer_participants WHERE participant_user_id = $${values.length} AND valid_to IS NULL)`,
+      );
     }
     if (term) {
       values.push(search, search, search, search, search);

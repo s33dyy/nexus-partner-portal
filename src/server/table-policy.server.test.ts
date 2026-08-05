@@ -707,7 +707,7 @@ test("portal_deals reads are unscoped by ownership for RM/PAM/KAM/ISR/Support �
   }
 });
 
-test("portal_deals reads stay partner-scoped for partner_admin/partner_user, and self-scoped for restricted_distributor via their partnerId", async () => {
+test("portal_deals reads stay partner-scoped for partner_admin, and tag-only-scoped for restricted_distributor via their partnerId", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
 
   const partnerRead = await applyTablePolicy(
@@ -725,10 +725,11 @@ test("portal_deals reads stay partner-scoped for partner_admin/partner_user, and
     { column: "partner_id", value: "partner-a", operator: "eq" },
   ]);
 
-  // restricted_distributor always has a real partnerId (they're tenant-
-  // scoped, not internal), so they never reach the LIVEY-internal branch —
-  // still whole-tenant, not tag-scoped (§2.4/8.7a — a separate, still-open
-  // finding about the write/command layer, not this read-scope fix).
+  // §2.4/§8.7a (fixed): restricted_distributor always has a real partnerId
+  // (they're tenant-scoped, not internal), so they never reach the
+  // LIVEY-internal branch — but unlike partner_admin/partner_user, they get
+  // no ownership fallback at all: only partner_id scope plus an active
+  // deal_participants tag makes a deal visible.
   const distributorRead = await applyTablePolicy(
     { table: "portal_deals", operation: "select", filters: [] },
     {
@@ -743,6 +744,81 @@ test("portal_deals reads stay partner-scoped for partner_admin/partner_user, and
   expect(distributorRead.filters).toEqual([
     { column: "partner_id", value: "partner-a", operator: "eq" },
   ]);
+  expect(distributorRead.scopeOwnerOrParticipantTag).toEqual({
+    ownerColumn: null,
+    ownerValue: "distributor-1",
+    participantTable: "deal_participants",
+    fkColumn: "deal_id",
+  });
+});
+
+// §2.9/§10.2: this guard (assertNoProtectedLifecycleUpdate,
+// TASK_LIFECYCLE_UPDATE_FIELDS) already existed — landed 2026-08-02 in an
+// unrelated feature commit and never cross-referenced back to `current
+// gaps.md`'s §2.9 entry, which still described it as open as of this
+// writing. Added as regression coverage while re-verifying that finding,
+// not as a new fix.
+test("§2.9/§10.2: generic update path rejects a direct write to tasks.status, even for super_admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const superAdminAuth = {
+    userId: "admin-1",
+    roles: ["super_admin"],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+    governedRoleKey: "super_admin" as const,
+  };
+
+  await expect(
+    applyTablePolicy(
+      { table: "tasks", operation: "update", values: { status: "cancelled" }, filters: [] },
+      superAdminAuth,
+    ),
+  ).rejects.toThrow(/named transition command/i);
+});
+
+test("§2.9/§10.2: generic update path rejects direct writes to version/blocked_reason/completed_at/cancelled_at too", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "user-1",
+    roles: ["partner_user"],
+    partnerId: "partner-1",
+    companyName: "Acme",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_user" as const,
+  };
+
+  for (const column of ["version", "blocked_reason", "completed_at", "cancelled_at"]) {
+    await expect(
+      applyTablePolicy(
+        { table: "tasks", operation: "update", values: { [column]: "x" }, filters: [] },
+        auth,
+      ),
+    ).rejects.toThrow(/named transition command/i);
+  }
+});
+
+test("§2.9/§10.2: generic update path still allows ordinary tasks columns (title, priority, due_at)", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "user-1",
+    roles: ["partner_user"],
+    partnerId: "partner-1",
+    companyName: "Acme",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_user" as const,
+  };
+
+  const result = await applyTablePolicy(
+    {
+      table: "tasks",
+      operation: "update",
+      values: { title: "Renamed", priority: "high" },
+      filters: [],
+    },
+    auth,
+  );
+  expect(result.values).toEqual({ title: "Renamed", priority: "high" });
 });
 
 test("tasks reads are scoped to creator OR assignee for LIVEY-internal roles, not creator-only", async () => {
@@ -1252,7 +1328,7 @@ test("partner_admin keeps full company-wide visibility — no owner-or-tag restr
   expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
 });
 
-test("restricted_distributor is unaffected by this change (still flat partner_id scope)", async () => {
+test("restricted_distributor gets tag-only scope (no ownership fallback), unlike partner_user", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
   const result = await applyTablePolicy(
     { table: "portal_deals", operation: "select", filters: [] },
@@ -1266,7 +1342,29 @@ test("restricted_distributor is unaffected by this change (still flat partner_id
     value: "partner-1",
     operator: "eq",
   });
-  expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
+  expect(result.scopeOwnerOrParticipantTag).toEqual({
+    ownerColumn: null,
+    ownerValue: "user-1",
+    participantTable: "deal_participants",
+    fkColumn: "deal_id",
+  });
+});
+
+test("restricted_distributor reading portal_customers also gets tag-only scope", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    { table: "portal_customers", operation: "select", filters: [] },
+    partnerUserAuth({
+      roles: ["restricted_distributor"],
+      governedRoleKey: "restricted_distributor" as const,
+    }),
+  );
+  expect(result.scopeOwnerOrParticipantTag).toEqual({
+    ownerColumn: null,
+    ownerValue: "user-1",
+    participantTable: "customer_participants",
+    fkColumn: "customer_id",
+  });
 });
 
 test("super_admin stays fully unscoped, even for partner_user-restricted tables", async () => {

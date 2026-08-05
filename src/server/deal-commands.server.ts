@@ -74,10 +74,33 @@ export type DealSnapshot = {
   commercial_approved: boolean;
 };
 
-export function authorizeDealActor(
+/** §8.7/§8.8: "Distributor assignment grants no record visibility until a
+ * Customer or Deal tag exists" — a Distributor must be an active tagged
+ * participant on this specific deal, not merely a member of the owning
+ * partner's tenant. Checked here (not just in table-policy.server.ts's read
+ * scope) so the write-side commands below can't be reached by guessing a
+ * dealId that belongs to the Distributor's own partner but was never tagged
+ * to them. */
+async function isActiveDealParticipant(
+  tx: Pick<PoolClient, "query">,
+  dealId: string,
+  userId: string | null,
+): Promise<boolean> {
+  if (!userId) return false;
+  const { rows } = await tx.query(
+    `SELECT 1 FROM deal_participants
+     WHERE deal_id = $1 AND participant_user_id = $2 AND valid_to IS NULL
+     LIMIT 1`,
+    [dealId, userId],
+  );
+  return rows.length > 0;
+}
+
+export async function authorizeDealActor(
   actor: DealCommandActor,
-  deal: Pick<DealSnapshot, "partner_id" | "country" | "region">,
-): PolicyDecision {
+  deal: Pick<DealSnapshot, "partner_id" | "country" | "region"> & { id?: string },
+  tx: Pick<PoolClient, "query">,
+): Promise<PolicyDecision> {
   const basePolicy = evaluateActiveContextPolicy({
     roles: [actor.assignment.roleKey],
     assignment: actor.assignment,
@@ -89,11 +112,27 @@ export function authorizeDealActor(
     return { allowed: true, reason: null };
   }
 
-  if (
-    actor.assignment.roleKey === "partner_admin" ||
-    actor.assignment.roleKey === "partner_user" ||
-    actor.assignment.roleKey === "restricted_distributor"
-  ) {
+  if (actor.assignment.roleKey === "restricted_distributor") {
+    if (!actor.assignment.partnerId || actor.assignment.partnerId !== deal.partner_id) {
+      return {
+        allowed: false,
+        reason: "Deal is outside the assignment's partner scope",
+        denial: makePolicyDenial(null, "Deal is outside the assignment's partner scope"),
+      };
+    }
+    // A brand-new deal (createDeal, no `id` yet) has nothing to tag yet —
+    // the tag check only applies to actions on an already-existing deal.
+    if (deal.id && !(await isActiveDealParticipant(tx, deal.id, actor.userId))) {
+      return {
+        allowed: false,
+        reason: "Deal is not tagged to this Distributor assignment",
+        denial: makePolicyDenial(null, "Deal is not tagged to this Distributor assignment"),
+      };
+    }
+    return { allowed: true, reason: null };
+  }
+
+  if (actor.assignment.roleKey === "partner_admin" || actor.assignment.roleKey === "partner_user") {
     if (!actor.assignment.partnerId || actor.assignment.partnerId !== deal.partner_id) {
       return {
         allowed: false,
@@ -277,7 +316,7 @@ async function runDealTransitionCommand(input: {
       };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -366,6 +405,18 @@ export async function moveDealStageForward(input: {
     eventName: "deal.stage_advanced",
     reason: input.note ?? null,
     resolveTarget: (deal) => {
+      // §2.5/§9.8/§9.9: "Forward movement is available only on approved or
+      // auto-approved active Deals" — every stage row in §9.8's table lists
+      // "Approved/auto-approved registration" as a minimum forward
+      // requirement starting at Sourced, so this applies to every forward
+      // move, not just entry into Negotiation. Previously unchecked here, a
+      // deal that had never even been submitted for registration could be
+      // forward-clicked all the way to Negotiation.
+      if (!deal.commercial_approved) {
+        return validationFailure(
+          "Deal must complete registration approval before moving forward",
+        );
+      }
       const toStage = FORWARD_NEXT_STAGE[deal.stage];
       if (!toStage) {
         return validationFailure(`Deal cannot move forward from stage "${deal.stage}"`);
@@ -542,11 +593,15 @@ export async function createDeal(input: {
     const currencyCode = (data.currencyCode?.trim() || "USD").toUpperCase();
     const amountValue = data.amountValue ?? parseDealAmount(amount);
     const amountUsd = currencyCode === "USD" ? amountValue : (data.amountUsd ?? null);
-    const policy = authorizeDealActor(input.actor, {
-      partner_id: resolvedPartnerId,
-      country,
-      region,
-    });
+    const policy = await authorizeDealActor(
+      input.actor,
+      {
+        partner_id: resolvedPartnerId,
+        country,
+        region,
+      },
+      tx,
+    );
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -690,7 +745,7 @@ export async function submitDealForRegistration(input: {
     if (!deal) {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -722,15 +777,19 @@ export async function submitDealForRegistration(input: {
 
     const autoApproved = !requiresSuperAdminApproval(dtpToEvaluate);
 
-    // For autoApproved deals, we set commercial_approved = true and move to negotiation
-    // if it hasn't reached it. If not autoApproved, we just set status = submitted.
+    // §2.5/§9.1/§9.7/§9.9: registration status and pipeline stage are
+    // independent dimensions — approving (auto or manual) records a
+    // decision and unblocks forward movement (see moveDealStageForward's
+    // commercial_approved gate), it never itself advances `stage`. A deal
+    // stays exactly where the submitter left it; the *next* explicit
+    // "move forward" click is what progresses the pipeline, now that it's
+    // no longer blocked.
     const newStatus = autoApproved ? "approved" : "submitted";
     const newCommercialApproved = autoApproved;
-    const newStage = autoApproved ? "negotiation" : deal.stage;
 
     await tx.query(
-      `UPDATE portal_deals SET status = $1, commercial_approved = $2, stage = $3, updated_at = now() WHERE id = $4`,
-      [newStatus, newCommercialApproved, newStage, input.data.dealId],
+      `UPDATE portal_deals SET status = $1, commercial_approved = $2, updated_at = now() WHERE id = $3`,
+      [newStatus, newCommercialApproved, input.data.dealId],
     );
 
     await recordTransitionAndOutbox({
@@ -740,7 +799,7 @@ export async function submitDealForRegistration(input: {
       commandName: "SubmitDealForRegistration",
       eventName: autoApproved ? "DealRegistrationAutoApproved" : "DealRegistrationSubmitted",
       deal,
-      toStage: newStage as DealStage,
+      toStage: deal.stage,
       toStatus: newStatus,
       reason: autoApproved
         ? "Auto-approved based on DTP threshold"

@@ -35,7 +35,7 @@ export type TableQueryLike = {
   // scopeAnyColumnEquals's two-plain-columns shape can't express. See
   // isRestrictedPartnerRole.
   scopeOwnerOrParticipantTag?: {
-    ownerColumn: string;
+    ownerColumn: string | null;
     ownerValue: string;
     participantTable: "deal_participants" | "customer_participants";
     fkColumn: "deal_id" | "customer_id";
@@ -227,13 +227,23 @@ function isLiveyInternalRole(auth: TablePolicyAuthContext): boolean {
  * tagDealParticipant/tagCustomerParticipant) — not their whole company's
  * book of business. Partner Admin is deliberately excluded — it keeps the
  * existing flat partner_id-wide visibility, since an admin needs to
- * oversee the whole team. restricted_distributor's own §8.7a gap (it
- * currently gets that same flat whole-tenant access, though product.md
- * §8.7/§8.8 says it should be tag-gated even more strictly than this) is
- * intentionally left untouched here — a separate decision, not bundled
- * into this one. */
+ * oversee the whole team. restricted_distributor is handled by the
+ * stricter isDistributorRole/scopeOwnerOrParticipantTag branch below (see
+ * §2.4/§8.7a) rather than this one — a Distributor gets tag-only visibility
+ * with no "I created it" fallback, since product.md §8.7/§8.8 says a
+ * Distributor's assignment "grants no record visibility until a Customer or
+ * Deal tag exists," full stop. */
 function isRestrictedPartnerRole(auth: TablePolicyAuthContext): boolean {
   return auth.governedRoleKey === "partner_user" && !!auth.partnerId;
+}
+
+/** §8.7/§8.8: a Distributor's assignment grants no record visibility until
+ * an explicit Deal/Customer tag exists — stricter than isRestrictedPartnerRole
+ * above (no "I created it" fallback at all, via scopeOwnerOrParticipantTag's
+ * `ownerColumn: null` mode). See authorizeDealActor's matching write-side
+ * check in deal-commands.server.ts. */
+function isDistributorRole(auth: TablePolicyAuthContext): boolean {
+  return auth.governedRoleKey === "restricted_distributor" && !!auth.partnerId;
 }
 
 function isGenericSuperAdmin(auth: GenericTableAuthContext) {
@@ -812,6 +822,30 @@ async function applyTablePolicyInner(
         filters: appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
         scopeOwnerOrParticipantTag: {
           ownerColumn: "user_id",
+          ownerValue: auth.userId,
+          participantTable:
+            query.table === "portal_deals" ? "deal_participants" : "customer_participants",
+          fkColumn: query.table === "portal_deals" ? "deal_id" : "customer_id",
+        },
+      };
+    }
+
+    // §2.4/§8.7a: a Distributor gets tag-only visibility within its own
+    // tenant — "partner_id X AND I'm an active tagged participant", no
+    // ownership fallback at all (unlike partner_user above, a Distributor
+    // seeing a record it merely created but was never tagged on would still
+    // violate "grants no record visibility until a tag exists").
+    if (
+      (query.table === "portal_deals" || query.table === "portal_customers") &&
+      (query.operation === "select" || query.operation === "count") &&
+      isDistributorRole(auth) &&
+      auth.userId
+    ) {
+      return {
+        ...query,
+        filters: appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
+        scopeOwnerOrParticipantTag: {
+          ownerColumn: null,
           ownerValue: auth.userId,
           participantTable:
             query.table === "portal_deals" ? "deal_participants" : "customer_participants",

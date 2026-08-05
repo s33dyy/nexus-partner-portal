@@ -32,7 +32,7 @@ export async function addDealLineItem(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -105,7 +105,7 @@ export async function updateDealLineItem(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -187,7 +187,7 @@ export async function removeDealLineItem(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -237,7 +237,7 @@ export async function freezePricingRevision(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -300,7 +300,7 @@ export async function requestDiscount(input: {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -363,7 +363,7 @@ export async function approveDiscount(input: {
     // whether they have any relationship to this deal's partner or region —
     // could approve a discount on any deal. The role check below is
     // layered on top of that, not a replacement for it.
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }

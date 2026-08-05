@@ -39,6 +39,7 @@ dist-ssr
 /tmp/
 /output/
 /graphify-out/
+/db/dumps/
 
 # Local tool config/state — environment-specific, not shared
 /.claude/

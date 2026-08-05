@@ -11,7 +11,6 @@ import {
 import { toast } from "sonner";
 import { FileUp, Check, X, AlertCircle, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { usePartnerAccess } from "@/hooks/use-partner-access";
 
 export function DealOutcomeReview({
   dealId,
@@ -22,9 +21,13 @@ export function DealOutcomeReview({
   dealStage: string;
   commercialApproved: boolean;
 }) {
-  const { can } = useAuth();
-  const access = usePartnerAccess();
-  const isSuperAdmin = access.isLiveyInternal; // Replaced super_admin with livey internal for deal approvals.
+  const { can, roleKey } = useAuth();
+  // §2.7/§9.7/§9.15: "Tagged PAM/RM or Super Admin" — narrowed from the
+  // former access.isLiveyInternal (which also covered kam/isr/livey_support/
+  // restricted_distributor) to match the server's actual authority so this
+  // panel doesn't render Approve/Reject buttons that are guaranteed to fail
+  // for every role except the three the server now accepts.
+  const isSuperAdmin = roleKey === "super_admin" || roleKey === "pam" || roleKey === "rm";
   const [loading, setLoading] = useState(false);
   const [poNumber, setPoNumber] = useState("");
   const [poAmount, setPoAmount] = useState("");
@@ -32,6 +35,10 @@ export function DealOutcomeReview({
 
   const isNegotiation = dealStage === "negotiation";
   const isWon = dealStage === "won";
+  // §2.6/§9.15: a deal marked Won with "Submit Later" is Won — PO Pending,
+  // not locked out of ever submitting one — the server now accepts a PO
+  // submission in either stage (see submitPO's matching stage check).
+  const canSubmitPo = isNegotiation || isWon;
 
   if (!commercialApproved && !isWon) {
     return (
@@ -96,7 +103,7 @@ export function DealOutcomeReview({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isNegotiation && (
+        {canSubmitPo && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -138,7 +145,7 @@ export function DealOutcomeReview({
 
         {isSuperAdmin && (
           <div className="p-4 bg-muted rounded-md space-y-4 border">
-            <h4 className="font-medium text-sm">Super Admin Actions</h4>
+            <h4 className="font-medium text-sm">Outcome Review Actions</h4>
             <div className="flex gap-2">
               <Button
                 size="sm"

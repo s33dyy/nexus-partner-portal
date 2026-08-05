@@ -86,9 +86,11 @@ export type TableQuery = {
   // whoever created OR was assigned them.
   scopeAnyColumnEquals?: { columns: [string, string]; value: string };
   // Same idea, for "I own it OR I'm an active tagged participant on it" —
-  // see table-policy.server.ts's isRestrictedPartnerRole.
+  // see table-policy.server.ts's isRestrictedPartnerRole. `ownerColumn: null`
+  // drops the ownership half entirely (tag-only — see isDistributorRole),
+  // for roles that must never get an "I created it" fallback.
   scopeOwnerOrParticipantTag?: {
-    ownerColumn: string;
+    ownerColumn: string | null;
     ownerValue: string;
     participantTable: "deal_participants" | "customer_participants";
     fkColumn: "deal_id" | "customer_id";
@@ -1102,7 +1104,7 @@ function appendOwnerOrParticipantTagScope(
   if (!scope) {
     return { sql: whereSql, params: whereParams };
   }
-  if (!columns.includes(scope.ownerColumn)) {
+  if (scope.ownerColumn !== null && !columns.includes(scope.ownerColumn)) {
     throw new Error(`Unsupported scope column: ${scope.ownerColumn}`);
   }
   if (!PARTICIPANT_SCOPE_TABLES.has(scope.participantTable)) {
@@ -1112,12 +1114,18 @@ function appendOwnerOrParticipantTagScope(
     throw new Error(`Unsupported participant scope fk column: ${scope.fkColumn}`);
   }
   const paramIndex = whereParams.length + 1;
-  const condition = `(${quoteIdent(scope.ownerColumn)} = $${paramIndex} OR EXISTS (
+  const tagExists = `EXISTS (
     SELECT 1 FROM ${quoteIdent(scope.participantTable)} AS pt
     WHERE pt.${quoteIdent(scope.fkColumn)} = ${quoteIdent(table)}.${quoteIdent("id")}
       AND pt.${quoteIdent("participant_user_id")} = $${paramIndex}
       AND pt.${quoteIdent("valid_to")} IS NULL
-  ))`;
+  )`;
+  // ownerColumn: null means "tag-only" — no ownership fallback at all (see
+  // isDistributorRole). Otherwise "I own it OR I'm tagged", as before.
+  const condition =
+    scope.ownerColumn === null
+      ? tagExists
+      : `(${quoteIdent(scope.ownerColumn)} = $${paramIndex} OR ${tagExists})`;
   return {
     sql: whereSql ? `${whereSql} AND ${condition}` : ` WHERE ${condition}`,
     params: [...whereParams, scope.ownerValue],

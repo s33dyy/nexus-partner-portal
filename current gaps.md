@@ -7,6 +7,7 @@
 | Codebase | `main` @ `653c44d`, 32 routes / ~20k route LOC, `db/schema.sql` (67 tables) |
 | Method | Fresh chapter-by-chapter re-audit: each of the 17 substantive chapters (4–19, 23) independently re-read in full against `product.md`, then verified directly against the current routes, server commands, domain contracts, and schema by a dedicated agent — not diffed against the previous version of this document |
 | Related | `docs/implementation-status.md` (this session's fix log — every item below already fixed and deployed is cross-referenced there) |
+| Addendum | §21 below — a 2026-08-05 independent full-backend re-audit (12 domain agents, spec-vs-code) confirms essentially every open item below is still open, and surfaces one new item: an undocumented Call Center/Twilio Voice backend added after this pass (commit `81f48a4`) |
 
 This document **replaces** the previous `current gaps.md` in place. It is a fresh pass, not a
 diff — every chapter was re-read against the current code from scratch, so an item's absence
@@ -98,59 +99,94 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.3 Ch.6 6a (§6.1/§6.2/§6.7) — No email verification; password-reset hands the raw token back to whoever asks
+### 2.3 Ch.6 6a (§6.1/§6.2/§6.7) — No email verification; password-reset hands the raw token back to whoever asks — **token-leak/enumeration half fixed 2026-08-01, email verification still open**
 
 **Spec (§6.1/§6.2/§6.7):** Registration must send email verification and unverified identities cannot enter onboarding until verified (§6.2 steps 2-4); passwords/reset secrets must never be exposed and must travel through a secure (email) channel, never displayed to the requester (§6.1 'Passwords are never sent, displayed, exported...', §6.7 'through a secure channel').
 
 **Shipped:** signUpLocal (src/server/livey-service.server.ts:1504-1556) creates the profile and a live session in one step with no email-verification concept anywhere in the schema or code; routes/auth.tsx's SignUpForm (lines 250-277) signs the user in and navigates straight to /partner/onboarding. Separately, requestPasswordReset (src/server/livey-service.server.ts:1844-1865) returns the actual reset link containing the plaintext token directly in the RPC response to ANY caller (even unauthenticated) who supplies a target email, and routes/auth.tsx's ForgotForm (lines 357-380) copies that link to the requester's own clipboard and shows it as a success toast — no email is ever sent. Anyone who knows a user's email address can obtain a working password-reset token for that account and take it over.
 
+**Fix (partial, 2026-08-01):** `requestPasswordReset` now always returns `{ ok: true }` regardless of whether the account exists — the token is still generated and stored, but only logged server-side (`console.info`), never returned to the caller. `ForgotForm` shows an identical "If that account exists, a reset link is on its way" message either way. This closes the account-takeover/enumeration primitive (see §2.23, same function) but is a stopgap, not real delivery: since no email transport is configured, self-service reset in production requires an operator with log access to relay the link out-of-band. **Still open:** no email-verification gate on signUpLocal/registration (the other half of this finding), and real email delivery to replace the log-relay stopgap (tracked in Phase 5 of §20's phased plan, which needs email/WhatsApp transport for digests anyway).
+
 ---
 
-### 2.4 Ch.8 8.7a (§8.7/§8.8) — Distributor gets whole-tenant access instead of only explicitly tagged records
+### 2.4 Ch.8 8.7a (§8.7/§8.8) — Distributor gets whole-tenant access instead of only explicitly tagged records — **Deal/Customer half fixed 2026-08-05, Task/Ticket half still open**
 
 **Spec (§8.7/§8.8):** "Distributor assignment grants no record visibility until a Customer or Deal tag exists"; "A Distributor cannot ... retain access merely because a cached card ... exists"; §8.8 acceptance criterion: "Distributor cannot discover an untagged Customer."
 
 **Shipped:** The command-layer authorization functions that gate every Deal/Task/Ticket mutation treat restricted_distributor identically to partner_admin/partner_user: access is granted to ANY record whose partner_id matches the distributor's own assignment.partnerId, with zero reference to customer_participants/deal_participants tag membership. Identical block in all three: src/server/deal-commands.server.ts:92-105 (authorizeDealActor), src/server/task-commands.server.ts:86-99, src/server/ticket-commands.server.ts:93-106 - `if (role === 'partner_admin' || role === 'partner_user' || role === 'restricted_distributor') { if (partnerId !== record.partner_id) deny; else allow; }`. A full read of table-policy.server.ts (getScopeSpec/getGenericScopeSpec, lines 205-439) confirms no EXISTS/JOIN against customer_participants or deal_participants is ever consulted for any role. Net effect: once a Distributor is assigned to a partner tenant (via admin.users.tsx's per-user assignment flow), they can read/update/advance-stage/delete every Deal, Task, and Ticket belonging to that entire partner - not only ones an RM/PAM explicitly tagged them onto via the Customer/Deal participant commands - directly contradicting the chapter's repeated "no visibility until tagged" invariant. This is a tenant-isolation violation, not a missing feature.
 
+**Fix (Deal/Customer, 2026-08-05):** `authorizeDealActor` (deal-commands.server.ts) and the new `authorizeCustomerActor` (participant-commands.server.ts) now give `restricted_distributor` its own branch, split out from the shared `partner_admin`/`partner_user` one: after the existing partner_id match, an *additional* check requires an active row in `deal_participants`/`customer_participants` (`participant_user_id = actor.userId AND valid_to IS NULL`) before any write is allowed — a brand-new deal being created (no `id` yet) is exempt, since there's nothing to tag yet. The read side (`table-policy.server.ts`) got a matching `isDistributorRole` branch reusing the `scopeOwnerOrParticipantTag` mechanism a prior feature commit (`f511d48`) had already built for `partner_user`'s own narrower "own-or-tagged" visibility — extended with a new `ownerColumn: null` mode so Distributor gets tag-only visibility with no "I created it" fallback at all (unlike `partner_user`, which does get that fallback). Verified: `tsc --noEmit`, `eslint`, and the full test suite all clean (378 pass, the 3 pre-existing unrelated failures confirmed identical on `main`); 4 new tests (2 read-scope in `table-policy.server.test.ts`, 2 write-side in `deal-commands.server.test.ts` covering both the deny-when-untagged and allow-when-tagged cases, plus a guard that `createDeal` never runs the tag check against a not-yet-created deal). Not yet browser-verified end-to-end with a real seeded Distributor account.
+
+**Still open — Task/Ticket:** deliberately not bundled into this fix, since neither `tasks` nor `support_tickets` has its own participant-tag table the way Deals/Customers do — extending "no visibility until tagged" to those two needs a separate design decision (e.g. inherit visibility from a tagged Deal/Customer via `related_id`, or scope to `assignee_id`/`created_by` directly) rather than a copy of this exact mechanism. `authorizeTaskActor`/`authorizeTicketActor` and their read-side scope specs are unchanged — a Distributor still gets flat partner-wide Task/Ticket access.
+
+**Re-verification against product.md's exact text (2026-08-05, same day, second pass):** re-read §8.7/§8.8 in full against the diff above rather than against this document's own paraphrase, and found three more clauses the first pass hadn't covered — two now fixed, one still open:
+
+- **Fixed — the dropdown/lookup bypass.** `listDropdownSourceValues`'s `"client"` source (`dropdown-sources.server.ts`) runs its own raw `pool.query` against `portal_customers` and is used by the manual account/customer pickers, the in-app Assistant, and the WhatsApp wizard's customer browsing — none of which go through `table-policy.server.ts`'s `applyTablePolicy` at all, so the read-scope fix above didn't cover it. A Distributor could still enumerate every customer at their partner tenant through this search box, directly violating §8.8's own acceptance criterion word-for-word: "Distributor cannot discover an untagged Customer." Added the same tag-only `customer_participants` filter here too, threaded a new `isDistributor` field through `DropdownCallerAuth` (caught by the compiler at both existing construction sites — `dropdown-sources.server.ts`'s own `requireAuthenticatedCaller` and `assistant.server.ts`'s `toDropdownCallerAuth`, the latter shared by the WhatsApp wizard — once the field was made required, TypeScript refused to compile until both were updated, which is exactly the point of making it required rather than optional).
+- **Fixed — "a Distributor cannot invoke either participant command."** The first pass's tag check in `authorizeDealActor`/`authorizeCustomerActor` means a Distributor already tagged onto a record now *passes* that check — which, combined with `tagDealParticipant`/`untagDealParticipant`/`tagCustomerParticipant`/`untagCustomerParticipant` calling nothing but that same authorize function, meant a tagged Distributor could untag themselves or tag someone else onto a record they're already on — directly contradicting §8.7's explicit "A Distributor cannot invoke either participant command... or retain access merely because a cached card or notification exists." Added a `denyIfDistributor` guard at the top of all four commands, before any tag/authorize check runs, so the role is refused outright regardless of its own tag status. Also added the create-side half of "only an authorised RM in geography scope or PAM in Partner scope may create... a Distributor-to-Customer tag": `denyIfTaggingDistributorWithoutAuthority` blocks any actor other than rm/pam/super_admin from creating a tag with `participantType === "distributor"` (case-insensitive), on both `tagDealParticipant` and `tagCustomerParticipant`.
+- **Still open — the "end" half of the RM/PAM-only tagging authority.** `untagDealParticipant`/`untagCustomerParticipant` take only a `participantId`, not the tag's `participant_type`, so enforcing "...or end a Distributor-to-Customer tag" the same way needs a lookup of the existing participant row first to learn what type it is before deciding who may end it — not implemented this pass, tracked as a smaller follow-up rather than rushed in.
+- **Still open — the field-level "safe field set."** §8.7's "Distributor Customer access exposes the safe identity, permitted Contacts, shared Tasks, explicitly shared support/shipment context, and explicitly tagged Deals. It excludes unrelated Deals, pricing policy, Partner-wide analytics, and internal notes" is a column/field-level projection requirement, not a record-visibility one — nothing in this fix touches it. A Distributor who *is* correctly tagged onto a Deal today still receives the exact same full field set (pricing, DTP, internal notes) as any other authorised role would. This is the pre-existing, still-open finding already tracked below as **8.7b** (the named `Add/Remove Distributor to/from Customer/Deal` commands with a safe-field-set preview) — re-confirmed accurate, not newly discovered.
+
+Verified again with the same rigor: `tsc --noEmit`, `eslint`, full suite (387 pass, same 3 pre-existing unrelated failures), `bun run build` all clean; 8 new tests in `participant-commands.server.test.ts` (deny-Distributor-outright × 4 commands, deny-non-RM/PAM-tagging-distributor × 2, allow-RM/PAM × 2) plus 1 new test in `dropdown-sources.server.test.ts` asserting the actual SQL text differs by caller (contains `customer_participants`/`valid_to IS NULL` for a Distributor, absent for a Partner Admin).
+
 ---
 
-### 2.5 Ch.9 9a (§9.1/§9.2/§9.7/§9.9) — Registration status, pipeline stage, and outcome review are collapsed into one stage field, in three separate code paths
+### 2.5 Ch.9 9a (§9.1/§9.2/§9.7/§9.9) — Registration status, pipeline stage, and outcome review are collapsed into one stage field, in three separate code paths — **paths 1 and 3 fixed 2026-08-05; path 2 (admin.deals.tsx raw write) still open**
 
 **Spec (§9.1/§9.2/§9.7/§9.9):** Registration status, pipeline stage, and outcome review status are three independent dimensions that must never be collapsed into one field. Registration approval (auto or manual) records a decision and unblocks forward movement — it never itself changes pipeline_stage. Forward movement is available only on approved/auto-approved active Deals, one stage at a time, validating each stage's exit/entry criteria.
 
-**Shipped:** Three separate code paths violate this. (1) submitDealForRegistration (src/server/deal-commands.server.ts:723-734) computes `newStage = autoApproved ? "negotiation" : deal.stage` and writes it directly — clicking "Submit for Registration" on a fresh Sourced deal under $5,000 jumps it straight to Negotiation, skipping Demo/Testing/Qualified/Proposal. (2) admin.deals.tsx's saveReview (src/routes/_authenticated/admin.deals.tsx:272-314, stage logic at 303-310) is a raw client-side `supabase.from("portal_deals").update(...)` call — not routed through any deal-commands.server.ts function at all — that sets `stage: "negotiation"` on Approve, bypassing authorizeDealActor, optimistic-concurrency version checks, and the deal_transitions/domain_activity_events/outbox audit trail entirely. (3) moveDealStageForward (src/server/deal-commands.server.ts:355-376) never inspects deal.status/commercial_approved at all — its resolveTarget only checks FORWARD_NEXT_STAGE[deal.stage] — so a never-submitted Draft deal can be forward-clicked all the way to Negotiation with zero registration gate, and none of §9.8's per-stage minimum requirements (Demo task, Testing plan, Qualified budget, Proposal price snapshot, etc.) or §9.11's post-Testing PAM/KAM handoff/Coverage-Exception rule are checked anywhere in this generic transition.
+**Shipped (as of the original audit):** Three separate code paths violate this. (1) submitDealForRegistration (src/server/deal-commands.server.ts:723-734) computes `newStage = autoApproved ? "negotiation" : deal.stage` and writes it directly — clicking "Submit for Registration" on a fresh Sourced deal under $5,000 jumps it straight to Negotiation, skipping Demo/Testing/Qualified/Proposal. (2) admin.deals.tsx's saveReview (src/routes/_authenticated/admin.deals.tsx:272-314, stage logic at 303-310) is a raw client-side `supabase.from("portal_deals").update(...)` call — not routed through any deal-commands.server.ts function at all — that sets `stage: "negotiation"` on Approve, bypassing authorizeDealActor, optimistic-concurrency version checks, and the deal_transitions/domain_activity_events/outbox audit trail entirely. (3) moveDealStageForward (src/server/deal-commands.server.ts:355-376) never inspects deal.status/commercial_approved at all — its resolveTarget only checks FORWARD_NEXT_STAGE[deal.stage] — so a never-submitted Draft deal can be forward-clicked all the way to Negotiation with zero registration gate, and none of §9.8's per-stage minimum requirements (Demo task, Testing plan, Qualified budget, Proposal price snapshot, etc.) or §9.11's post-Testing PAM/KAM handoff/Coverage-Exception rule are checked anywhere in this generic transition.
+
+**Fix (paths 1 and 3, 2026-08-05):** `submitDealForRegistration` no longer computes or writes `newStage` at all — it sets only `status`/`commercial_approved`, leaving `stage` exactly where the submitter left it (§9.1's "registration approval... never itself changes pipeline_stage," literally). `moveDealStageForward` now denies with `"Deal must complete registration approval before moving forward"` whenever `deal.commercial_approved` is false, before even resolving the target stage — matching §9.8's per-stage table, which lists "Approved/auto-approved registration" as a minimum forward requirement starting at Sourced (i.e. applies to every forward move, not only entry into Negotiation). **Not attempted:** the per-stage exit/entry criteria beyond the registration gate (Demo task, Testing plan, Qualified budget, Proposal price snapshot, §9.11's PAM/KAM handoff/Coverage Exception) — those remain unchecked by this generic transition, same as before.
+
+**Still open — path 2:** `admin.deals.tsx`'s `saveReview` is untouched — still a raw client-side `supabase.from("portal_deals").update(...)` call that can still set `stage` directly, bypassing `authorizeDealActor`, optimistic concurrency, and the whole audit trail, and is not affected by either fix above (it doesn't go through `submitDealForRegistration` or `moveDealStageForward` at all). This needs a dedicated server command (a `reviewDealRegistration`-shaped addition to `deal-commands.server.ts`, mirroring the shape `outcome-review-commands.server.ts` already uses) to replace it — deliberately not attempted in this pass to keep the batch reviewable; tracked as the next piece of this same finding.
+
+**Verification (paths 1 and 3):** `tsc --noEmit`, `eslint` clean. 4 new tests in `deal-commands.server.test.ts`: `submitDealForRegistration` auto-approves without touching `stage` (asserted directly against the generated SQL, not just the return value), the same for the manual-review-required branch, `moveDealStageForward` denies a never-approved deal at Sourced, and allows one already approved at a later pre-Negotiation stage (added a `commercial_approved` field to the test file's `DealRow`/`baseDealRow`, defaulting to `true` so the ~20 pre-existing forward-movement tests written before this gate existed keep testing what they originally intended). Full suite 401 pass (+7 across §2.5+§2.6), same 3 pre-existing unrelated failures, `bun run build` clean. Not browser-verified.
 
 ---
 
-### 2.6 Ch.9 9b (§9.15/§9.19) — Won/Lost bypasses the PO/outcome-review flow, permanently orphaning the deal from rewards
+### 2.6 Ch.9 9b (§9.15/§9.19) — Won/Lost bypasses the PO/outcome-review flow, permanently orphaning the deal from rewards — **the outcome-review deadlock fixed 2026-08-05; Won's required-field capture still open**
 
 **Spec (§9.15/§9.19):** Selecting Won requires an outcome date, a PO Upload-Now-or-Submit-Later choice, and confirmed final lines/DTP/split before the deal can leave Negotiation; Approve on the outcome-review state machine is what creates the reward award and accounting sync. Ordinary Lost requires a loss reason and is only available from Negotiation.
 
-**Shipped:** The "Mark won"/"Mark lost" buttons (src/routes/_authenticated/deals.tsx:2474-2497, identical logic in pipeline.tsx:222-269 "Move forward" and deals.tsx:1470-1526 "Advance stage") call closeAs/markDealWon/markDealLost (src/server/deal-commands.server.ts:412-462) unconditionally from any active stage with no reason, no PO, no outcome date, and no confirmed line/DTP snapshot. Once markDealWon sets portal_deals.stage='won', the only PO-submission entry point permanently disappears: DealOutcomeReview's isNegotiation gate (src/components/deal-outcome-review.tsx:33,99) and submitPO's own server check `deal.stage !== "negotiation"` (src/server/outcome-review-commands.server.ts:136) both require the deal to still be in Negotiation. So a deal closed through this (the only reachable) path can never submit a PO, never reach outcome_review_status=approved, and never trigger awardApprovedWinRewards or an accounting sync — the entire §9.15 flow this session's reward fix (awarding on approvePO) depends on is unreachable from the shipped UI. admin.deals.tsx's saveReview("won")/("lost") (admin.deals.tsx:303-310) reproduces the same unconditional bypass via a raw client update.
+**Shipped (as of the original audit):** The "Mark won"/"Mark lost" buttons (src/routes/_authenticated/deals.tsx:2474-2497, identical logic in pipeline.tsx:222-269 "Move forward" and deals.tsx:1470-1526 "Advance stage") call closeAs/markDealWon/markDealLost (src/server/deal-commands.server.ts:412-462) unconditionally from any active stage with no reason, no PO, no outcome date, and no confirmed line/DTP snapshot. Once markDealWon sets portal_deals.stage='won', the only PO-submission entry point permanently disappears: DealOutcomeReview's isNegotiation gate (src/components/deal-outcome-review.tsx:33,99) and submitPO's own server check `deal.stage !== "negotiation"` (src/server/outcome-review-commands.server.ts:136) both require the deal to still be in Negotiation. So a deal closed through this (the only reachable) path can never submit a PO, never reach outcome_review_status=approved, and never trigger awardApprovedWinRewards or an accounting sync — the entire §9.15 flow this session's reward fix (awarding on approvePO) depends on is unreachable from the shipped UI. admin.deals.tsx's saveReview("won")/("lost") (admin.deals.tsx:303-310) reproduces the same unconditional bypass via a raw client update.
+
+**Fix (the deadlock, 2026-08-05):** re-read §9.15's own flowchart directly and found the fix is narrower than it first looks: the spec's flow has "Negotiation → Won with Submit Later" and "...with valid PO Upload Now" as the *normal* immediate transitions — reaching stage `"won"` right away is correct and intended, it's not itself the bug. The actual bug is that `submitPO` only ever accepted `deal.stage === "negotiation"`, so the moment a deal became Won it was permanently locked out of ever submitting a PO again — a self-inflicted deadlock, not a missing-capture problem per se. Widened `submitPO`'s stage check to accept `"negotiation"` or `"won"` (a deal can only ever reach `"won"` via `markDealWon`'s own terminal-stage guard, so this doesn't open any new path to submit a PO on a deal that was never negotiated), and widened `deal-outcome-review.tsx`'s PO-submission form visibility (`canSubmitPo = isNegotiation || isWon`, was `isNegotiation` only) to match — a deal marked Won-with-Submit-Later now actually shows the PO form instead of nothing.
+
+**Still open:** `markDealWon`/`markDealLost` still require none of the spec's mandated inputs — no outcome date, no PO-now-or-later choice, no confirmed final lines/DTP/contributor-split capture, no loss reason on Lost. `admin.deals.tsx`'s `saveReview("won")`/`("lost")` still bypasses everything via a raw client update (same root cause as §2.5's still-open path 2 — worth fixing both together, since it's the same command gap). This pass closed the "permanently orphaned from rewards" deadlock specifically, not the full Won/Lost data-capture UX the spec describes — that's a real, separate, larger piece of work (a proper Won/Lost dialog), deliberately not attempted here.
+
+**Verification:** `tsc --noEmit`, `eslint` clean. 3 new tests in `outcome-review-commands.server.test.ts` (this function had zero prior test coverage): `submitPO` accepted from negotiation (regression-proves the existing behavior still works), accepted from won (proves the deadlock is closed), still denied from an unrelated stage like qualified (proves this isn't a blanket stage-check removal). Full suite 401 pass, same 3 pre-existing unrelated failures, `bun run build` clean. Not browser-verified.
 
 ---
 
-### 2.7 Ch.9 9c (§9.7/§9.15) — PO approval buttons are shown to PAM/RM but the server accepts only literal super_admin
+### 2.7 Ch.9 9c (§9.7/§9.15) — PO approval buttons are shown to PAM/RM but the server accepts only literal super_admin — **fixed 2026-08-05**
 
 **Spec (§9.7/§9.15):** The PO/outcome-review state machine authorizes "Tagged PAM/RM or Super Admin" to approve, request changes on, or reject a claimed Won outcome.
 
-**Shipped:** deal-outcome-review.tsx:27 sets `isSuperAdmin = access.isLiveyInternal`, which is true for rm, pam, kam, isr, livey_support, and restricted_distributor (src/domain/contracts/features.ts:67-75), and renders the full Approve/Request-changes/Reject panel (deal-outcome-review.tsx:139-169) to all of them. But the server commands they call — approvePO (src/server/outcome-review-commands.server.ts:205-211), requestChanges (247-253), rejectOutcome (283-289) — each hard-reject with `roleKey !== "super_admin"`. Every tagged PAM or RM sees fully-enabled buttons that fail every time with "Only super_admin can approve POs"/etc. Separately, none of these three commands call authorizeDealActor at all (only the literal role check), so if the role check is ever loosened to admit pam/rm without also adding deal/partner/geography scoping, any pam or rm system-wide — not just ones tagged to this specific deal — could approve or reject any deal's outcome (the same vulnerability class already fixed this session for approveDiscount in pricing-commands.server.ts).
+**Shipped (as of the original audit):** deal-outcome-review.tsx:27 sets `isSuperAdmin = access.isLiveyInternal`, which is true for rm, pam, kam, isr, livey_support, and restricted_distributor (src/domain/contracts/features.ts:67-75), and renders the full Approve/Request-changes/Reject panel (deal-outcome-review.tsx:139-169) to all of them. But the server commands they call — approvePO (src/server/outcome-review-commands.server.ts:205-211), requestChanges (247-253), rejectOutcome (283-289) — each hard-reject with `roleKey !== "super_admin"`. Every tagged PAM or RM sees fully-enabled buttons that fail every time with "Only super_admin can approve POs"/etc. Separately, none of these three commands call authorizeDealActor at all (only the literal role check), so if the role check is ever loosened to admit pam/rm without also adding deal/partner/geography scoping, any pam or rm system-wide — not just ones tagged to this specific deal — could approve or reject any deal's outcome (the same vulnerability class already fixed this session for approveDiscount in pricing-commands.server.ts).
+
+**Fix:** All three commands now call `authorizeDealActor(input.actor, deal, tx)` first (closing the scope hole — a pam/rm outside their geography ceiling is rejected exactly like every other deal command), then check role membership against a new `PO_REVIEW_ROLES` set (`super_admin`/`pam`/`rm`) via `authorizePoReviewer`. The full participant-tag model ("Tagged PAM/RM") isn't built yet (§5.7/§9g, still open — automatic PAM/KAM tagging doesn't exist), so `authorizeDealActor`'s existing geography/partner scoping stands in as the interim substitute for "tagged," the same deliberate trade-off already used for `isLiveyInternalRole` elsewhere in `table-policy.server.ts`. The UI (`deal-outcome-review.tsx`) was narrowed to match: `isSuperAdmin` is now `roleKey === "super_admin" || "pam" || "rm"` (was `access.isLiveyInternal`, which also covered kam/isr/livey_support/restricted_distributor — those roles no longer see a panel that's guaranteed to fail for them), and the panel heading changed from "Super Admin Actions" to "Outcome Review Actions" since it's no longer super_admin-exclusive.
+
+**Verification:** `tsc --noEmit`, `eslint`, full suite (394 pass, same 3 pre-existing unrelated failures) all clean; `bun run build` clean. 4 new tests: a PAM inside their geography scope is now allowed (previously always failed), an RM *outside* their geography scope is still denied (proves this isn't a blanket role grant), a KAM is still denied even in scope (not a named PO-review role), and `requestChanges`/`rejectOutcome` both accept a scoped RM the same way `approvePO` does. The 5 pre-existing tests (including the one asserting `partner_admin` is denied) all still pass unchanged. Not browser-verified end-to-end against a real seeded PAM/RM account — same open item as the rest of today's server-side RBAC work.
 
 ---
 
-### 2.8 Ch.9 9d (§9.5/§9.13/§9.19) — Pipeline value wrongly includes Won/Lost deals, summed off the free-text amount instead of DTP
+### 2.8 Ch.9 9d (§9.5/§9.13/§9.19) — Pipeline value wrongly includes Won/Lost deals, summed off the free-text amount instead of DTP — **dashboard half fixed 2026-08-02, Pipeline-page half still open**
 
 **Spec (§9.5/§9.13/§9.19):** Open pipeline value must be scoped to Sourced-through-Negotiation only, computed from quantity × current effective DTP; Won and Lost are excluded from open/weighted pipeline. Every pipeline card must show Partner, Customer, POC, a stage-specific value label (Pipeline value / Claimed won value pending review / Won value / Lost value), local reference, next task, RM/ISR/PAM/KAM participant chips, and a registration/outcome-review indicator, with Move forward and Move backward both available as card actions.
 
 **Shipped:** pipeline.tsx's `totals.pipeline` (src/routes/_authenticated/pipeline.tsx:209-212) sums `getDealUsdAmount(deal)` — which reads the free-text `amount`/`amount_usd` column (src/lib/portal-records.ts:283-289), never deal_line_items/pricing_revisions DTP — over `regionScopedDeals`, which is only region-filtered (pipeline.tsx:181-184), not stage-filtered, so Won and Lost deals are included in the headline "pipeline" figure every time the page loads. The board cards (pipeline.tsx:453-503) show only account name, owner name, region, the single `product` string, probability, and a flat `deal.amount` badge (line 464) — no Customer, no POC, no stage-specific value label, no local reference, no next task, no participant chips, no registration/outcome indicator — and offer only "Move forward"/"Notes" (lines 482-498), with no "Move backward" action anywhere on the card.
 
+**Correction (2026-08-05, re-verified against current code):** commits `e0e1696`/`152b433`/`a350cb4` (2026-08-02, "define canonical open pipeline metric" / "scope dashboard pipeline aggregation" / "report open pipeline from effective dtp") gave `dashboard-metrics.server.ts` a real server-side canonical open-pipeline figure computed from effective DTP — that half is fixed. But this is a *different* number from the one this finding is actually about: the Pipeline *page*'s own headline `totals.pipeline` (`pipeline.tsx:190-201` as of this re-check) is untouched — still `regionScopedDeals.reduce((sum, deal) => sum + getDealUsdAmount(deal), 0)`, still summing the free-text amount over every stage including Won/Lost, since `regionScopedDeals` (line 162) filters only by region, never by stage. The dashboard KPI and the Pipeline page's own total are two separate, redundant calculations of "pipeline value" today — one now correct, one still not — which is itself worth fixing as part of closing this out (Pipeline page should read the same canonical metric the dashboard now computes, not maintain its own parallel client-side sum).
+
 ---
 
-### 2.9 Ch.10 10a (§10.2) — Tasks can be updated directly through the generic table path, bypassing the transition guard entirely
+### 2.9 Ch.10 10a (§10.2) — Tasks can be updated directly through the generic table path, bypassing the transition guard entirely — **fixed 2026-08-02 (never cross-referenced back to this document until this re-verification)**
 
 **Spec (§10.2):** "A workflow may propose the next valid transition but cannot update Task status by direct field write." All status changes must go through the governed transition command (mandatory reasons for blocked/cancelled/reopen, allowed-transition checks, actor/time capture, Activity history).
 
-**Shipped:** transitionTask (src/server/task-commands.server.ts:296-392) correctly enforces the state machine, reason requirements, and writes task_transitions/domain_activity_events/outbox records. But that command is not the only writable path: the generic table-policy update executor (src/server/livey-service.server.ts:1084-1113, reached via supabase.from("tasks").update(...) -> queryTable) filters only by a column-name allowlist, with zero business-rule or field-level restriction, and its row-scope check (src/server/table-policy.server.ts:742-754, getScopeSpec case "tasks" at 406-414) only matches partner_id/creator_id, not which columns are being set. role_permissions grants can_update=true for the "tasks" feature to super_admin, rm, pam, kam, isr, livey_support, partner_admin, partner_user, and restricted_distributor (db/schema.sql:1414-1526). Any of these roles can therefore call `supabase.from("tasks").update({status:"cancelled"})` (or completed/to_do/etc.) directly on a task in their scope, skipping mandatory reasons, allowed-transition checks, optimistic-concurrency version checks, and the entire task_transitions/outbox audit trail that transitionTask writes.
+**Shipped (as of the original audit):** transitionTask (src/server/task-commands.server.ts:296-392) correctly enforces the state machine, reason requirements, and writes task_transitions/domain_activity_events/outbox records. But that command is not the only writable path: the generic table-policy update executor (src/server/livey-service.server.ts:1084-1113, reached via supabase.from("tasks").update(...) -> queryTable) filters only by a column-name allowlist, with zero business-rule or field-level restriction, and its row-scope check (src/server/table-policy.server.ts:742-754, getScopeSpec case "tasks" at 406-414) only matches partner_id/creator_id, not which columns are being set. role_permissions grants can_update=true for the "tasks" feature to super_admin, rm, pam, kam, isr, livey_support, partner_admin, partner_user, and restricted_distributor (db/schema.sql:1414-1526). Any of these roles can therefore call `supabase.from("tasks").update({status:"cancelled"})` (or completed/to_do/etc.) directly on a task in their scope, skipping mandatory reasons, allowed-transition checks, optimistic-concurrency version checks, and the entire task_transitions/outbox audit trail that transitionTask writes.
+
+**Correction (2026-08-05, found while attempting to fix this):** this was already fixed — `table-policy.server.ts`'s `applyTablePolicy` calls `assertNoProtectedLifecycleUpdate(query)` before anything else runs, which throws `"Task lifecycle fields require the named transition command"` whenever a generic `tasks` update touches `status`, `version`, `blocked_reason`, `completed_at`, or `cancelled_at` — the exact five columns `transitionTask` itself writes — with no super_admin bypass, matching the spec's absolute (not role-scoped) framing. This landed in commit `bef8ee5` (2026-08-02, "real Insight Hub completion flow, full-database Assistant, auto-task-on-tag" — an unrelated feature commit) and was simply never cross-referenced back to this entry. A first attempt at "fixing" this independently duplicated the exact same guard under a different name before the pre-existing one was noticed mid-implementation (its error message didn't match what the new code expected — that mismatch is what surfaced it); the duplicate was reverted and 3 regression tests were added against the real, pre-existing guard instead (`table-policy.server.test.ts`). Ordinary task columns (title, description, priority, due_at, assignee_id) remain editable through the generic path, as they should.
 
 ---
 
@@ -172,35 +208,43 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.12 Ch.11 11b (§11.1/§11.4) — Deal activity is written into the global News feed, leaking one partner's deal details to every partner
+### 2.12 Ch.11 11b (§11.1/§11.4) — Deal activity is written into the global News feed, leaking one partner's deal details to every partner — **fixed 2026-08-02**
 
 **Spec (§11.1/§11.4):** "News and Activity never share a storage model merely because they appear beside each other on a dashboard," and the dashboard feed must "never leak a count or preview from an unauthorised record."
 
-**Shipped:** publishDealActivity (src/routes/_authenticated/deals.tsx:872-915, src/routes/_authenticated/pipeline.tsx:141-179) inserts a row into portal_news_posts for every deal stage change/note/won-lost/submission, embedding the customer account name and product (e.g. deals.tsx:1502-1508, admin.deals.tsx:320-326 `${selectedDeal.account_name} was marked ${status} by admin`). portal_news_posts is in PUBLIC_READ_TABLES (src/server/table-policy.server.ts:61-65) with no partner/audience scoping on select, and dashboard.tsx:185 and partner.tsx:126 both do an unfiltered `select("*")`, so any authenticated user of any partner sees every other partner's deal account names/products/stage changes on their News tab. This path is only reachable in practice via super_admin actors (admin.deals.tsx): the identical insert attempted by ordinary partner_admin/partner_user callers in pipeline.tsx/deals.tsx is rejected by table-policy.server.ts:618-621 (`isWrite && !superAdmin => Access denied`) and silently swallowed by the unchecked `Promise.allSettled` (deals.tsx:892-915, pipeline.tsx:155-178) — so for ordinary partner-triggered deal moves the "activity feed" entry silently never appears, while for super-admin-triggered deal actions it leaks the partner's deal details globally.
+**Shipped (as of the original audit):** publishDealActivity (src/routes/_authenticated/deals.tsx:872-915, src/routes/_authenticated/pipeline.tsx:141-179) inserts a row into portal_news_posts for every deal stage change/note/won-lost/submission, embedding the customer account name and product (e.g. deals.tsx:1502-1508, admin.deals.tsx:320-326 `${selectedDeal.account_name} was marked ${status} by admin`). portal_news_posts is in PUBLIC_READ_TABLES (src/server/table-policy.server.ts:61-65) with no partner/audience scoping on select, and dashboard.tsx:185 and partner.tsx:126 both do an unfiltered `select("*")`, so any authenticated user of any partner sees every other partner's deal account names/products/stage changes on their News tab. This path is only reachable in practice via super_admin actors (admin.deals.tsx): the identical insert attempted by ordinary partner_admin/partner_user callers in pipeline.tsx/deals.tsx is rejected by table-policy.server.ts:618-621 (`isWrite && !superAdmin => Access denied`) and silently swallowed by the unchecked `Promise.allSettled` (deals.tsx:892-915, pipeline.tsx:155-178) — so for ordinary partner-triggered deal moves the "activity feed" entry silently never appears, while for super-admin-triggered deal actions it leaks the partner's deal details globally.
+
+**Fix (found already applied, 2026-08-05 re-verification):** commit `7b99e48` (2026-08-02, "separate workflow activity from editorial news") removed every `portal_news_posts` insert from deal-lifecycle code — confirmed by grep, zero references remain in `deals.tsx`, `pipeline.tsx`, `admin.deals.tsx`, or `admin.partners.tsx`. Deal stage/registration changes keep their Notification/Activity/audit evidence; `admin.news.tsx` is now the one explicit editorial publishing surface, exactly as the spec quote requires. A dedicated regression test exists (`src/lib/news-activity-boundary.test.ts`).
 
 ---
 
-### 2.13 Ch.13 13a (§13.2/§13.3/§13.10) — Ticket creation inserts into two columns that don't exist in the deployed schema — every real ticket create fails
+### 2.13 Ch.13 13a (§13.2/§13.3/§13.10) — Ticket creation inserts into two columns that don't exist in the deployed schema — every real ticket create fails — **fixed 2026-08-02**
 
 **Spec (§13.2/§13.3/§13.10):** Ticket creation supports optional product rows and serial numbers per product; acceptance criteria require every ticket to actually be creatable and usable.
 
-**Shipped:** createTicket() in src/server/ticket-commands.server.ts:262-280 unconditionally INSERTs into support_tickets.product_sku and support_tickets.serial_number, but neither column exists anywhere in db/schema.sql — the only file actually applied to the database via `bun scripts/apply-migrations.ts` / `npm run db:migrate` (confirmed by grepping the whole 1703-line file for both names). Those two columns were only ever defined in the disconnected supabase/migrations/20260730000000_phase4_tickets.sql (lines 1-2), whose sibling ALTER for support_ticket_comments.is_internal (line 3 of that same file) was ported into db/schema.sql:1642 this session (with an explicit comment explaining the is_internal bug) — but the product_sku/serial_number siblings from that identical migration were never ported. Every invocation of createTicket (the sole ticket-creation path, wired from support.tsx's "Create ticket" button at line 380) throws a Postgres "column does not exist" error and fails 100% of the time. Seed scripts don't hit this (scripts/seed-phase1-supplement.ts inserts tickets directly without those columns), which is why pre-seeded demo tickets render fine while real user-driven creation is completely broken.
+**Shipped (as of the original audit):** createTicket() in src/server/ticket-commands.server.ts:262-280 unconditionally INSERTs into support_tickets.product_sku and support_tickets.serial_number, but neither column exists anywhere in db/schema.sql — the only file actually applied to the database via `bun scripts/apply-migrations.ts` / `npm run db:migrate` (confirmed by grepping the whole 1703-line file for both names). Those two columns were only ever defined in the disconnected supabase/migrations/20260730000000_phase4_tickets.sql (lines 1-2), whose sibling ALTER for support_ticket_comments.is_internal (line 3 of that same file) was ported into db/schema.sql:1642 this session (with an explicit comment explaining the is_internal bug) — but the product_sku/serial_number siblings from that identical migration were never ported. Every invocation of createTicket (the sole ticket-creation path, wired from support.tsx's "Create ticket" button at line 380) throws a Postgres "column does not exist" error and fails 100% of the time. Seed scripts don't hit this (scripts/seed-phase1-supplement.ts inserts tickets directly without those columns), which is why pre-seeded demo tickets render fine while real user-driven creation is completely broken.
+
+**Fix (found already applied, 2026-08-05 re-verification):** `db/schema.sql:1217-1218` now has `ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS product_sku TEXT;` / `... serial_number TEXT;`, landed in commit `0b03c62` (2026-08-02, "align canonical ticket and reward schema for repeatable deploys" — a dedicated schema-repair commit prompted by a real reproduced deploy failure, per its own commit message). `createTicket`'s INSERT now matches the deployed schema.
 
 ---
 
-### 2.14 Ch.13 13b (§13.5) — livey_support sees no ticket action controls at all — a UI-only lockout of its own primary role
+### 2.14 Ch.13 13b (§13.5) — livey_support sees no ticket action controls at all — a UI-only lockout of its own primary role — **fixed 2026-08-02**
 
 **Spec (§13.5):** LIVEY Support and Super Admin can close a Ticket (and by extension accept/wait-on-partner/decide-reopen — the same joint authority the command layer enforces).
 
-**Shipped:** src/routes/_authenticated/support.tsx:524 gates the entire accept/wait-on-partner/close/reopen-decide action panel (and the priority/assignee edit panel) behind `hasRole("super_admin")` only — there is no `hasRole("livey_support")` branch anywhere in that block (grep confirms livey_support is only checked for comment visibility at lines 127/262 and the internal-note checkbox at line 718). Meanwhile src/server/ticket-commands.server.ts's SUPPORT_ROLES/requireSupportRole (lines 56, 123-132) correctly authorizes both super_admin and livey_support at the command layer. The result is a UI-only lockout: a livey_support user, viewing an open ticket, sees no accept/close/wait controls at all (the ternary's else-branch only renders a partner-facing "Request reopen" button, and only when status is closed), so the role the blueprint names as primary ticket-closing authority can never actually manage a ticket through the product's own interface.
+**Shipped (as of the original audit):** src/routes/_authenticated/support.tsx:524 gates the entire accept/wait-on-partner/close/reopen-decide action panel (and the priority/assignee edit panel) behind `hasRole("super_admin")` only — there is no `hasRole("livey_support")` branch anywhere in that block (grep confirms livey_support is only checked for comment visibility at lines 127/262 and the internal-note checkbox at line 718). Meanwhile src/server/ticket-commands.server.ts's SUPPORT_ROLES/requireSupportRole (lines 56, 123-132) correctly authorizes both super_admin and livey_support at the command layer. The result is a UI-only lockout: a livey_support user, viewing an open ticket, sees no accept/close/wait controls at all (the ternary's else-branch only renders a partner-facing "Request reopen" button, and only when status is closed), so the role the blueprint names as primary ticket-closing authority can never actually manage a ticket through the product's own interface.
+
+**Fix (found already applied, 2026-08-05 re-verification):** commit `60d52e5` (2026-08-02, "expose ticket workflow to livey support") added `src/lib/ticket-permissions.ts`'s `canManageTicket(roleKey)`, which now gates the whole action panel (`support.tsx`'s `canManageSelectedTicket`) and includes both `super_admin` and `livey_support`, with a comment noting it "mirrors `SUPPORT_ROLES` in `ticket-commands.server.ts` exactly." The priority/assignee edit sub-panel (`saveTicketPriority`, still gated to `hasRole("super_admin")` only at the time of this re-check) was not covered by this fix and remains a narrower, separate presentation-layer gap — not the primary lockout this finding was about, which is resolved.
 
 ---
 
-### 2.15 Ch.15 15a (§15.1/§15.4/§15.7) — Redemptions never reserve points or stock; approval revalidates nothing and can double-spend
+### 2.15 Ch.15 15a (§15.1/§15.4/§15.7) — Redemptions never reserve points or stock; approval revalidates nothing and can double-spend — **fixed 2026-08-02**
 
 **Spec (§15.1/§15.4/§15.7):** Pending redemptions must reserve points atomically; approval/fulfillment must revalidate balance, eligibility, and stock; ledger must carry Redemption Reservation / Reservation Release / Redemption Fulfillment Debit events; and the full Requested→Points Reserved→Pending Review/Processing→Fulfilled/Failed/Refunded state machine must be enforced with stock/points effects exactly-once.
 
-**Shipped:** submitRequest (src/routes/_authenticated/rewards.tsx:226-272) only inserts a reward_redemptions row with status 'requested' — no reward_point_events reservation row is created, no stock check, no balance re-check beyond a stale client-side `points >= cost` gate. approveRedemption (src/routes/_authenticated/admin.rewards.tsx:357-412) makes two independent, non-transactional supabase calls (update redemption status, then insert a negative points_delta ledger row) with no check that the user's current balance actually covers it and no decrement of reward_catalog_items.stock anywhere in the codebase. rejectRedemption never needs to 'release' anything because nothing was ever reserved. Only 3 ad hoc statuses exist (requested/approved/rejected) versus the 10+ states/transitions required. table-policy.server.ts's scope rules for reward_redemptions/reward_point_events (lines ~229,364) only add partner/user row-scoping — no business-rule enforcement exists anywhere for this table.
+**Shipped (as of the original audit):** submitRequest (src/routes/_authenticated/rewards.tsx:226-272) only inserts a reward_redemptions row with status 'requested' — no reward_point_events reservation row is created, no stock check, no balance re-check beyond a stale client-side `points >= cost` gate. approveRedemption (src/routes/_authenticated/admin.rewards.tsx:357-412) makes two independent, non-transactional supabase calls (update redemption status, then insert a negative points_delta ledger row) with no check that the user's current balance actually covers it and no decrement of reward_catalog_items.stock anywhere in the codebase. rejectRedemption never needs to 'release' anything because nothing was ever reserved. Only 3 ad hoc statuses exist (requested/approved/rejected) versus the 10+ states/transitions required. table-policy.server.ts's scope rules for reward_redemptions/reward_point_events (lines ~229,364) only add partner/user row-scoping — no business-rule enforcement exists anywhere for this table.
+
+**Fix (found already applied, 2026-08-05 re-verification):** a real `src/server/reward-commands.server.ts` (836 lines, 1291 lines of tests) now exists, landed across commits `ac2625e`/`0e4e91c`/`f34e66f` (2026-08-02, "add reward reservation integrity schema" / "reserve, review, release, and retire rewards atomically" / "route reward mutations through commands"). `requestRewardRedemption` takes `FOR UPDATE` row locks on the profile and catalog item, checks an idempotency key, and inserts a real `redemption_reservation` ledger event; `approveRewardRedemption`/`rejectRewardRedemption` look up and release/consume that exact reservation row rather than trusting client state; `rewards.tsx`/`admin.rewards.tsx` were rewired to call these commands instead of raw `supabase.from(...)` writes. Concurrency behaviour is covered by a fake pool with a real per-row async lock in the test suite, not just stubbed responses. Still not verified against the full 10+-state canonical model from the spec (states used are a smaller practical set), but the core "never reserve, can double-spend" defect this finding is about is resolved.
 
 ---
 
@@ -222,11 +266,13 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.18 Ch.16 16f (§16.5) — Reward catalog items hard-delete with no confirmation, cascading away redemption history
+### 2.18 Ch.16 16f (§16.5) — Reward catalog items hard-delete with no confirmation, cascading away redemption history — **fixed 2026-08-02**
 
 **Spec (§16.5):** Configuration cannot delete a value referenced by history; it must be retired instead.
 
-**Shipped:** src/routes/_authenticated/admin.rewards.tsx's deleteItem (lines 307-325) hard-deletes a `reward_catalog_items` row with a single click and no confirmation dialog (no AlertDialog/window.confirm anywhere in the file) and no check for existing redemption history. db/schema.sql:700 defines `reward_redemptions.reward_id UUID NOT NULL REFERENCES reward_catalog_items(id) ON DELETE CASCADE`, so deleting a reward that has ever been redeemed permanently destroys every historical `reward_redemptions` row for it (the points-liability/redemption history required as an analytics report group in §16.1). table-policy.server.ts's rule for this table (lines 892-901: `reward_catalog_items` — "if (!superAdmin && isWrite) throw... return {...query, filters}") imposes no restriction beyond role, i.e. it permits the delete outright rather than forcing a retire-only path.
+**Shipped (as of the original audit):** src/routes/_authenticated/admin.rewards.tsx's deleteItem (lines 307-325) hard-deletes a `reward_catalog_items` row with a single click and no confirmation dialog (no AlertDialog/window.confirm anywhere in the file) and no check for existing redemption history. db/schema.sql:700 defines `reward_redemptions.reward_id UUID NOT NULL REFERENCES reward_catalog_items(id) ON DELETE CASCADE`, so deleting a reward that has ever been redeemed permanently destroys every historical `reward_redemptions` row for it (the points-liability/redemption history required as an analytics report group in §16.1). table-policy.server.ts's rule for this table (lines 892-901: `reward_catalog_items` — "if (!superAdmin && isWrite) throw... return {...query, filters}") imposes no restriction beyond role, i.e. it permits the delete outright rather than forcing a retire-only path.
+
+**Fix (found already applied, 2026-08-05 re-verification):** part of the same reward-commands rebuild as §2.15. `admin.rewards.tsx` now calls `retireRewardCatalogItem` (from `reward-commands.server.ts`) instead of a hard delete — confirmed live at the call site (`admin.rewards.tsx:317`). Redemption history and ledger rows are preserved; a retired item stops accepting new requests rather than being destroyed.
 
 ---
 
@@ -268,19 +314,23 @@ the previous version of this document's own numbering convention.
 
 ---
 
-### 2.23 Ch.19 19a (§19.2) — Password-reset endpoint confirms account existence and hands back a live takeover token
+### 2.23 Ch.19 19a (§19.2) — Password-reset endpoint confirms account existence and hands back a live takeover token — **fixed 2026-08-01**
 
 **Spec (§19.2):** "Authentication errors do not reveal whether an email exists" and reset tokens must only reach the account owner through a controlled channel, stored only as hashes.
 
 **Shipped:** requestPasswordReset (src/server/livey-service.server.ts:1844-1863) returns the raw, valid password-reset link directly in its response whenever the email matches a profile, and `{resetLink: null}` otherwise — unconditionally, in every environment, with no NODE_ENV gate. No email-sending mechanism exists anywhere in the repo (confirmed by repo-wide search: no SMTP/SendGrid/Resend/Postmark/nodemailer usage) — the reset link is never actually emailed. The public ForgotForm (src/routes/auth.tsx:357-381) then copies that live token to the caller's clipboard and shows "Reset link generated and copied to clipboard." when the account exists vs. "If that account exists, a reset link is on its way." when it doesn't (lines 373-380). Net effect: any unauthenticated visitor who knows or guesses a target's email gets both (a) confirmation the account exists and (b) a fully valid password-reset token for that account, with no need to access the victim's inbox — a direct account-takeover path, not just an enumeration side-channel.
 
+**Fix:** identical underlying function and fix as §2.3 above — `requestPasswordReset` now always returns `{ ok: true }`, never the token/link, regardless of whether the account exists; `ForgotForm` shows the same message either way. Verified end-to-end in a browser: a real seeded email and a fabricated one produced byte-identical `{"ok":true}` responses and toast text; the real token appeared only in server-side logs. Real email delivery (to retire the log-relay stopgap) is still open — tracked in Phase 5 of §20's phased plan.
+
 ---
 
-### 2.24 Ch.19 19b (§19.2) — Flat 14-day session lifetime for every role; a real session-revocation function exists but nothing calls it
+### 2.24 Ch.19 19b (§19.2) — Flat 14-day session lifetime for every role; a real session-revocation function exists but nothing calls it — **revocation wiring + role-tiered absolute expiry fixed 2026-08-01, idle timeout still open**
 
 **Spec (§19.2):** Idle/absolute session lifetimes must be 30 min/12 h for Super Admin, Partner Admin, and every LIVEY-internal role, and 60 min/24 h for Partner User; password reset, MFA reset, role/scope change, suspension, offboarding, and suspected compromise must revoke affected sessions; users can view/revoke active sessions.
 
 **Shipped:** sessionExpiresAt() (src/server/livey-service.server.ts:649-650, 965-967) issues one flat SESSION_DAYS=14 (336h) absolute expiry for every role via signInWithPassword, signUpLocal, completePasswordReset, and createSessionForUser — no idle timeout exists at all (last_seen_at is updated on every request at line 1196 but never compared against a threshold), and no role-based tiering exists anywhere. revokeUserSessionsAndContexts (lines 1363-1392) is the only function that revokes rows in `sessions`, but it has zero call sites anywhere else in src/ — completePasswordReset (1867-1937), issueTemporaryPasswordForUser (admin-forced reset, 1939-1957), and changeUserRole (identity.change_user_role, src/server/user-role-commands.server.ts:55-160, the exact function fixed for authorization this session) never call it, so a stolen or otherwise-live session token for a demoted, reset, or role-changed user (including super_admin) survives all of these events for up to 14 days. assignGovernedRole (src/server/role-assignment-commands.server.ts:215-219) revokes `active_contexts` on reassignment but likewise never touches `sessions`. No route or UI exists to list or revoke a user's own active sessions.
+
+**Fix (partial, 2026-08-01):** `revokeUserSessionsAndContexts` is now called from `completePasswordReset`, `issueTemporaryPasswordForUser` (admin-forced reset), `changeUserRole`, and `assignGovernedRole` (which previously only revoked `active_contexts`, not `sessions`, on reassignment). Verified with a real production-build session row: `expires_at - created_at` measured exactly 12h for a super_admin login. `sessionExpiresAt()` now takes the caller's roles and returns 12h for Super Admin/Partner Admin/every LIVEY-internal role, 24h only when the caller's sole role is `partner_user` — replacing the flat 14-day lifetime. **Still open:** idle-timeout enforcement (30/60 min) — `last_seen_at` is tracked but nothing compares it to a threshold yet, since that requires touching the per-request session-validation path (`getSessionFromToken`), deliberately deferred to keep the 2026-08-01 batch's blast radius contained; and no route/UI exists yet to list or revoke a user's own active sessions.
 
 ---
 ## 3. Chapter 4 — Experience and interaction system
@@ -512,81 +562,351 @@ Beyond the S1 items in §2.23, §2.24:
 | 23c | §23.9 invariant 1 ('every canonical term has one definition or one explicitly named sole registry') / §23.4 Partner lifecycle: §23.9 requires exactly one authoritative definition per canonical term. §23.4's Partner lifecycle dictionary includes suspended and offboarded as post-approval administrative terminal states. | Two of the domains audited above (Task, Ticket) are actually implemented correctly against blueprint in their live command modules — but by design, not by fixing the registry: task-commands.server.ts:27-35 defines its own TASK_STATUSES = ['to_do','in_progress','blocked','completed','cancelled'] (matches blueprint's todo/in_progress/blocked/completed/cancelled almost exactly) and ticket-commands.server.ts:25-38 defines its own TICKET_STATUSES = ['open','in_progress','waiting_on_partner','closed','reopen_requested'] (exact match to blueprint §23.4 Ticket workflow). Both files contain explicit code comments stating they intentionally diverge from taxonomy.ts's 'generic placeholder' because it doesn't match the blueprint or the live DB values — i.e., the codebase itself documents that there is no single sole registry for these terms, contradicting §23.9's invariant, and creates a live risk that a future caller importing TASK_STATUSES/TICKET_STATUSES from domain/contracts/taxonomy.ts (as src/domain/contracts/state-machine.ts and reference-data.ts already do) gets the wrong values silently. Separately, Partner lifecycle's live backing store, the Postgres `partner_status` type (db/schema.sql:29-38, confirmed live via pg_enum query to currently hold pending_partner_registration/submitted/under_review/partial_approval/pending_agreement/signed_pending_review/need_more_info/approved/rejected), is a strict CREATE TYPE ... AS ENUM — it structurally cannot hold blueprint's `suspended` or `offboarded` values without an ALTER TYPE ADD VALUE migration; no such migration exists in db/schema.sql, so a partner can never be represented as administratively Suspended or Offboarded under the current schema, only Rejected/Approved. | S3 |
 
 ---
-## 20. Suggested sequencing
+## 20. Phased remediation plan
 
-The order below groups the 24 S1 items by blast radius and dependency, not by chapter number —
-items that unblock the most downstream work, or that are live security/financial exposures,
-come first. Several S1s across different chapters turned out to be the *same* underlying bug
-seen from two angles; those are called out so they're fixed once, not twice.
+This supersedes the old flat "suggested sequencing" list with named phases that cover the
+**whole** backlog above (S1 through S3, all 17 substantive chapters), not just the 24 S1s. Each
+phase has a scope (gap IDs from §2 and §3-§19 above, plus §21's new item), a rationale for why
+it sits at that point in the sequence, and an exit criterion — a concrete, checkable statement
+of "done," not "improved." Phases are ordered by dependency and blast radius: a later phase
+routinely assumes an earlier phase's fix is already in place (e.g. Phase 4's reward fulfillment
+work assumes Phase 2's scope-spec review already fixed who can act on a redemption). Do not
+skip ahead on severity label alone — an S2 that blocks a later S1's fix belongs earlier.
 
-1. **Stop the two live account-takeover / data-leak holes — these are exploitable today.**
-   `requestPasswordReset` returns a live, valid reset token to *any* caller who supplies a
-   target email (no email is ever sent), and also reveals whether the account exists — a direct
-   takeover path, not just enumeration. *(§2.3 / §2.23 — same function, cited from both the
-   onboarding and security chapters)* The generic table-read path ignores the caller's
-   requested column list and always executes `SELECT *`, so every read of `profiles`
-   (including the Super Admin CSV export) returns `password_hash` over the network. *(§2.17)*
-   Zoho Sign's `send-agreement`/`resync-agreement` HTTP routes have no server-side auth check
-   at all — any caller who knows a `partnerId` can trigger a real signing request or flip
-   partner status. *(§2.19)* The inbound Zoho webhook's signature check fails **open** when
-   the secret env var is unset (the documented default). *(§2.20)* Fix all four before anything
-   else — none require an architecture change, only closing a check that's missing or backwards.
+Several items appear in more than one phase's scope on purpose: the underlying code is touched
+incrementally (e.g. `table-policy.server.ts`'s scope-spec function is edited in Phase 2 for
+tenant isolation and again in Phase 5 for notification recipients) rather than in one giant
+patch, so each touch is reviewable and revertible on its own.
 
-2. **Then harden sessions on top of the reset-flow fix.** `revokeUserSessionsAndContexts`
-   exists and works but is never called from password reset, admin-forced reset, or role
-   change, and every session has one flat 14-day lifetime regardless of role. *(§2.24)*
+---
 
-3. **Do the per-table scope-spec review the code's own comment already calls for.** One
-   pattern — `getScopeSpec`/`getGenericScopeSpec` in `table-policy.server.ts` falling back to
-   "creator/self" scoping for LIVEY-internal roles instead of "authorised assignment scope" —
-   is the root cause of six separate-looking S1/S2 findings: RM/PAM/KAM/ISR/Support can only
-   see deals and tasks they personally created (§2.2, §2.10); the Activity Timeline is
-   super-admin-only and silently empty for everyone else (§2.22); the generic table-update path
-   lets any role bypass the Task transition guard entirely (§2.9); and the Distributor role gets
-   *whole-tenant* access instead of tag-gated access — the opposite failure mode, also fixed by
-   the same review (§2.4). Same effort as the `support_tickets` fix already done this session,
-   repeated per table — `portal_deals`, `tasks`, `domain_activity_events`, and the
-   Deal/Task/Ticket command-layer `authorizeDealActor`-style checks.
+### Phase 0 — Close the exploitable holes (today, no architecture change needed)
 
-4. **Unblock account creation.** Two of three paths that create a real partner account
-   (self-service sign-up, partner-admin team invite) never insert an `assignments` row, so
-   those accounts are silently denied on every governed table forever. *(§2.1)* This is why
-   seeded-data verification didn't catch it — the seed script hand-inserts assignments.
+**Status as of 2026-08-05: mostly done.** §2.3/§2.23 (password-reset token leak/enumeration),
+§2.17 (password_hash leak), and §2.19 (Zoho Sign endpoint auth) are fixed and deployed. §2.20's
+fail-open bug is fixed (webhook now rejects when unsigned/misconfigured, deployed with a real
+secret in Railway — pending the one remaining manual step of configuring that same secret in
+Zoho's own webhook dashboard, which no session has had credentials for).
 
-5. **Make the deal pipeline's core invariant hold**, since §9 is the product's primary
-   surface: split registration status back out of `pipeline_stage` in all three places that
-   collapse them (§2.5); require the outcome-review/PO flow before a deal can leave Negotiation
-   instead of letting "Mark won" bypass it and permanently orphan the deal from rewards (§2.6);
-   fix the PO-approval role check so PAM/RM buttons actually work instead of failing every time
-   (§2.7); and stop summing Won/Lost deals and free-text amounts into "pipeline value" (§2.8).
+**Scope still open:** the rest of §2.20 — timestamp/replay-window/provider-account checks, and
+a durable `command_inbox` receipt persisted *before* any domain mutation runs (right now the
+webhook goes straight from signature check to mutation with no receipt row at all). §2.3's
+other half — an email-verification gate on registration — is also still open, and real email
+delivery to replace the current log-relay stopgap is deferred to Phase 5 (it needs the same
+transport digests need, no sense building it twice).
 
-6. **Close the ticketing outage and the reward integrity gaps.** `createTicket` inserts into
-   two columns absent from the deployed schema, so every real ticket creation throws — same
-   class of bug as this session's `is_internal` fix, same fix (add the missing `ALTER TABLE`).
-   *(§2.13)* `livey_support` sees no ticket action controls in the UI at all, despite being
-   equally authorised at the command layer *(§2.14)* — a one-line role-gate fix. Redemptions
-   never reserve points/stock, so approval can't revalidate anything and double-spend is
-   possible once real usage begins *(§2.15)*; and a LIVEY-internal or Distributor deal creator
-   with no tagged partner collaborator is awarded 100% of a deal's Won rewards instead of being
-   blocked *(§2.16)*.
+**Why first:** these are live, unauthenticated exposures with no dependency on anything else
+in this plan — closing them is a config/check fix, not a redesign.
 
-7. **Notifications and News.** Rewrite recipient resolution to target the record's actual
-   assignee/watchers instead of the acting user or "everyone at this `partner_id`" *(§2.11)*,
-   and stop writing deal-stage-change activity into the globally-readable `portal_news_posts`
-   table, which currently leaks one partner's deal details to every other partner whenever a
-   super_admin triggers the write path *(§2.12)*.
+**Exit criterion:** no unauthenticated endpoint returns a credential, token, or account-existence
+signal (met); every inbound webhook is signature *and* replay-window verified and leaves a
+durable receipt in `command_inbox` before any domain mutation runs (signature check met,
+replay-window and receipt still open).
 
-8. **Configuration guardrails.** Add a confirm-and-check-history step before a reward catalog
-   item can be deleted, since the FK is `ON DELETE CASCADE` and silently destroys redemption
-   history today *(§2.18)*.
+---
 
-9. **Then** the two large, lower-urgency rebuilds: the Integration Operations Centre, which is
-   100% fabricated client-state with no real provider calls behind any operator action
-   *(§2.21)*, and the rest of the absent modules in blueprint-priority order — Auto CRM (§12),
-   ticketing completeness beyond the two S1s above (§13), Insight Hub assessments/certificates
-   (§14), and the missing Zoho Books/WhatsApp/GyFTR/DHL adapters (§17).
+### Phase 1 — Session and credential hardening
 
-Independent of the above and cheap to land: the two remaining free-text search boxes on
-Rewards/Support (4b), an "unsaved changes" prompt on dialog close (4f), and gating the two
-lookup fields (Region/State on partner onboarding, deals, customers) that currently allow
-ad hoc value creation despite a governed dictionary already existing for them (4e).
+**Status as of 2026-08-05: partly done.** §2.24's core is fixed — session revocation is wired
+to password reset, admin-forced reset, and role/assignment change, and absolute session
+lifetime is now role-tiered (12h internal/Super/Partner Admin, 24h Partner User) instead of a
+flat 14 days.
+
+**Scope still open:** idle-timeout enforcement (30/60 min) — `last_seen_at` is tracked but
+nothing compares it to a threshold yet; this needs the per-request session-validation path
+(`getSessionFromToken`), deliberately deferred when the rest of §2.24 landed to keep that
+batch's blast radius small. A user-facing "active sessions" list/revoke UI also doesn't exist
+yet. Beyond that: §6c (inviter sets a new user's plaintext password directly, no forced reset,
+no credential-status lifecycle); §19c (no MFA anywhere, no email verification gate before
+onboarding); §19d (no rate limiting on auth, reset, invite, or MFA endpoints — login is
+unthrottled password guessing).
+
+**Why here:** depends on Phase 0's reset-flow fix being in place first (already true). Everything
+else in the plan assumes a session, once compromised or superseded, actually dies — true for
+the explicit revocation events above, not yet true for a session simply left idle.
+
+**Exit criterion:** a password reset, admin-forced reset, role change, or suspension always
+revokes prior sessions (met); role-tiered absolute session lifetimes match §19.2 (met) and idle
+lifetimes do too (open); MFA is enforced for Super Admin and internal roles (open); auth
+endpoints are rate-limited by account and IP (open).
+
+---
+
+### Phase 2 — Tenant isolation and the RBAC scope-spec review
+
+**Status as of 2026-08-05: mostly done.** §2.1 (account-creation paths not granting an
+Assignment), §2.2/§2.10 (LIVEY-internal roles collapsed to self-created-only on deals/tasks),
+and §2.22 (Activity Timeline access, for the one shape the shipped UI actually uses — a single
+deal's own timeline) are all fixed and deployed via a purpose-built `isLiveyInternalRole` /
+`scopeAnyColumnEquals` mechanism in `table-policy.server.ts`, verified end-to-end with a real
+governed `rm` test user in a local browser session. Three unrelated but blocking bugs were
+found and fixed along the way (a broken client-side assignment-field mapping, `portal_team_members`
+throwing for any LIVEY-internal caller, and a missing `is_internal` column allowlist entry) —
+see `docs/implementation-status.md`'s 2026-08-01 "Phase 2" entry for the full detail.
+
+**§2.4 update (2026-08-05):** the Deal/Customer half is now fixed too — `restricted_distributor`
+gets tag-only visibility (via a new `isDistributorRole` read-scope branch reusing the
+`scopeOwnerOrParticipantTag` mechanism, plus matching write-side checks in `authorizeDealActor`/
+`authorizeCustomerActor`). See §2.4's own entry above for detail. Deliberately *not* extended to
+Task/Ticket in the same pass — neither table has a participant-tag table to check against, so
+that's tracked as a distinct, smaller remaining item, not a reason to consider this phase done.
+
+**§2.9 correction (2026-08-05):** also already fixed, since 2026-08-02 — `applyTablePolicy`'s
+`assertNoProtectedLifecycleUpdate` guard already blocks the generic table-update path from
+touching `tasks.status`/`version`/`blocked_reason`/`completed_at`/`cancelled_at`, with no
+super_admin bypass. See §2.9's own entry above; not something this phase still needs to do.
+
+**Scope still open — this phase is not closed yet:** §2.4's Task/Ticket half (a Distributor
+still gets flat partner-wide access to Tasks and Tickets — needs its own design decision on what
+"tagged" means for those two, not a copy of the Deal/Customer mechanism), and the general case
+of §2.22 (the dashboard's
+broad, unfiltered activity feed — any `subject_type` other than "deal", or no `subject_id` at
+all — still denies for non-super-admin; only the single-deal-timeline shape was fixed). Plus one
+item new to this plan, not in the original sequencing: **DB-level enforcement.** The
+2026-08-05 audit confirms all access control lives in `table-policy.server.ts` (application
+layer only) — the app connects via one privileged `pg.Pool`, so any raw query that skips that
+layer has no backstop, and the handful of Supabase-era RLS migrations left in
+`supabase/migrations/` are dead code against the real runtime path, not a working
+defense-in-depth layer. This phase should end with an explicit, written decision: either build
+real per-request DB-level scoping (RLS or an equivalent), or formally retire/delete the stale
+RLS migrations and document app-layer-only as the accepted model — right now it's neither,
+which is its own risk (a future reader assumes RLS is live because the migrations are still
+there).
+
+**Why here:** this is the single highest-leverage phase in the whole plan — one pattern
+(`getScopeSpec`/`getGenericScopeSpec` falling back to "creator/self" instead of "authorised
+assignment scope") is the root cause of five of the six items above. Fixing it once, reviewed
+per table, closes more distinct findings than any other phase. It must land before Phase 3,
+since deal-scope correctness is a precondition for the pipeline-integrity work, and before
+Phase 5, since notification-recipient correctness depends on the same scope machinery.
+
+**Exit criterion:** every governed table's read/write scope matches the §5.5 permission matrix
+for every role, not just `support_tickets`; the Task/Deal generic-write paths cannot bypass a
+command-layer transition guard; every real account-creation path leaves a working `assignments`
+row; the RLS question has a written answer, not an open question.
+
+---
+
+### Phase 3 — Deal pipeline integrity (the product's primary surface)
+
+**Status as of 2026-08-05:** §2.7 is fixed (`authorizeDealActor` + role-scoped `PO_REVIEW_ROLES`
+on `approvePO`/`requestChanges`/`rejectOutcome`, UI narrowed to match). §2.5 and §2.6 are
+*partially* fixed — see each entry above for exactly what landed and what's still open: §2.5's
+paths 1 (`submitDealForRegistration`) and 3 (`moveDealStageForward`'s registration gate) are
+done, path 2 (`admin.deals.tsx`'s raw client write) is not; §2.6's outcome-review deadlock
+(`submitPO` locking out Won deals) is closed, the Won/Lost required-field capture UX is not.
+§2.8 is half-fixed: the *dashboard's* pipeline KPI is now a real server-computed canonical
+metric (2026-08-02), but the *Pipeline page's own* separate `totals.pipeline` is unchanged and
+still wrong — see §2.8's entry above; this phase should make the Pipeline page consume the same
+canonical metric instead of maintaining a second, incorrect one.
+
+**Scope still open:** §2.5's path 2 and §2.6's Won/Lost data-capture share one root fix — a
+proper server-side `reviewDealRegistration`/richer `markDealWon`/`markDealLost` set of commands
+to replace `admin.deals.tsx`'s raw client writes and add the spec's required Won/Lost inputs
+(outcome date, PO choice, confirmed lines, loss reason) — worth doing as one piece since it's
+the same command-layer gap underneath both findings. Plus §2.8's remaining Pipeline-page half
+(still sums free-text amount over every stage including Won/Lost — the dashboard half is
+already fixed, see above).
+Then the already-built-but-unreachable server logic that this phase should finally wire into
+the UI: 9e (backward movement has no button anywhere), 9f (no "add line item" control, so
+`deal_line_items`/the catalogue pricing engine is dead in practice), 9g (RM/ISR auto-tagging
+and the PAM/KAM Testing→Qualified handoff — needs the Coverage Exception state machine built,
+not just wired), 9h (discount request/approval workflow has no UI), 18d (Deal Line Item →
+Pricing Revision path, blocked on 9f), 18c (retire or connect the disconnected governed
+catalogue tables vs. the live `portal_catalog_items` duplicate).
+
+**Why here:** depends on Phase 2's scope-spec review (deal visibility must be correct before
+deal *mutation* correctness matters), and is sequenced before Phase 4 because reward-award
+correctness (Phase 4) is downstream of outcome-review actually being reachable (this phase).
+
+**Exit criterion:** a deal cannot reach Won without passing outcome review (the deadlock
+preventing outcome review from ever being reached is fixed; Won still doesn't itself *require*
+outcome review to have happened — that's the still-open data-capture half); PAM/RM can approve
+a PO without a server-side rejection (met); pipeline value reflects DTP on open-stage deals only
+(dashboard half met, Pipeline-page half open); backward movement, line-item capture, and the
+discount workflow are reachable through the shipped UI, not just the command layer (open).
+
+---
+
+### Phase 4 — Support and Rewards integrity
+
+**Status as of 2026-08-05: the four live-correctness S1s are done.** §2.13 (ticket creation
+crash), §2.14 (livey_support ticket-action lockout), §2.15 (redemption reservation/double-spend),
+and §2.18 (reward catalog hard-delete) were all fixed 2026-08-02 — see each entry above for
+detail. §2.16 (contributor-eligibility gate) is re-confirmed still open: `awardApprovedWinRewards`
+still falls back to 100%-to-creator with no role check.
+
+**Scope still open:** §2.16, plus module completeness: 13c/13d/13e/13f (ticket product/serial
+model, real SLA policy, ticket notifications, human-readable ID format), 15c (reward
+calculation's two-step USD→points conversion, currently collapsed into one ad hoc rate — not
+re-verified against the new `reward-commands.server.ts`, worth a fresh check before assuming
+still open), 15d (gadget catalogue fields: country eligibility, shipping requirement,
+fulfillment task), 15e (Reward Store shows a fake points-derived tier instead of the real
+governed partner tier), 15f (stat cards not clickable, all-or-nothing CSV import). Finally,
+wire the already-built GyFTR client into the redemption fulfillment step (part of §17e) so an
+approved redemption can actually reach `fulfilled` instead of getting stuck in `processing`
+forever — worth re-checking whether the new `reward-commands.server.ts` already calls it before
+assuming it doesn't.
+
+**Why here:** independent of Phase 3, so it can run in parallel once Phase 2 lands.
+
+**Exit criterion:** ticket creation never fails (met); `livey_support` can accept/close/wait a
+ticket through the product's own UI (met); a redemption cannot be approved past the requester's
+actual balance or the item's actual stock (met); a LIVEY/Distributor-created deal with no
+tagged partner collaborator blocks Won approval instead of awarding the creator (open); at
+least one redemption has been taken end-to-end through GyFTR to `fulfilled` (unverified either
+way, re-check before assuming).
+
+---
+
+### Phase 5 — Notifications, News, and delivery infrastructure
+
+**§2.12 update (2026-08-05):** already fixed 2026-08-02 — deal activity no longer writes to
+`portal_news_posts` at all, see §2.12's own entry above. Removed from this phase's remaining
+scope; the notification-recipient-targeting half (§2.11) is re-confirmed still open below.
+
+**Scope:** §2.11 (notifications target the actor or the whole partner, never the record's real
+assignee/watchers), 11c
+(News has no lifecycle/audience/digest model at all — it's a bare photo-post CRUD), 11d (no
+email/WhatsApp digest transport, no delivery-state machine, no preferences), 13e (ticket events
+never notify anyone but the acting user's own browser toast), 10e's reminder/escalation half
+(task reminders/SLA alerts — the workspace-view half of 10e belongs in Phase 6). This is also
+where the project's **first real scheduled-job/worker infrastructure** gets built — nothing in
+the codebase runs on a schedule today (confirmed: no cron, no queue library, nothing in
+`package.json`), and SLA breach checks, digest sends, reminders, and draining `command_outbox`
+(§17e / 18f — write-only today, nothing ever consumes it) all need one. Build the worker once
+here; every later phase that needs "something happens later" (Phase 6 certificates, Phase 7
+provider reconciliation) reuses it rather than inventing its own.
+
+**Why here:** depends on Phase 2's scope-spec review (a notification recipient has to be
+resolved against the same correct assignment/participant model), and the worker infrastructure
+this phase builds is a hard prerequisite for Phase 6 and Phase 7's SLA/reconciliation work.
+
+**Exit criterion:** a notification always reaches the record's actual assignee/watchers, never
+the acting user or "everyone at this `partner_id`"; News has Draft/Scheduled/Published/
+Expired/Archived states and real audience targeting; at least one scheduled job runs in
+production and successfully drains `command_outbox`; a digest can be sent through a real email
+or WhatsApp transport, not just simulated in-app.
+
+---
+
+### Phase 6 — Task, Insight Hub, and Auto CRM completion
+
+**Scope:** 10c/10d (task data model — multiple related records, checklists, dependencies,
+templates — and stage-triggered task generation, currently fully disconnected from the deal
+pipeline), the workspace half of 10e (Today/Upcoming/Overdue/saved views), 14a/14b (a real
+lesson viewer and assessment flow — right now "Continue learning" is a hardcoded-disabled
+button and no learner can progress past enrollment), 14c (admin content authoring beyond
+Track/Subject CRUD, audience/assignment targeting, analytics), 12a/12b (the Auto CRM Lead
+entity and lifecycle — no `leads` table exists at all today — and expanding the in-app
+Assistant beyond its current two intents). Note the WhatsApp *wizard* (deal drafting, ticket
+browsing, OTP identity linking) is already shipped and independently audited as solid in the
+2026-08-05 pass — this phase's WhatsApp-adjacent work is the *Auto CRM* layer in front of it
+(lead capture, dedup, scoring, routing), not a rebuild of the wizard itself.
+
+**Why here:** these three modules are independent of each other and of the deal-pipeline
+critical path, so they can be staffed in parallel once Phase 5's scheduled-job infrastructure
+exists (task reminders and Lead nurture timers both need it). Sequenced after Phase 4 because
+none of them carry a live-correctness or security risk the way Phases 0-4 do — they're
+capability gaps, not active bugs.
+
+**Exit criterion:** a stage-template task generates automatically on deal-stage entry and
+blocks the transition until required tasks complete; a learner can view a lesson, submit an
+assessment, and receive a real Certificate record with a status lifecycle; a `leads` table
+exists and at least the New→Qualified→Converted path is reachable end-to-end.
+
+---
+
+### Phase 7 — Remaining external integrations
+
+**Scope:** §2.21 (Integration Operations Centre is 100% fabricated client state), 17d (Zoho
+Books has no adapter at all), 17f (Zoho Sign lacks agreement revisioning, checksums, and
+one-active-request enforcement), the DHL and remaining email adapters from §17e. Also the
+item new to this plan: **§21's Call Center/Twilio Voice finding** — it's a real, working,
+reasonably-built adapter (server-side credentials, signature-verified webhooks, idempotent
+inserts, RBAC-gated) but was built outside the shared integration-record model and isn't
+documented in `product.md` at all. This phase should either (a) formally add Call Center to
+`product.md` and bring it up to the same outbox/reconciliation/Ops-Centre-visibility bar as
+every other provider, or (b) explicitly scope it as internal tooling exempt from §17's
+governance model — but not leave it undocumented and ungoverned indefinitely.
+
+**Why here:** every item in this phase depends on Phase 5's worker infrastructure (reconciliation
+jobs, retry/backoff, dead-letter handling) to be built correctly rather than as another
+one-off synchronous adapter.
+
+**Exit criterion:** the Integration Operations Centre reflects real provider state and its
+operator actions (pause/resume/reconnect/disconnect) make a real backend call; Zoho Books,
+DHL, and Call Center each have a documented, governed status (built-to-spec, explicitly
+out-of-scope, or explicitly deferred) — none are silently absent or silently undocumented.
+
+---
+
+### Phase 8 — Non-functional hardening and UX polish
+
+**Scope:** 19f (CSP/CORS/frame-ancestors headers, field-level encryption for provider secrets
+and voucher codes), 19g (retention/purge jobs, data-subject access/erasure workflow), 19h
+(backups, restore drills, observability/alerting), 19i (real accessibility test coverage —
+axe/keyboard/screen-reader/zoom, not just "a dialog became visible"), 19j (pagination on large
+lists, N+1 policy-check batching), 16b/16g (export audit trail and policy-change
+versioning/dual-approval), and the remaining UX-only items that don't block any other phase:
+chapter 4 (4a-4h: breadcrumb, saved views, unsaved-changes prompts, the two remaining free-text
+search boxes on Rewards/Support, governed Region/State fields that still allow ad hoc value
+creation), chapter 7 (7.1-7.9: per-role dashboards), chapter 8 (8.1/8.2/8.4/8.5/8.6/8.7b:
+Partner detail tabs, Contact/POC entity, next-step workflow, duplicate-detection-at-creation),
+and chapter 23 (23a/23b/23c: consolidating the 15-of-17 divergent reference-data dictionaries
+into one sole registry per canonical term, matching §23.9's own invariant).
+
+**Why last:** none of these block correctness or security of the core commercial flow — they're
+the release-readiness bar (§19.1) and the UX completeness bar, appropriate to close out once
+the product actually works end-to-end.
+
+**Exit criterion:** the §19.1 non-functional quality bar is met; each of the 9 roles has a
+distinct, populated dashboard; reference data has exactly one authoritative registry per
+canonical term, with no command module silently defining its own competing constant.
+
+---
+
+## 21. Addendum — 2026-08-05 independent full-backend re-audit
+
+| Attribute | Value |
+| --- | --- |
+| Method | 12 independent domain agents, each reading its `product.md` section(s) fresh against the current backend (`src/server`, `src/domain`, `src/integrations`, `db/schema.sql`, `supabase/migrations`) — a static spec-vs-code audit, not a line-by-line diff against this document |
+| Codebase | `main`, post commit `81f48a4` ("Call Center Phase 1 — Twilio Voice calling with browser softphone") — five commits ahead of this document's 31 July baseline |
+| Result | No item in §2-§19 above was found fixed since the 2026-08-01 entries already marked as such. One genuinely new item, below. |
+
+### 21.1 New — Call Center / Twilio Voice backend (not specified anywhere in `product.md`)
+
+**What shipped:** `src/server/twilio-voice.server.ts`, the `call_logs` table
+(`db/schema.sql`, near line 1876), and `src/routes/_authenticated/calls.tsx` implement browser
+softphone calling via Twilio Voice: outbound/inbound call handling, webhook-driven call-status
+updates, and a calls list UI. This is real, working code, not a stub.
+
+**Governance gap:** `product.md` has zero mentions of a call center, softphone, or Twilio Voice
+anywhere in its 6,091 lines (confirmed by full-text search) — this feature was built and
+shipped with no corresponding spec chapter or acceptance criteria. On its own engineering
+merits it's built reasonably consistently with the rest of the codebase: credentials are
+server-side only (env vars), inbound webhooks reuse the existing `verifyTwilioSignature` check
+from the WhatsApp integration, and call-log inserts use `ON CONFLICT (twilio_call_sid) DO
+NOTHING` for idempotency, gated by a dedicated `requireCallsCapability` RBAC check. But — like
+every other integration in this codebase (see §2.21, 17e) — it does not use the shared
+integration-record model (§17.2), does not write to or drain `command_outbox`/`command_inbox`,
+and has no card in the Integration Operations Centre. It is not a uniquely worse offender than
+the rest of §17; it is simply new, real, and currently invisible to both the spec and the
+Ops Centre.
+
+**Recommended handling:** see Phase 7 above (§20). Either add a Call Center chapter/section to
+`product.md` and bring this adapter up to the same bar as the rest of §17's remediation, or
+explicitly record it as an intentionally-exempt internal tool — either is acceptable, silence
+is not.
+
+### 21.2 Confirmation, not a new finding — DB-level tenant isolation
+
+The 2026-08-05 audit independently reached the same conclusion the existing document's own
+§20 (now Phase 2) sequencing note already implies: every access-control decision in this
+codebase is enforced in `table-policy.server.ts` at the application layer, over a single
+privileged `pg.Pool` connection with no per-request database role. The `ROW LEVEL SECURITY`
+policies present in a handful of early `supabase/migrations/*.sql` files are not consulted by
+the live runtime path at all. This is called out explicitly in Phase 2's scope above rather
+than filed as a separate gap ID, since it's the same root cause already tracked there — but is
+worth stating plainly here: there is currently no database-level backstop if an
+application-layer check is ever missed on a new table or a new raw query.

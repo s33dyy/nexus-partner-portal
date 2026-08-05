@@ -300,6 +300,78 @@ test("approvePO does not double-award if a reward event already exists for the d
   }
 });
 
+test("§2.6/§9.15: submitPO is accepted from negotiation", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ stage: "negotiation" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { submitPO } = await import("@/server/outcome-review-commands.server");
+    const result = await submitPO({
+      actor: buildActor(),
+      data: {
+        dealId: "deal-1",
+        poDocumentUrl: "https://example.com/po.pdf",
+        poNumber: "PO-1",
+        poDate: "2026-08-05",
+        poAmount: 10000,
+        currencyCode: "USD",
+      },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.6/§9.15: submitPO is also accepted once the deal is already Won (PO Pending), not locked out", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ stage: "won" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { submitPO } = await import("@/server/outcome-review-commands.server");
+    const result = await submitPO({
+      actor: buildActor(),
+      data: {
+        dealId: "deal-1",
+        poDocumentUrl: "https://example.com/po.pdf",
+        poNumber: "PO-1",
+        poDate: "2026-08-05",
+        poAmount: 10000,
+        currencyCode: "USD",
+      },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.6/§9.15: submitPO is still denied outside negotiation/won (e.g. qualified)", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ stage: "qualified" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { submitPO } = await import("@/server/outcome-review-commands.server");
+    const result = await submitPO({
+      actor: buildActor(),
+      data: {
+        dealId: "deal-1",
+        poDocumentUrl: "https://example.com/po.pdf",
+        poNumber: "PO-1",
+        poDate: "2026-08-05",
+        poAmount: 10000,
+        currencyCode: "USD",
+      },
+    });
+    expect(result.ok).toBe(false);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("approvePO denies a non-super_admin actor and awards nothing", async () => {
   const harness = await installFakePool({
     dealRow: baseDealRow(),
@@ -316,5 +388,114 @@ test("approvePO denies a non-super_admin actor and awards nothing", async () => 
     expect(harness.insertedRewardEvents).toHaveLength(0);
   } finally {
     harness.restore();
+  }
+});
+
+test("§2.7: approvePO now allows a PAM inside their geography scope, not just super_admin", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ country: "India", region: "India West" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { approvePO } = await import("@/server/outcome-review-commands.server");
+    const result = await approvePO({
+      actor: buildActor({
+        roleKey: "pam",
+        teamDomain: "partner_success",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+      }),
+      data: { dealId: "deal-1", reason: "PO verified" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(harness.insertedRewardEvents).toHaveLength(1);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.7: approvePO still denies an RM outside their geography scope (not a blanket role grant)", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ country: "Singapore", region: "Asia Pacific" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { approvePO } = await import("@/server/outcome-review-commands.server");
+    const result = await approvePO({
+      actor: buildActor({
+        roleKey: "rm",
+        teamDomain: "sales",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+      }),
+      data: { dealId: "deal-1", reason: "PO verified" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(harness.insertedRewardEvents).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.7: approvePO still denies a KAM (not a named PO-review role, even in scope)", async () => {
+  const harness = await installFakePool({
+    dealRow: baseDealRow({ country: "India", region: "India West" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { approvePO } = await import("@/server/outcome-review-commands.server");
+    const result = await approvePO({
+      actor: buildActor({
+        roleKey: "kam",
+        teamDomain: "partner_success",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      }),
+      data: { dealId: "deal-1", reason: "PO verified" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(harness.insertedRewardEvents).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.7: requestChanges and rejectOutcome also accept a scoped RM, not just super_admin", async () => {
+  const harnessChanges = await installFakePool({
+    dealRow: baseDealRow({ country: "India", region: "India West" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { requestChanges } = await import("@/server/outcome-review-commands.server");
+    const result = await requestChanges({
+      actor: buildActor({
+        roleKey: "rm",
+        teamDomain: "sales",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+      }),
+      data: { dealId: "deal-1", reason: "Need updated PO" },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harnessChanges.restore();
+  }
+
+  const harnessReject = await installFakePool({
+    dealRow: baseDealRow({ country: "India", region: "India West" }),
+    rewardDealInfo: baseRewardDealInfo(),
+  })();
+  try {
+    const { rejectOutcome } = await import("@/server/outcome-review-commands.server");
+    const result = await rejectOutcome({
+      actor: buildActor({
+        roleKey: "rm",
+        teamDomain: "sales",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.india,
+      }),
+      data: { dealId: "deal-1", reason: "PO invalid" },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harnessReject.restore();
   }
 });

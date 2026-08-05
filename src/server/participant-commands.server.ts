@@ -20,6 +20,50 @@ import type { GovernedActor } from "@/server/governed-actor.server";
 
 const PARTICIPANT_TASK_DUE_BUSINESS_DAYS = 2;
 
+/** §8.7: "A Distributor cannot invoke either participant command, alter its
+ * own effective dates, transfer its Tasks to another user, or retain access
+ * merely because a cached card or notification exists." A Distributor
+ * satisfying authorizeDealActor/authorizeCustomerActor's tag check (because
+ * they're already an active participant on this exact record) must still be
+ * refused here — the spec forbids the role from invoking the command at
+ * all, not just from invoking it on records it isn't tagged to. Only an
+ * authorised RM/PAM (or Super Admin) may tag/untag a Distributor. */
+function denyIfDistributor(actor: { assignment: { roleKey: string } }) {
+  if (actor.assignment.roleKey !== "restricted_distributor") {
+    return null;
+  }
+  return makePolicyDenial(
+    null,
+    "A Distributor assignment cannot invoke a participant tagging command",
+  );
+}
+
+const DISTRIBUTOR_TAG_AUTHORITIES = new Set(["rm", "pam", "super_admin"]);
+
+/** §8.7: "Only an authorised RM in geography scope or PAM in Partner scope
+ * may create or end a Distributor-to-Customer tag." Scoped to the create
+ * side only for now — untagDealParticipant/untagCustomerParticipant take
+ * only a participantId, not the tag's participant_type, so enforcing the
+ * "end" half needs a lookup of the existing row first; tracked as a smaller
+ * follow-up rather than bundled in here. Geography/Partner scope for the
+ * RM/PAM themselves is still enforced by authorizeDealActor/
+ * authorizeCustomerActor above this check, not duplicated here. */
+function denyIfTaggingDistributorWithoutAuthority(
+  actor: { assignment: { roleKey: string } },
+  participantType: string,
+) {
+  if (participantType.trim().toLowerCase() !== "distributor") {
+    return null;
+  }
+  if (DISTRIBUTOR_TAG_AUTHORITIES.has(actor.assignment.roleKey)) {
+    return null;
+  }
+  return makePolicyDenial(
+    null,
+    "Only an authorised RM or PAM (or Super Admin) may create a Distributor tag",
+  );
+}
+
 function participantTaskDueAt(): string {
   const due = new Date();
   let remaining = PARTICIPANT_TASK_DUE_BUSINESS_DAYS;
@@ -79,15 +123,27 @@ export async function tagDealParticipant(input: {
   data: TagDealParticipantInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const distributorDenial = denyIfDistributor(input.actor);
+  if (distributorDenial) {
+    return { ok: false, failure: distributorDenial, correlationId };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    const authorityDenial = denyIfTaggingDistributorWithoutAuthority(
+      input.actor,
+      input.data.participantType,
+    );
+    if (authorityDenial) {
+      return { ok: false, failure: authorityDenial, correlationId };
     }
 
     const participantId = randomUUID();
@@ -152,13 +208,17 @@ export async function untagDealParticipant(input: {
   data: UntagDealParticipantInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const distributorDenial = denyIfDistributor(input.actor);
+  if (distributorDenial) {
+    return { ok: false, failure: distributorDenial, correlationId };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {
       return { ok: false, failure: validationFailure("Deal not found"), correlationId };
     }
 
-    const policy = authorizeDealActor(input.actor, deal);
+    const policy = await authorizeDealActor(input.actor, deal, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -180,15 +240,33 @@ export async function untagDealParticipant(input: {
   });
 }
 
+/** Mirrors isActiveDealParticipant (deal-commands.server.ts) for the
+ * customer side of §8.7/§8.8's tag-gating requirement. */
+async function isActiveCustomerParticipant(
+  tx: PoolClient,
+  customerId: string,
+  userId: string | null,
+): Promise<boolean> {
+  if (!userId) return false;
+  const { rows } = await tx.query(
+    `SELECT 1 FROM customer_participants
+     WHERE customer_id = $1 AND participant_user_id = $2 AND valid_to IS NULL
+     LIMIT 1`,
+    [customerId, userId],
+  );
+  return rows.length > 0;
+}
+
 /** No customer-command module exists yet (customers are only scoped through
  * table-policy.server.ts's generic ownership filter today) — this mirrors
  * authorizeDealActor/authorizeTaskActor's shape exactly rather than reusing
  * either, since a Customer's scope key (partner_id) happens to match but the
  * type doesn't. */
-function authorizeCustomerActor(
+async function authorizeCustomerActor(
   actor: GovernedActor,
-  customer: { partner_id: string | null },
-): PolicyDecision {
+  customer: { id?: string; partner_id: string | null },
+  tx: PoolClient,
+): Promise<PolicyDecision> {
   const basePolicy = evaluateActiveContextPolicy({
     roles: [actor.assignment.roleKey],
     assignment: actor.assignment,
@@ -200,11 +278,26 @@ function authorizeCustomerActor(
     return { allowed: true, reason: null };
   }
 
-  if (
-    actor.assignment.roleKey === "partner_admin" ||
-    actor.assignment.roleKey === "partner_user" ||
-    actor.assignment.roleKey === "restricted_distributor"
-  ) {
+  if (actor.assignment.roleKey === "restricted_distributor") {
+    if (!actor.assignment.partnerId || actor.assignment.partnerId !== customer.partner_id) {
+      return {
+        allowed: false,
+        reason: "Customer is outside the assignment's partner scope",
+        denial: makePolicyDenial(null, "Customer is outside the assignment's partner scope"),
+      };
+    }
+    // §8.7/§8.8: no visibility until a Customer tag exists.
+    if (customer.id && !(await isActiveCustomerParticipant(tx, customer.id, actor.userId))) {
+      return {
+        allowed: false,
+        reason: "Customer is not tagged to this Distributor assignment",
+        denial: makePolicyDenial(null, "Customer is not tagged to this Distributor assignment"),
+      };
+    }
+    return { allowed: true, reason: null };
+  }
+
+  if (actor.assignment.roleKey === "partner_admin" || actor.assignment.roleKey === "partner_user") {
     if (!actor.assignment.partnerId || actor.assignment.partnerId !== customer.partner_id) {
       return {
         allowed: false,
@@ -259,15 +352,27 @@ export async function tagCustomerParticipant(input: {
   data: TagCustomerParticipantInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const distributorDenial = denyIfDistributor(input.actor);
+  if (distributorDenial) {
+    return { ok: false, failure: distributorDenial, correlationId };
+  }
   return withTransaction(async (tx) => {
     const customer = await loadCustomerForUpdate(tx, input.data.customerId);
     if (!customer) {
       return { ok: false, failure: validationFailure("Customer not found"), correlationId };
     }
 
-    const policy = authorizeCustomerActor(input.actor, customer);
+    const policy = await authorizeCustomerActor(input.actor, customer, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    const authorityDenial = denyIfTaggingDistributorWithoutAuthority(
+      input.actor,
+      input.data.participantType,
+    );
+    if (authorityDenial) {
+      return { ok: false, failure: authorityDenial, correlationId };
     }
 
     const participantId = randomUUID();
@@ -325,13 +430,17 @@ export async function untagCustomerParticipant(input: {
   data: UntagCustomerParticipantInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const distributorDenial = denyIfDistributor(input.actor);
+  if (distributorDenial) {
+    return { ok: false, failure: distributorDenial, correlationId };
+  }
   return withTransaction(async (tx) => {
     const customer = await loadCustomerForUpdate(tx, input.data.customerId);
     if (!customer) {
       return { ok: false, failure: validationFailure("Customer not found"), correlationId };
     }
 
-    const policy = authorizeCustomerActor(input.actor, customer);
+    const policy = await authorizeCustomerActor(input.actor, customer, tx);
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
