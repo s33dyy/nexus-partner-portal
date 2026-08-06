@@ -11,6 +11,7 @@ import {
 } from "@/domain/contracts/commands";
 import { evaluateActiveContextPolicy, type PolicyDecision } from "@/domain/contracts/governance";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
+import { issueGyFTRVoucher } from "@/integrations/gyftr";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
 import {
   resolveGovernedActor,
@@ -388,7 +389,7 @@ export async function approveRewardRedemption(input: {
     };
   }
 
-  return withTransaction(async (tx) => {
+  const approvalResult = await withTransaction<CommandExecutionResult>(async (tx) => {
     const basePolicy = checkBasePolicy(input.actor);
     if (!basePolicy.allowed) {
       return { ok: false, failure: basePolicy.denial, correlationId };
@@ -453,6 +454,168 @@ export async function approveRewardRedemption(input: {
       correlationId,
     };
   });
+
+  if (!approvalResult.ok) {
+    return approvalResult;
+  }
+
+  // Best-effort fulfillment attempt, deliberately run as a separate step
+  // from the approval transaction above so the GyFTR call never holds a DB
+  // row lock (product.md §15.7: a provider timeout must stay Processing or
+  // move to Failed on explicit adapter truth — it never blocks/duplicates
+  // the approval itself). A failure here never overturns the approval;
+  // approveRewardRedemption already succeeded by moving the redemption to
+  // Processing.
+  await attemptGyFTRFulfillment({
+    redemptionId: approvalResult.subjectId,
+    actor: input.actor,
+    correlationId,
+  });
+
+  return approvalResult;
+}
+
+type RedemptionForFulfillmentRow = {
+  id: string;
+  reward_id: string;
+  user_id: string | null;
+  status: string;
+  version: number;
+};
+
+// Attempts to move a just-approved (Processing) redemption to Fulfilled or
+// Failed via the GyFTR adapter. See product.md §15.7/§15.8: provider
+// vouchers are authoritative truth, never fabricated here — a missing
+// GyFTR credential set is handled entirely inside issueGyFTRVoucher's own
+// graceful stub fallback (src/integrations/gyftr/gyftr-client.ts), whose
+// STUB-prefixed voucher code is itself the honest signal that no real
+// voucher was issued. A genuine provider failure (ok: false) is recorded
+// verbatim as failure_reason, never silently upgraded to success.
+async function attemptGyFTRFulfillment(input: {
+  redemptionId: string;
+  actor: RewardCommandActor;
+  correlationId: string;
+}): Promise<void> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, reward_id, user_id, status, version
+       FROM reward_redemptions WHERE id = $1`,
+      [input.redemptionId],
+    );
+    const redemption = rows[0] as RedemptionForFulfillmentRow | undefined;
+    if (!redemption || redemption.status !== "processing") return;
+
+    let userEmail: string | undefined;
+    let userMobile: string | undefined;
+    if (redemption.user_id) {
+      const profileRes = await pool.query(`SELECT email, phone FROM profiles WHERE id = $1`, [
+        redemption.user_id,
+      ]);
+      const profileRow = profileRes.rows[0] as { email: string; phone: string | null } | undefined;
+      userEmail = profileRow?.email;
+      userMobile = profileRow?.phone ?? undefined;
+    }
+
+    // No dedicated GyFTR product-code field exists on reward_catalog_items
+    // yet (deferred — see current gaps.md 15d); the catalogue item's own id
+    // stands in as the product code for now.
+    const voucher = await issueGyFTRVoucher({
+      productCode: redemption.reward_id,
+      quantity: 1,
+      referenceId: redemption.id,
+      userMobile,
+      userEmail,
+    });
+
+    await withTransaction(async (tx) => {
+      const current = await tx.query(
+        `SELECT id, status, version FROM reward_redemptions WHERE id = $1 FOR UPDATE`,
+        [redemption.id],
+      );
+      const currentRow = current.rows[0] as
+        | { id: string; status: string; version: number }
+        | undefined;
+      // Only settle a row still Processing — a concurrent retry or manual
+      // reconciliation that already moved it is left alone rather than
+      // overwritten (never creates a second order/settlement).
+      if (!currentRow || currentRow.status !== "processing") return;
+
+      const newVersion = Number(currentRow.version) + 1;
+      if (voucher.ok) {
+        await tx.query(
+          `UPDATE reward_redemptions
+           SET status = 'fulfilled', fulfillment_provider = 'gyftr',
+               fulfillment_reference = $2, fulfillment_voucher_code = $3,
+               fulfillment_expires_at = $4, fulfilled_at = now(),
+               failure_reason = NULL, version = $5, updated_at = now()
+           WHERE id = $1 AND version = $6`,
+          [
+            redemption.id,
+            voucher.fulfillmentRef,
+            voucher.voucherCode,
+            voucher.expiryDate,
+            newVersion,
+            currentRow.version,
+          ],
+        );
+        await recordRewardEvent({
+          tx,
+          actor: input.actor,
+          correlationId: input.correlationId,
+          commandName: "reward.redemption.fulfill",
+          eventName: "reward.redemption.fulfilled",
+          subjectType: "reward_redemption",
+          subjectId: redemption.id,
+          payload: { provider: "gyftr", fulfillmentRef: voucher.fulfillmentRef },
+        });
+      } else {
+        await tx.query(
+          `UPDATE reward_redemptions
+           SET status = 'failed', failure_reason = $2, version = $3, updated_at = now()
+           WHERE id = $1 AND version = $4`,
+          [
+            redemption.id,
+            `${voucher.errorCode}: ${voucher.errorMessage}`,
+            newVersion,
+            currentRow.version,
+          ],
+        );
+        await recordRewardEvent({
+          tx,
+          actor: input.actor,
+          correlationId: input.correlationId,
+          commandName: "reward.redemption.fulfill",
+          eventName: "reward.redemption.failed",
+          subjectType: "reward_redemption",
+          subjectId: redemption.id,
+          payload: {
+            provider: "gyftr",
+            errorCode: voucher.errorCode,
+            errorMessage: voucher.errorMessage,
+          },
+        });
+      }
+    });
+  } catch (error) {
+    // Never let a fulfillment-attempt failure overturn the approval above.
+    // Best-effort: record what we can, but swallow if even that fails
+    // (e.g. DB unreachable) — the redemption is left truthfully at
+    // Processing rather than any status being fabricated.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[reward-commands] GyFTR fulfillment attempt failed for redemption ${input.redemptionId}: ${message}`,
+    );
+    try {
+      await pool.query(
+        `UPDATE reward_redemptions
+         SET status = 'failed', failure_reason = $2, version = version + 1, updated_at = now()
+         WHERE id = $1 AND status = 'processing'`,
+        [input.redemptionId, `INTERNAL_ERROR: ${message}`],
+      );
+    } catch {
+      // Swallow — already logged above.
+    }
+  }
 }
 
 export async function rejectRewardRedemption(input: {

@@ -773,6 +773,53 @@ BEGIN
   END IF;
 END $$;
 
+-- Reward fulfillment wiring (2026-08-06): product.md §15.7's Processing ->
+-- Fulfilled/Failed transition needs somewhere to record the GyFTR provider
+-- truth (never fabricated — a STUB- prefixed voucher code is the honest
+-- graceful-fallback result when GyFTR credentials are absent, a recorded
+-- failure_reason is the honest result when the provider call fails). Same
+-- ADD COLUMN IF NOT EXISTS convention as the block above.
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS fulfillment_provider TEXT;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS fulfillment_reference TEXT;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS fulfillment_voucher_code TEXT;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS fulfillment_expires_at TIMESTAMPTZ;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMPTZ;
+ALTER TABLE reward_redemptions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+
+-- §15.9 gadget catalogue fields (2026-08-06): country eligibility, shipping
+-- requirement, and the fulfillment Task assignee for manually/physically
+-- fulfilled items. Bounded to the 3 fields this session's finding named;
+-- active-date window and accountable-LIVEY-role remain deferred (see
+-- current gaps.md 15d).
+ALTER TABLE reward_catalog_items ADD COLUMN IF NOT EXISTS country_eligibility TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE reward_catalog_items ADD COLUMN IF NOT EXISTS requires_shipping BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE reward_catalog_items ADD COLUMN IF NOT EXISTS fulfillment_assignee_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
+-- §15.2 points-rate policy (2026-08-06): the smallest real version of the
+-- "effective-dated global points policy" the spec calls for — a single
+-- current-rate row model keyed by effective_from, not the full
+-- non-overlapping-interval model (deferred, see current gaps.md 15c).
+-- Brand-new table, so plain CREATE TABLE IF NOT EXISTS is correct here.
+CREATE TABLE IF NOT EXISTS reward_points_rate_policy (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  points_per_reward_dollar NUMERIC(12,4) NOT NULL CHECK (points_per_reward_dollar > 0),
+  effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS reward_points_rate_policy_effective_from_idx
+  ON reward_points_rate_policy (effective_from DESC);
+
+-- Seed the rate that reproduces today's pre-fix behaviour exactly (reward
+-- USD value was being used 1:1 as the points pool), so this fix changes the
+-- *shape* of the calculation (a real two-step USD-then-points conversion)
+-- without silently changing every existing deal's point totals.
+INSERT INTO reward_points_rate_policy (id, points_per_reward_dollar, effective_from, is_seed)
+VALUES ('00000000-0000-0000-0000-0000000000f1', 1, '2020-01-01T00:00:00Z', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS lookup_values (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   field_name TEXT NOT NULL,
