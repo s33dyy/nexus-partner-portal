@@ -7,7 +7,7 @@
 | Codebase | `main` @ `653c44d`, 32 routes / ~20k route LOC, `db/schema.sql` (67 tables) |
 | Method | Fresh chapter-by-chapter re-audit: each of the 17 substantive chapters (4–19, 23) independently re-read in full against `product.md`, then verified directly against the current routes, server commands, domain contracts, and schema by a dedicated agent — not diffed against the previous version of this document |
 | Related | `docs/implementation-status.md` (this session's fix log — every item below already fixed and deployed is cross-referenced there) |
-| Addendum | §21 below — a 2026-08-05 independent full-backend re-audit (12 domain agents, spec-vs-code) confirms essentially every open item below is still open, and surfaces one new item: an undocumented Call Center/Twilio Voice backend added after this pass (commit `81f48a4`) |
+| Addendum | §21 below — a 2026-08-05 independent full-backend re-audit (12 domain agents, spec-vs-code) confirms essentially every open item below is still open, and surfaces one new item: an undocumented Call Center/Twilio Voice backend added after this pass (commit `81f48a4`). §22 below — a 2026-08-06 test-infrastructure fix corrects this document's own "same 3 pre-existing unrelated failures" verification baseline, cited throughout §2 above; the real current baseline is one unrelated failure, not three |
 
 This document **replaces** the previous `current gaps.md` in place. It is a fresh pass, not a
 diff — every chapter was re-read against the current code from scratch, so an item's absence
@@ -948,3 +948,34 @@ the live runtime path at all. This is called out explicitly in Phase 2's scope a
 than filed as a separate gap ID, since it's the same root cause already tracked there — but is
 worth stating plainly here: there is currently no database-level backstop if an
 application-layer check is ever missed on a new table or a new raw query.
+
+---
+
+## 22. Addendum — 2026-08-06 test-infrastructure fix, and a correction to this document's own "pre-existing failures" baseline
+
+Not a `product.md` gap — no S1-S3 item above changed. Recorded here because several entries in
+this document (§2.4, §8.7b, §2.5, §2.6, §2.7, §2.9, §2.16) cite "same 3 pre-existing unrelated
+failures" as part of their own verification evidence, and that baseline turned out to be both
+stale and, for the 16-failure spike this session actually found, not the cause.
+
+**What was actually wrong:** `src/server/table-policy.server.test.ts` — the RBAC test file
+covering the §2.2/§2.4/§2.9/§2.10/§2.22 read/scope logic this document tracks — had 16 of its
+~45 tests silently depending on a real Postgres connection to a database named `test`, which
+doesn't exist on this (or presumably any standard dev) machine. Every other `*.server.test.ts`
+file in the repo fully fakes `pool.query`/`pool.connect` before exercising anything that
+touches the database; this file only did so for 7 of its tests, leaving the other ~15 exposed
+to a real `pool.query` call inside `assertGovernedFeatureCapability` → `loadRoleCapabilities`
+(role_permissions lookup) that only super_admin auth happens to bypass. Full root-cause,
+fix, and verification detail (isolated 45/45 pass, full suite 407→422 pass with only one
+pre-existing unrelated failure left) is in `docs/implementation-status.md`'s
+2026-08-06 (continued) entry — not duplicated here.
+
+**The baseline correction:** `google-oauth.server.test.ts` is fully green today (8/8, isolated
+and full-suite) — it is not, and per the evidence gathered here was never actually, part of a
+"3 pre-existing failures" set. The real, current, pre-existing-and-out-of-scope baseline is
+exactly **one** failing test (`assistant.server.test.ts`'s `parseIntent` fallback-message
+assertion). The rest of the old "3" almost certainly came from `bun test` run bare at the repo
+root incorrectly picking up `e2e/*.spec.ts` (Playwright specs, not `bun:test` ones) and
+crashing on both — a pre-existing, unrelated test-tooling gap, not a code defect. Every future
+session verifying a fix against "the pre-existing failure baseline" should scope with
+`bun test src scripts` (excludes `e2e/`) and expect exactly one known failure, not three.

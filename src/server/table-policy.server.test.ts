@@ -1,6 +1,51 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 
+import { FEATURE_KEYS } from "@/domain/contracts/features";
 import { GOVERNANCE_GEOGRAPHY_NODE_IDS } from "@/domain/contracts/governance";
+
+process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+// assertGovernedFeatureCapability (table-policy.server.ts) runs a real
+// `pool.query` against role_permissions for every non-super-admin call to
+// applyTablePolicy on a TABLE_FEATURE_MAP table — before any of the
+// ownership/scope logic this file actually tests ever runs. Without a fake
+// here, that hits a live Postgres connection for a `test` database that
+// doesn't exist in a standard dev environment. This file isn't exercising
+// the CRUD matrix itself (that's role-permissions data, not code under test
+// here), so a uniform permissive stub is correct for every test — tests
+// that DO care about specific SQL/rows (assertLinkedDealAccess,
+// assertLinkedTicketAccess, withNonRepudiableActor, ...) already install
+// their own more specific pool.query mock, which simply overrides this
+// default for the duration of that test.
+let restorePoolQuery: (() => void) | null = null;
+
+beforeEach(async () => {
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async (sql: string) => {
+    if (String(sql).includes("FROM role_permissions")) {
+      return {
+        rows: FEATURE_KEYS.map((feature_key) => ({
+          feature_key,
+          can_create: true,
+          can_read: true,
+          can_update: true,
+          can_delete: true,
+        })),
+        rowCount: FEATURE_KEYS.length,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  }) as typeof pool.query;
+  restorePoolQuery = () => {
+    pool.query = originalQuery as typeof pool.query;
+  };
+});
+
+afterEach(() => {
+  restorePoolQuery?.();
+  restorePoolQuery = null;
+});
 
 test("generic table policy allows bootstrap-safe lookup reads and scopes partner reads", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
@@ -52,8 +97,6 @@ test("generic table policy denies anonymous business reads", async () => {
 });
 
 test("queryTableWithAuthContext scopes partner reads and denies anonymous access", async () => {
-  process.env.DATABASE_URL ??= "postgres://localhost/test";
-
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
   const { pool } = await import("@/server/postgres.server");
 
@@ -136,8 +179,6 @@ test("queryTableWithAuthContext scopes partner reads and denies anonymous access
 });
 
 test("queryTableWithAuthContext honors an explicit select() column list instead of always running SELECT *", async () => {
-  process.env.DATABASE_URL ??= "postgres://localhost/test";
-
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
   const { pool } = await import("@/server/postgres.server");
 
@@ -202,8 +243,6 @@ test("queryTableWithAuthContext honors an explicit select() column list instead 
 });
 
 test("queryTableWithAuthContext rejects a select() column that isn't in the table's allowlist", async () => {
-  process.env.DATABASE_URL ??= "postgres://localhost/test";
-
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
 
   await expect(
@@ -459,7 +498,6 @@ test("support_ticket_comments' is_internal filter actually reaches SQL execution
   // viewer's ticket-thread load threw "Unsupported filter column:
   // is_internal" in production — this is the integration test that catches
   // that class of gap.
-  process.env.DATABASE_URL ??= "postgres://localhost/test";
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
   const { pool } = await import("@/server/postgres.server");
 
@@ -844,7 +882,6 @@ test("tasks reads are scoped to creator OR assignee for LIVEY-internal roles, no
 });
 
 test("tasks reads for queryTableWithAuthContext generate a real (creator_id = $1 OR assignee_id = $1) SQL clause", async () => {
-  process.env.DATABASE_URL ??= "postgres://localhost/test";
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
   const { pool } = await import("@/server/postgres.server");
 
