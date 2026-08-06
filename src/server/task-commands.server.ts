@@ -67,11 +67,13 @@ type TaskSnapshot = {
   partnerId: string | null;
   version: number;
   title: string;
+  assigneeId: string | null;
+  creatorId: string | null;
 };
 
 function authorizeTaskActor(
   actor: TaskCommandActor,
-  task: { partnerId: string | null },
+  task: { partnerId: string | null; assigneeId?: string | null; creatorId?: string | null },
 ): PolicyDecision {
   const basePolicy = evaluateActiveContextPolicy({
     roles: [actor.assignment.roleKey],
@@ -84,11 +86,33 @@ function authorizeTaskActor(
     return { allowed: true, reason: null };
   }
 
-  if (
-    actor.assignment.roleKey === "partner_admin" ||
-    actor.assignment.roleKey === "partner_user" ||
-    actor.assignment.roleKey === "restricted_distributor"
-  ) {
+  // §2.4 interim fix: tasks has no participant-tag table of its own (unlike
+  // deal_participants/customer_participants), so the full §8.7 tag-based
+  // model isn't buildable here yet. Narrower than the flat partner_id match
+  // partner_admin/partner_user keep below: a Distributor may only act on a
+  // Task they are the assignee or creator of, not every Task in the tenant.
+  if (actor.assignment.roleKey === "restricted_distributor") {
+    if (!actor.assignment.partnerId || actor.assignment.partnerId !== task.partnerId) {
+      return {
+        allowed: false,
+        reason: "Task is outside the assignment's partner scope",
+        denial: makePolicyDenial(null, "Task is outside the assignment's partner scope"),
+      };
+    }
+    const isAssigneeOrCreator =
+      (!!task.assigneeId && task.assigneeId === actor.userId) ||
+      (!!task.creatorId && task.creatorId === actor.userId);
+    if (!isAssigneeOrCreator) {
+      return {
+        allowed: false,
+        reason: "Task is not assigned to or created by this Distributor",
+        denial: makePolicyDenial(null, "Task is not assigned to or created by this Distributor"),
+      };
+    }
+    return { allowed: true, reason: null };
+  }
+
+  if (actor.assignment.roleKey === "partner_admin" || actor.assignment.roleKey === "partner_user") {
     if (!actor.assignment.partnerId || actor.assignment.partnerId !== task.partnerId) {
       return {
         allowed: false,
@@ -126,11 +150,19 @@ function validationFailure(message: string, field = "status"): CommandFailureCon
 
 async function loadTaskForUpdate(tx: PoolClient, taskId: string): Promise<TaskSnapshot | null> {
   const { rows } = await tx.query(
-    `SELECT id, status, partner_id, version, title FROM tasks WHERE id = $1 FOR UPDATE`,
+    `SELECT id, status, partner_id, version, title, assignee_id, creator_id FROM tasks WHERE id = $1 FOR UPDATE`,
     [taskId],
   );
   const row = rows[0] as
-    | { id: string; status: string; partner_id: string | null; version: number; title: string }
+    | {
+        id: string;
+        status: string;
+        partner_id: string | null;
+        version: number;
+        title: string;
+        assignee_id: string | null;
+        creator_id: string | null;
+      }
     | undefined;
   if (!row) return null;
   return {
@@ -139,6 +171,8 @@ async function loadTaskForUpdate(tx: PoolClient, taskId: string): Promise<TaskSn
     partnerId: row.partner_id,
     version: Number(row.version),
     title: row.title,
+    assigneeId: row.assignee_id ?? null,
+    creatorId: row.creator_id ?? null,
   };
 }
 
@@ -244,7 +278,16 @@ export async function createTask(input: {
 
   return withTransaction(async (tx) => {
     const partnerId = resolveCreatePartnerId(input.actor, input.data.partnerId ?? null);
-    const policy = authorizeTaskActor(input.actor, { partnerId });
+    // The creator is always the acting user for a brand-new Task, so this
+    // trivially satisfies restricted_distributor's assignee-or-creator check
+    // above — a Distributor can always create a Task within their own
+    // partner scope, same as today, just narrower once someone else reads
+    // or transitions it unless they're also the assignee.
+    const policy = authorizeTaskActor(input.actor, {
+      partnerId,
+      assigneeId: input.data.assigneeId ?? null,
+      creatorId: input.actor.userId,
+    });
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -313,7 +356,11 @@ export async function transitionTask(input: {
       };
     }
 
-    const policy = authorizeTaskActor(input.actor, { partnerId: task.partnerId });
+    const policy = authorizeTaskActor(input.actor, {
+      partnerId: task.partnerId,
+      assigneeId: task.assigneeId,
+      creatorId: task.creatorId,
+    });
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }

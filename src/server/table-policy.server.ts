@@ -236,6 +236,19 @@ function isRestrictedPartnerRole(auth: TablePolicyAuthContext): boolean {
   return auth.governedRoleKey === "partner_user" && !!auth.partnerId;
 }
 
+/** True only for restricted_distributor. §2.4's Task/Ticket interim fix:
+ * neither table has a participant-tag table like deal_participants/
+ * customer_participants (that's the still-open portal_deals/portal_customers
+ * half of §2.4/8.7a, deliberately left untouched — see
+ * isRestrictedPartnerRole's own comment), so this narrows a Distributor's
+ * read scope from the flat partner_id-wide visibility partner_admin/
+ * partner_user keep down to "tasks I created or am assigned to" / "tickets
+ * I raised", mirroring authorizeTaskActor/authorizeTicketActor's identical
+ * restriction on the write side. */
+function isRestrictedDistributorRole(auth: TablePolicyAuthContext): boolean {
+  return auth.governedRoleKey === "restricted_distributor" && !!auth.partnerId;
+}
+
 function isGenericSuperAdmin(auth: GenericTableAuthContext) {
   return auth.roles.includes("super_admin");
 }
@@ -408,10 +421,18 @@ function getScopeSpec(table: string, auth: TablePolicyAuthContext): ScopeSpec | 
     case "portal_customers":
     case "reward_point_events":
     case "reward_redemptions":
-    case "notifications":
       return auth.partnerId
         ? { kind: "column", column: "partner_id", value: auth.partnerId, fallbackColumn: "user_id" }
         : { kind: "column", column: "user_id", value: auth.userId };
+    // §2.11/§11.5: "Notifications do not target all members of a Partner
+    // merely because partner_id matches" — unlike the partner_id-first tables
+    // above, a notification is always recipient-specific, so reads are always
+    // scoped to the caller's own user_id regardless of partnerId. The insert
+    // side needs a different rule (a caller must be able to create a
+    // notification addressed to someone else, the actual recipient) — see
+    // the dedicated "notifications" insert bypass in applyTablePolicyInner.
+    case "notifications":
+      return { kind: "column", column: "user_id", value: auth.userId };
     case "portal_customer_activities":
       return auth.partnerId
         ? {
@@ -768,12 +789,56 @@ async function applyTablePolicyInner(
       return { ...query, filters };
     }
 
+    // §2.11/§11.5: a notification's user_id must be the actual recipient
+    // (e.g. a deal's owner), not forced to equal the acting user — the
+    // read scope above (now strictly user_id = caller, to close the
+    // over-broad partner-wide leak) would otherwise also reject every
+    // insert naming someone else as recipient, since the ordinary
+    // column-scope enforcement further down requires row.user_id to equal
+    // auth.userId whenever there's no partnerId-based fallback in play.
+    // notifications carries no link back to the record it's about, so a
+    // precise "the actor and the named recipient share a real relationship
+    // on this specific record" check isn't expressible here without a
+    // schema change; every caller of this generic insert path is already
+    // an authenticated, tenant-scoped Deal/Ticket/Task actor (pipeline.tsx/
+    // deals.tsx's publishDealNotification; ticket-commands.server.ts writes
+    // notifications directly via raw pool queries and never reaches this
+    // path at all), so this only relaxes WHO a notification can be
+    // addressed to, not WHO may call it. Tracked as a residual gap in
+    // current gaps.md pending a stronger per-record check.
+    if (query.table === "notifications" && query.operation === "insert") {
+      return { ...query, filters };
+    }
+
     if (
       query.table === "support_tickets" &&
       (query.operation === "select" || query.operation === "count") &&
       hasGlobalLiveySupportAccess(auth)
     ) {
       return { ...query, filters };
+    }
+
+    // §2.4 interim fix (see authorizeTicketActor's identical write-side
+    // restriction): a Distributor's read scope narrows from every ticket at
+    // their partner down to tickets they personally raised. Stacked on top
+    // of the ordinary partner_id filter below (both are plain "eq" filters
+    // on different columns, so they simply AND together) rather than a
+    // fallbackColumn substitution, since a Distributor must satisfy BOTH
+    // "in my tenant" AND "I created it", not either/or.
+    if (
+      query.table === "support_tickets" &&
+      (query.operation === "select" || query.operation === "count") &&
+      isRestrictedDistributorRole(auth) &&
+      auth.userId
+    ) {
+      return {
+        ...query,
+        filters: appendScopeFilter(
+          appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
+          "created_by",
+          auth.userId,
+        ),
+      };
     }
 
     // §5.5/§5.6: RM/PAM/KAM/ISR/Support get an "authorised scope" view of
@@ -834,6 +899,25 @@ async function applyTablePolicyInner(
       return {
         ...query,
         filters,
+        scopeAnyColumnEquals: { columns: ["creator_id", "assignee_id"], value: auth.userId },
+      };
+    }
+
+    // §2.4 interim fix (see authorizeTaskActor's identical write-side
+    // restriction): a Distributor's read scope narrows from every task at
+    // their partner down to tasks they created or are assigned to. Unlike
+    // the LIVEY-internal bypass above, the partner_id filter still applies
+    // underneath (a Distributor is tenant-scoped, not organisation-wide) —
+    // this only adds the creator-or-assignee condition on top of it.
+    if (
+      query.table === "tasks" &&
+      (query.operation === "select" || query.operation === "count") &&
+      isRestrictedDistributorRole(auth) &&
+      auth.userId
+    ) {
+      return {
+        ...query,
+        filters: appendScopeFilter(filters, scopeSpec.column, String(scopeSpec.value ?? "")),
         scopeAnyColumnEquals: { columns: ["creator_id", "assignee_id"], value: auth.userId },
       };
     }
