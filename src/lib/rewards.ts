@@ -23,6 +23,11 @@ export type RewardCatalogRecord = {
   is_seed: boolean;
   created_at: string;
   updated_at: string;
+  // §15.9 gadget catalogue fields. country_eligibility empty = no
+  // restriction (available everywhere).
+  country_eligibility: string[];
+  requires_shipping: boolean;
+  fulfillment_assignee_id: string | null;
 };
 
 export type RewardPointEventRecord = {
@@ -58,6 +63,16 @@ export type RewardRedemptionRecord = {
   is_seed: boolean;
   created_at: string;
   updated_at: string;
+  // Fulfillment (product.md §15.7/§15.8) — provider truth recorded once
+  // approval attempts GyFTR issuance. fulfillment_voucher_code is a
+  // provider secret (§15.8): never render it outside the entitled
+  // recipient's own protected view, and never include it in exports.
+  fulfillment_provider: string | null;
+  fulfillment_reference: string | null;
+  fulfillment_voucher_code: string | null;
+  fulfillment_expires_at: string | null;
+  fulfilled_at: string | null;
+  failure_reason: string | null;
 };
 
 export function rewardTierForPoints(points: number): RewardTier {

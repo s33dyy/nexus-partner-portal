@@ -1,10 +1,15 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 
 import { GOVERNANCE_GEOGRAPHY_NODE_IDS } from "@/domain/contracts/governance";
 import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/governance";
 import type { RewardCommandActor } from "@/server/reward-commands.server";
 
 process.env.DATABASE_URL ??= "postgres://localhost/test";
+
+// Captured before any test calls mock.module("@/integrations/gyftr", ...) so
+// the GyFTR-failure test below can restore the real graceful-stub client
+// afterward instead of leaking its mock into every later test in this file.
+const realGyftrModule = await import("@/integrations/gyftr");
 
 const ISSUED_AT = "2026-08-01T00:00:00.000Z";
 
@@ -132,6 +137,12 @@ type RedemptionRow = {
   version: number;
   approved_by: string | null;
   approved_at: string | null;
+  fulfillment_provider: string | null;
+  fulfillment_reference: string | null;
+  fulfillment_voucher_code: string | null;
+  fulfillment_expires_at: string | null;
+  fulfilled_at: string | null;
+  failure_reason: string | null;
 };
 
 type PointEventRow = {
@@ -237,6 +248,37 @@ function installFakePool(state: RewardHarnessState) {
       const row = state.pointEvents.find((r) => r.idempotency_key === params[0]);
       return { rows: row ? [{ id: row.id }] : [] };
     }
+    // --- attemptGyFTRFulfillment's pre-check read (outside any tx) -------
+    if (sql.startsWith("SELECT id, reward_id, user_id, status, version FROM reward_redemptions")) {
+      const row = state.redemptions.find((r) => r.id === params[0]);
+      return {
+        rows: row
+          ? [
+              {
+                id: row.id,
+                reward_id: row.reward_id,
+                user_id: row.user_id,
+                status: row.status,
+                version: row.version,
+              },
+            ]
+          : [],
+      };
+    }
+    if (sql.startsWith("SELECT email, phone FROM profiles")) {
+      const row = state.profiles.find((p) => p.id === params[0]);
+      return { rows: row ? [{ email: `${row.id}@example.com`, phone: null }] : [] };
+    }
+    // --- attemptGyFTRFulfillment's catch-block fallback (outside any tx) -
+    if (sql.startsWith("UPDATE reward_redemptions SET status = 'failed', failure_reason = $2")) {
+      const [id, reason] = params as [string, string];
+      const row = state.redemptions.find((r) => r.id === id && r.status === "processing");
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = "failed";
+      row.failure_reason = reason;
+      row.version += 1;
+      return { rows: [], rowCount: 1 };
+    }
     throw new Error(`Unhandled read outside transaction: ${sql}`);
   }
 
@@ -308,6 +350,15 @@ function installFakePool(state: RewardHarnessState) {
         const row = state.redemptions.find((r) => r.id === params[0]);
         return { rows: row ? [row] : [] };
       }
+      // --- reward_redemptions lock by id (GyFTR fulfillment settle) -------
+      if (
+        sql.startsWith("SELECT id, status, version FROM reward_redemptions") &&
+        sql.includes("FOR UPDATE")
+      ) {
+        await lock(`redemption:${params[0]}`);
+        const row = state.redemptions.find((r) => r.id === params[0]);
+        return { rows: row ? [{ id: row.id, status: row.status, version: row.version }] : [] };
+      }
 
       // --- reservation / release lookups -----------------------------------
       if (
@@ -368,6 +419,12 @@ function installFakePool(state: RewardHarnessState) {
           version: 1,
           approved_by: null,
           approved_at: null,
+          fulfillment_provider: null,
+          fulfillment_reference: null,
+          fulfillment_voucher_code: null,
+          fulfillment_expires_at: null,
+          fulfilled_at: null,
+          failure_reason: null,
         };
         if (state.redemptions.some((r) => r.idempotency_key === idempotencyKey)) {
           const conflict = new Error("duplicate key value violates unique constraint") as Error & {
@@ -549,6 +606,40 @@ function installFakePool(state: RewardHarnessState) {
         row.status = "cancelled";
         row.approved_by = approvedBy;
         row.approved_at = new Date().toISOString();
+        row.version = newVersion;
+        undoLog.push(() => Object.assign(row, before));
+        return { rows: [], rowCount: 1 };
+      }
+      // --- GyFTR fulfillment settle (attemptGyFTRFulfillment) --------------
+      if (sql.startsWith("UPDATE reward_redemptions SET status = 'fulfilled'")) {
+        const [id, fulfillmentRef, voucherCode, expiresAt, newVersion, expectedVersion] =
+          params as [string, string, string, string, number, number];
+        const row = state.redemptions.find((r) => r.id === id);
+        if (!row || row.version !== expectedVersion) return { rows: [], rowCount: 0 };
+        const before = { ...row };
+        row.status = "fulfilled";
+        row.fulfillment_provider = "gyftr";
+        row.fulfillment_reference = fulfillmentRef;
+        row.fulfillment_voucher_code = voucherCode;
+        row.fulfillment_expires_at = expiresAt;
+        row.fulfilled_at = new Date().toISOString();
+        row.failure_reason = null;
+        row.version = newVersion;
+        undoLog.push(() => Object.assign(row, before));
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.startsWith("UPDATE reward_redemptions SET status = 'failed'")) {
+        const [id, reason, newVersion, expectedVersion] = params as [
+          string,
+          string,
+          number,
+          number,
+        ];
+        const row = state.redemptions.find((r) => r.id === id);
+        if (!row || row.version !== expectedVersion) return { rows: [], rowCount: 0 };
+        const before = { ...row };
+        row.status = "failed";
+        row.failure_reason = reason;
         row.version = newVersion;
         undoLog.push(() => Object.assign(row, before));
         return { rows: [], rowCount: 1 };
@@ -961,6 +1052,12 @@ function seedReservedRedemption(state: RewardHarnessState) {
     version: 1,
     approved_by: null,
     approved_at: null,
+    fulfillment_provider: null,
+    fulfillment_reference: null,
+    fulfillment_voucher_code: null,
+    fulfillment_expires_at: null,
+    fulfilled_at: null,
+    failure_reason: null,
   });
   state.pointEvents.push({
     id: "reservation-event-1",
@@ -975,7 +1072,7 @@ function seedReservedRedemption(state: RewardHarnessState) {
   });
 }
 
-test("approveRewardRedemption advances to processing without a second debit", async () => {
+test("approveRewardRedemption advances to processing without a second debit, then auto-fulfills via the GyFTR stub when no credentials are configured", async () => {
   const state = createRewardState();
   seedReservedRedemption(state);
   const harness = await installFakePool(state)();
@@ -986,11 +1083,94 @@ test("approveRewardRedemption advances to processing without a second debit", as
       redemptionId: "redemption-1",
       expectedVersion: 1,
     });
+    // The approval step itself: version bump 1 -> 2, exactly one debit.
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.newVersion).toBe(2);
-    expect(state.redemptions[0]?.status).toBe("processing");
     expect(state.pointEvents.filter((event) => event.points_delta < 0)).toHaveLength(1);
+
+    // No GYFTR_* credentials are configured in this test environment, so
+    // issueGyFTRVoucher's own graceful stub fallback engages (see
+    // src/integrations/gyftr/gyftr-client.ts). attemptGyFTRFulfillment
+    // follows that honest ok:true stub result to Fulfilled — it does not
+    // leave the redemption stuck at Processing, and the STUB- prefix on
+    // the recorded voucher code is itself the honest signal that no real
+    // provider voucher was issued (never a fabricated success).
+    const settled = state.redemptions[0];
+    expect(settled?.status).toBe("fulfilled");
+    expect(settled?.version).toBe(3);
+    expect(settled?.fulfillment_provider).toBe("gyftr");
+    expect(settled?.fulfillment_voucher_code?.startsWith("STUB-")).toBe(true);
+    expect(settled?.fulfilled_at).not.toBeNull();
+    expect(settled?.failure_reason).toBeNull();
   } finally {
+    harness.restore();
+  }
+});
+
+test("approveRewardRedemption records the provider's own voucher reference when GyFTR issuance succeeds", async () => {
+  const state = createRewardState();
+  seedReservedRedemption(state);
+  const harness = await installFakePool(state)();
+  mock.module("@/integrations/gyftr", () => ({
+    issueGyFTRVoucher: async () => ({
+      ok: true,
+      voucherCode: "GYFTR-REAL-VOUCHER-123",
+      expiryDate: "2027-01-01T00:00:00.000Z",
+      fulfillmentRef: "gyftr-order-abc123",
+    }),
+  }));
+  try {
+    const { approveRewardRedemption } = await import("@/server/reward-commands.server");
+    const result = await approveRewardRedemption({
+      actor: adminActor(),
+      redemptionId: "redemption-1",
+      expectedVersion: 1,
+    });
+    expect(result.ok).toBe(true);
+
+    const settled = state.redemptions[0];
+    expect(settled?.status).toBe("fulfilled");
+    expect(settled?.fulfillment_provider).toBe("gyftr");
+    expect(settled?.fulfillment_reference).toBe("gyftr-order-abc123");
+    expect(settled?.fulfillment_voucher_code).toBe("GYFTR-REAL-VOUCHER-123");
+    expect(settled?.fulfillment_expires_at).toBe("2027-01-01T00:00:00.000Z");
+    expect(settled?.fulfilled_at).not.toBeNull();
+  } finally {
+    mock.module("@/integrations/gyftr", () => realGyftrModule);
+    harness.restore();
+  }
+});
+
+test("approveRewardRedemption records a real failure reason and never fabricates success when GyFTR issuance fails", async () => {
+  const state = createRewardState();
+  seedReservedRedemption(state);
+  const harness = await installFakePool(state)();
+  mock.module("@/integrations/gyftr", () => ({
+    issueGyFTRVoucher: async () => ({
+      ok: false,
+      errorCode: "PROVIDER_DOWN",
+      errorMessage: "simulated GyFTR outage",
+    }),
+  }));
+  try {
+    const { approveRewardRedemption } = await import("@/server/reward-commands.server");
+    const result = await approveRewardRedemption({
+      actor: adminActor(),
+      redemptionId: "redemption-1",
+      expectedVersion: 1,
+    });
+    // The approval transaction itself still succeeded — points were
+    // reserved and the redemption moved to Processing. Only the downstream
+    // fulfillment attempt failed, so approveRewardRedemption's own result
+    // is unaffected by the provider outage.
+    expect(result.ok).toBe(true);
+
+    const settled = state.redemptions[0];
+    expect(settled?.status).toBe("failed");
+    expect(settled?.failure_reason).toBe("PROVIDER_DOWN: simulated GyFTR outage");
+    expect(settled?.fulfillment_voucher_code).toBeNull();
+  } finally {
+    mock.module("@/integrations/gyftr", () => realGyftrModule);
     harness.restore();
   }
 });
@@ -1266,6 +1446,12 @@ test("review commands reject an unrecognised or already-terminal redemption stat
     version: 2,
     approved_by: ADMIN_USER_ID,
     approved_at: ISSUED_AT,
+    fulfillment_provider: null,
+    fulfillment_reference: null,
+    fulfillment_voucher_code: null,
+    fulfillment_expires_at: null,
+    fulfilled_at: null,
+    failure_reason: null,
   });
   const harness = await installFakePool(state)();
   try {
