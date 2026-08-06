@@ -165,14 +165,22 @@ function PipelinePage() {
     void load();
   }, [load]);
 
+  // §2.11/§11.5: target the deal's actual owner (portal_deals.user_id), not
+  // the acting user — a notification about a deal must reach the person
+  // responsible for it, even when someone else (their manager, an admin)
+  // is the one who triggered the event. Falls back to the actor only when
+  // the deal has no resolvable owner. Full participant fan-out to every
+  // tagged deal_participants row is a further step, not attempted here —
+  // see current gaps.md §2.11.
   const publishDealNotification = async (
+    deal: Pick<DealRecord, "user_id">,
     type: string,
     notificationTitle: string,
     notificationMessage: string,
   ) => {
     const { error } = await supabase.from("notifications").insert({
       id: globalThis.crypto.randomUUID(),
-      user_id: profile?.id ?? null,
+      user_id: deal.user_id ?? profile?.id ?? null,
       partner_id: profile?.partner_id ?? null,
       title: notificationTitle,
       message: notificationMessage,
@@ -243,6 +251,7 @@ function PipelinePage() {
       }
       toast.success(`${deal.account_name} moved to ${stage}`);
       await publishDealNotification(
+        deal,
         "deal_stage_change",
         `${deal.account_name} moved to ${stage}`,
         `${deal.account_name} advanced to ${stage}.`,
@@ -289,6 +298,7 @@ function PipelinePage() {
         .eq("id", noteDeal.id);
       if (error) throw error;
       await publishDealNotification(
+        noteDeal,
         "deal_note",
         `Note updated for ${noteDeal.account_name}`,
         noteDraft.trim() || `A note was updated for ${noteDeal.account_name}.`,

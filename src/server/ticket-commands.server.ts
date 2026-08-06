@@ -78,7 +78,7 @@ function validationFailure(message: string, field = "status"): CommandFailureCon
 
 function authorizeTicketActor(
   actor: TicketCommandActor,
-  ticket: { partnerId: string | null },
+  ticket: { partnerId: string | null; createdBy?: string | null },
 ): PolicyDecision {
   const basePolicy = evaluateActiveContextPolicy({
     roles: [actor.assignment.roleKey],
@@ -91,11 +91,30 @@ function authorizeTicketActor(
     return { allowed: true, reason: null };
   }
 
-  if (
-    actor.assignment.roleKey === "partner_admin" ||
-    actor.assignment.roleKey === "partner_user" ||
-    actor.assignment.roleKey === "restricted_distributor"
-  ) {
+  // §2.4 interim fix: support_tickets has no participant-tag table and no
+  // assignee_id (only a free-text assignee_name — confirmed via
+  // db/schema.sql), so the narrowest available interim scope for a
+  // Distributor is "tickets they themselves raised", not every ticket in
+  // the tenant partner_admin/partner_user still see below.
+  if (actor.assignment.roleKey === "restricted_distributor") {
+    if (!actor.assignment.partnerId || actor.assignment.partnerId !== ticket.partnerId) {
+      return {
+        allowed: false,
+        reason: "Ticket is outside the assignment's partner scope",
+        denial: makePolicyDenial(null, "Ticket is outside the assignment's partner scope"),
+      };
+    }
+    if (!ticket.createdBy || ticket.createdBy !== actor.userId) {
+      return {
+        allowed: false,
+        reason: "Ticket was not created by this Distributor",
+        denial: makePolicyDenial(null, "Ticket was not created by this Distributor"),
+      };
+    }
+    return { allowed: true, reason: null };
+  }
+
+  if (actor.assignment.roleKey === "partner_admin" || actor.assignment.roleKey === "partner_user") {
     if (!actor.assignment.partnerId || actor.assignment.partnerId !== ticket.partnerId) {
       return {
         allowed: false,
@@ -243,7 +262,12 @@ export async function createTicket(input: {
 
   return withTransaction(async (tx) => {
     const partnerId = resolveCreatePartnerId(input.actor, input.data.partnerId ?? null);
-    const policy = authorizeTicketActor(input.actor, { partnerId });
+    // createTicket always stamps created_by = actor.userId below, so this
+    // trivially satisfies restricted_distributor's own-ticket check above —
+    // a Distributor can always raise a ticket within their own partner
+    // scope, same as today; the narrowing only applies to reading/acting on
+    // a ticket they didn't create.
+    const policy = authorizeTicketActor(input.actor, { partnerId, createdBy: input.actor.userId });
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -323,7 +347,10 @@ async function runTicketTransition(input: {
       };
     }
 
-    const policy = authorizeTicketActor(input.actor, { partnerId: ticket.partnerId });
+    const policy = authorizeTicketActor(input.actor, {
+      partnerId: ticket.partnerId,
+      createdBy: ticket.createdBy,
+    });
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }
@@ -456,7 +483,10 @@ export async function addTicketReply(input: {
       };
     }
 
-    const policy = authorizeTicketActor(input.actor, { partnerId: ticket.partnerId });
+    const policy = authorizeTicketActor(input.actor, {
+      partnerId: ticket.partnerId,
+      createdBy: ticket.createdBy,
+    });
     if (!policy.allowed) {
       return { ok: false, failure: policy.denial, correlationId };
     }

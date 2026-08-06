@@ -888,18 +888,28 @@ function DealsPage() {
     [deals, draft.country],
   );
 
+  // §2.11/§11.5: target the deal's actual owner (portal_deals.user_id), not
+  // the acting user — a notification about a deal must reach the person
+  // responsible for it, even when someone else (an admin, their manager) is
+  // the one who triggered the event. `deal` is optional because the
+  // deal-creation call site has no separate owner to resolve yet (the
+  // creator IS the owner in that flow) — falls back to the actor there.
+  // Full participant fan-out to every tagged deal_participants row is a
+  // further step, not attempted here — see current gaps.md §2.11.
   const publishDealNotification = async ({
+    deal,
     notificationTitle,
     notificationMessage,
     type,
   }: {
+    deal?: Pick<DealRecord, "user_id"> | null;
     notificationTitle: string;
     notificationMessage: string;
     type: string;
   }) => {
     const { error } = await supabase.from("notifications").insert({
       id: globalThis.crypto.randomUUID(),
-      user_id: profile?.id ?? null,
+      user_id: deal?.user_id ?? profile?.id ?? null,
       partner_id: profile?.partner_id ?? null,
       title: notificationTitle,
       message: notificationMessage,
@@ -1491,6 +1501,7 @@ function DealsPage() {
     await load();
 
     await publishDealNotification({
+      deal: selectedDeal,
       notificationTitle: `${selectedDeal.account_name} moved to ${stage}`,
       notificationMessage: `${selectedDeal.account_name} advanced to ${stage}.`,
       type: "deal_stage_change",
@@ -1563,6 +1574,7 @@ function DealsPage() {
     await load();
 
     await publishDealNotification({
+      deal: selectedDeal,
       notificationTitle: status === "won" ? "Deal won" : "Deal lost",
       notificationMessage:
         status === "won"
