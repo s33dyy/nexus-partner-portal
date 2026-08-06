@@ -228,6 +228,7 @@ function PipelinePage() {
       }
       toast.success(`${deal.account_name} moved to ${stage}`);
       await publishDealNotification(
+        deal,
         "deal_stage_change",
         `${deal.account_name} moved to ${stage}`,
         `${deal.account_name} advanced to ${stage}.`,
@@ -274,6 +275,7 @@ function PipelinePage() {
         .eq("id", noteDeal.id);
       if (error) throw error;
       await publishDealNotification(
+        noteDeal,
         "deal_note",
         `Note updated for ${noteDeal.account_name}`,
         noteDraft.trim() || `A note was updated for ${noteDeal.account_name}.`,
