@@ -1635,6 +1635,7 @@ function DealsPage() {
     setBackwardDialogOpen(false);
     await load();
     await publishDealNotification({
+      deal: selectedDeal,
       notificationTitle: `${selectedDeal.account_name} moved back to ${backwardTargetStage}`,
       notificationMessage: `${selectedDeal.account_name} was moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,
       type: "deal_stage_change",

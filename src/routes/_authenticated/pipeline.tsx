@@ -354,6 +354,7 @@ function PipelinePage() {
       }
       toast.success(`${backwardDeal.account_name} moved back to ${backwardTargetStage}`);
       await publishDealNotification(
+        backwardDeal,
         "deal_stage_change",
         `${backwardDeal.account_name} moved back to ${backwardTargetStage}`,
         `${backwardDeal.account_name} moved back to ${backwardTargetStage}: ${backwardReason.trim()}`,

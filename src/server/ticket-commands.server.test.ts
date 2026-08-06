@@ -273,6 +273,45 @@ test("decideReopen approve moves reopen_requested back to open and requires a su
   }
 });
 
+test("§2.4: addTicketReply denies a restricted_distributor who did not create the ticket", async () => {
+  const harness = await installFakePool(
+    baseTicketRow({ status: "open", partner_id: "partner-1", created_by: "someone-else" }),
+  )();
+  try {
+    const { addTicketReply } = await import("@/server/ticket-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await addTicketReply({
+      actor,
+      data: { ticketId: "ticket-1", body: "Any update?" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4: addTicketReply allows a restricted_distributor who created the ticket themselves", async () => {
+  const harness = await installFakePool(
+    baseTicketRow({ status: "open", partner_id: "partner-1", created_by: REQUESTER_USER_ID }),
+  )();
+  try {
+    const { addTicketReply } = await import("@/server/ticket-commands.server");
+    const actor = buildActor({
+      userId: REQUESTER_USER_ID,
+      roleKey: "restricted_distributor",
+      partnerId: "partner-1",
+    });
+    const result = await addTicketReply({
+      actor,
+      data: { ticketId: "ticket-1", body: "Any update?" },
+    });
+    expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("addTicketReply rejects replying to a closed ticket", async () => {
   const harness = await installFakePool(baseTicketRow({ status: "closed" }))();
   try {

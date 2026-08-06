@@ -82,6 +82,8 @@ type TaskRow = {
   partner_id: string | null;
   version: number;
   title: string;
+  assignee_id?: string | null;
+  creator_id?: string | null;
 };
 
 function baseTaskRow(overrides: Partial<TaskRow> = {}): TaskRow {
@@ -174,6 +176,58 @@ test("transitionTask denies when partner-scoped assignment does not match the ta
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4: transitionTask denies a restricted_distributor who is neither assignee nor creator of the task", async () => {
+  const harness = await installFakePool(
+    baseTaskRow({
+      partner_id: "partner-1",
+      assignee_id: "someone-else",
+      creator_id: "someone-else-too",
+    }),
+  )();
+  try {
+    const { transitionTask } = await import("@/server/task-commands.server");
+    const actor = buildActor({ roleKey: "restricted_distributor", partnerId: "partner-1" });
+    const result = await transitionTask({
+      actor,
+      taskId: "task-1",
+      expectedVersion: 2,
+      toStatus: "in_progress",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("§2.4: transitionTask allows a restricted_distributor who is the task's assignee", async () => {
+  const distributorUserId = "22222222-2222-2222-2222-222222222222";
+  const harness = await installFakePool(
+    baseTaskRow({
+      partner_id: "partner-1",
+      assignee_id: distributorUserId,
+      creator_id: "someone-else",
+    }),
+  )();
+  try {
+    const { transitionTask } = await import("@/server/task-commands.server");
+    const actor = buildActor({
+      userId: distributorUserId,
+      roleKey: "restricted_distributor",
+      partnerId: "partner-1",
+    });
+    const result = await transitionTask({
+      actor,
+      taskId: "task-1",
+      expectedVersion: 2,
+      toStatus: "in_progress",
+    });
+    expect(result.ok).toBe(true);
   } finally {
     harness.restore();
   }
