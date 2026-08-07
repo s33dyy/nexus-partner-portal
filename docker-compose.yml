@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: livey_partner_portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d livey_partner_portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override the host-oriented value from .env with the in-network service name.
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/livey_partner_portal
+      # The compose network's "db" hostname isn't in the app's SSL allow-list
+      # (localhost/127.0.0.1/::1) and this local Postgres doesn't speak TLS.
+      PGSSLMODE: disable
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

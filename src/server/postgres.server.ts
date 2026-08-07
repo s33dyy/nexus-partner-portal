@@ -9,6 +9,7 @@ if (!DATABASE_URL) {
 }
 
 function shouldUseSsl(connectionString: string): boolean {
+  if (process.env.PGSSLMODE === "disable") return false;
   try {
     const url = new URL(connectionString);
     return !["localhost", "127.0.0.1", "::1"].includes(url.hostname);

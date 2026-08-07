@@ -31,6 +31,7 @@ BEGIN
     'submitted',
     'under_review',
     'need_more_info',
+    'partial_approval',
     'pending_agreement',
     'signed_pending_review',
     'approved',
@@ -44,7 +45,8 @@ $$;
 -- Add workflow statuses to existing enum if the type already exists (idempotent)
 DO $$
 BEGIN
-  ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'pending_agreement' AFTER 'need_more_info';
+  ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'partial_approval' AFTER 'need_more_info';
+  ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'pending_agreement' AFTER 'partial_approval';
   ALTER TYPE partner_status ADD VALUE IF NOT EXISTS 'signed_pending_review' AFTER 'pending_agreement';
 EXCEPTION
   WHEN others THEN NULL;
@@ -297,31 +299,11 @@ CREATE TABLE IF NOT EXISTS partner_documents (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS deal_documents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
-  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
-  uploaded_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  doc_type TEXT NOT NULL,
-  file_name TEXT NOT NULL,
-  file_path TEXT NOT NULL REFERENCES document_blobs(file_path) ON DELETE CASCADE,
-  mime_type TEXT,
-  size_bytes INTEGER,
-  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS partner_review_notes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
-  author_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  note TEXT NOT NULL,
-  status_change TEXT,
-  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
+-- portal_deals has no forward dependencies, so it's created here, ahead of
+-- deal_documents/partner_review_notes/portal_deal_collaborators below, all of
+-- which reference it via foreign key. Without this ordering, applying this
+-- file against a genuinely empty database (fresh Docker/Railway deploy)
+-- fails with "relation portal_deals does not exist" the first time.
 CREATE TABLE IF NOT EXISTS portal_deals (
   id UUID PRIMARY KEY,
   account_name TEXT NOT NULL,
@@ -354,6 +336,31 @@ CREATE TABLE IF NOT EXISTS portal_deals (
   is_seed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deal_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID NOT NULL REFERENCES portal_deals(id) ON DELETE CASCADE,
+  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  uploaded_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  doc_type TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL REFERENCES document_blobs(file_path) ON DELETE CASCADE,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS partner_review_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  author_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  status_change TEXT,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS portal_deal_collaborators (

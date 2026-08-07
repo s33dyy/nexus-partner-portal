@@ -1385,9 +1385,6 @@ async function seedGovernedCatalog(client: PoolClient) {
       id,
       product_code: product.code,
       product_name: product.name,
-      product_family: product.family,
-      category: product.family,
-      description: `${product.name} — governed catalogue entry.`,
       product_description: `${product.name} — governed catalogue entry.`,
       product_kind: "product",
       status: "active",
@@ -1406,7 +1403,6 @@ async function seedGovernedCatalog(client: PoolClient) {
       product_id: productIds[product.code],
       variant_code: `${product.code}-STD`,
       variant_name: "Standard",
-      variant_family: product.family,
       status: "active",
       version: 1,
       sort_order: 0,
@@ -1423,9 +1419,6 @@ async function seedGovernedCatalog(client: PoolClient) {
     await upsert(client, "product_skus", {
       id,
       product_variant_id: variantIds[product.code],
-      // Legacy column from the table's original (pre-governed) shape —
-      // nothing reads it, but it is still NOT NULL with no default.
-      sku: `${product.code}-STD-SKU`,
       sku_code: `${product.code}-STD-SKU`,
       currency_code: "USD",
       msrp_amount: msrp,
@@ -1450,8 +1443,6 @@ async function seedGovernedCatalog(client: PoolClient) {
     effective_to: null,
     status: "active",
     version: 1,
-    source: "seed",
-    description: "Default governed price book for USD-denominated sales.",
     is_seed: true,
     updated_at: new Date().toISOString(),
   });
@@ -1509,11 +1500,8 @@ async function seedGovernedCatalog(client: PoolClient) {
     await upsert(client, "combo_components", {
       id: deterministicUuid(GOVERNED_CATALOG_NS, `combo-component:${code}`),
       combo_id: comboId,
-      product_sku_id: skuIds[code],
       component_sku_id: skuIds[code],
-      component_quantity: 1,
       quantity: 1,
-      component_role: "included",
       sort_order: comboComponentCount,
       status: "active",
       version: 1,
