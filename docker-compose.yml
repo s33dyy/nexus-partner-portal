@@ -33,7 +33,7 @@ services:
       # The compose network's "db" hostname isn't in the app's SSL allow-list
       # (localhost/127.0.0.1/::1) and this local Postgres doesn't speak TLS.
       PGSSLMODE: disable
-      HOST: 0.0.0.0
+      HOST: "::"
       PORT: "3000"
       # Zero-config default so `db:bootstrap` works without a .env file.
       # Override in a local .env (copy from .env.example) for a real password.

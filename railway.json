@@ -6,6 +6,6 @@
   },
   "deploy": {
     "healthcheckPath": "/",
-    "startCommand": "bun run db:migrate && HOST=0.0.0.0 bun .output/server/index.mjs"
+    "startCommand": "bun run db:migrate && HOST=:: bun .output/server/index.mjs"
   }
 }
