@@ -7,21 +7,37 @@ How to run LIVEY PAM CRM entirely in Docker — app + Postgres — and populate 
 - Docker Desktop (or another Docker Engine + Compose v2) running locally.
 - Nothing else. Postgres, the app runtime (Bun), and the build all happen inside containers — you don't need Bun/Node/Postgres installed on the host.
 
-## 1. Configure environment variables
+## 1. Clone and build
+
+```bash
+git clone https://github.com/s33dyy/nexus-partner-portal.git
+cd nexus-partner-portal
+docker compose up --build
+```
+
+Run this from the repo root (the folder containing `docker-compose.yml`) — if you see `no configuration file provided: not found`, you're one directory up from where you think you are.
+
+**No `.env` file is required to run this.** The stack ships with working defaults (including a default `BOOTSTRAP_SUPER_ADMIN_PASSWORD`) baked into `docker-compose.yml`, so a fresh clone runs as-is.
+
+### Optional: configure environment variables
+
+Only needed if you want to change the seeded super admin password or enable an integration (Cloudinary, Zoho Sign, Google Sign-In, OpenRouter, Twilio):
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and set at minimum:
+Then edit `.env` — e.g.:
 
 ```bash
 BOOTSTRAP_SUPER_ADMIN_PASSWORD=<choose a password>
 ```
 
-This becomes the login password for the primary seeded super admin account (`maya.admin@livey.tech`). Everything else in `.env` (Cloudinary, Zoho Sign, Google Sign-In, OpenRouter, Twilio) is optional — leave those blank to run the core app; the corresponding integration features simply stay disabled/inactive until you fill them in.
+This becomes the login password for the primary seeded super admin account (`maya.admin@livey.tech`); if you skip this, it defaults to `ChangeMe123!`. Everything else in `.env` is optional — leave it blank to run the core app; the corresponding integration features simply stay disabled/inactive until you fill them in.
 
 You do **not** need to change `DATABASE_URL` — `docker-compose.yml` overrides it at runtime to point the `app` container at the `db` container over the compose network (`postgresql://postgres:postgres@db:5432/livey_partner_portal`), regardless of what's in `.env`.
+
+If you edit `.env` after the stack is already running, restart `app` to pick it up: `docker compose up -d --force-recreate app` (`env_file` is only read at container creation).
 
 ## 2. Build and start the stack
 
@@ -125,7 +141,8 @@ docker compose exec db psql -U postgres -d livey_partner_portal
 
 ## Troubleshooting
 
-- **`Missing BOOTSTRAP_SUPER_ADMIN_PASSWORD`** when running `db:bootstrap` — you haven't set that variable in `.env`. Set it and restart `app` (`docker compose up -d --force-recreate app`) so it picks up the new value, since `env_file` is only read at container creation.
+- **`Missing BOOTSTRAP_SUPER_ADMIN_PASSWORD`** when running `db:bootstrap` — this shouldn't happen out of the box (it defaults to `ChangeMe123!`). If you've set a blank value in `.env`, remove that line or set a real password, then restart `app` (`docker compose up -d --force-recreate app`) so it picks up the new value, since `env_file` is only read at container creation.
+- **`no configuration file provided: not found`** — you're not in the repo root. `cd` into the folder containing `docker-compose.yml` and re-run.
 - **Port already in use (`3000` or `5432`)** — something else on the host is bound to that port. Either stop it, or change the left-hand side of the `ports:` mapping in `docker-compose.yml` (e.g. `"5433:5432"`).
 - **`app` can't reach Postgres / SSL errors** — don't edit `DATABASE_URL` inside `docker-compose.yml`'s `environment:` block; it's intentionally pinned to the in-network hostname `db` with `PGSSLMODE=disable`, since this local Postgres doesn't speak TLS and `db` isn't on the app's localhost SSL allow-list ([`scripts/db.ts`](scripts/db.ts), [`src/server/postgres.server.ts`](src/server/postgres.server.ts)).
 - **Login works but data looks empty** — you started the stack but never ran the seed step (step 3) — migrations create empty tables, they don't populate them.

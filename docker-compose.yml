@@ -22,7 +22,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
-      - .env
+      # Optional: only needed to enable integrations (Cloudinary, Zoho Sign,
+      # Google Sign-In, OpenRouter, Twilio) or override BOOTSTRAP_SUPER_ADMIN_PASSWORD.
+      # `docker compose up` works out of the box without this file existing.
+      - path: .env
+        required: false
     environment:
       # Override the host-oriented value from .env with the in-network service name.
       DATABASE_URL: postgresql://postgres:postgres@db:5432/livey_partner_portal
@@ -31,6 +35,9 @@ services:
       PGSSLMODE: disable
       HOST: 0.0.0.0
       PORT: "3000"
+      # Zero-config default so `db:bootstrap` works without a .env file.
+      # Override in a local .env (copy from .env.example) for a real password.
+      BOOTSTRAP_SUPER_ADMIN_PASSWORD: ${BOOTSTRAP_SUPER_ADMIN_PASSWORD:-ChangeMe123!}
     ports:
       - "3000:3000"
     depends_on:
