@@ -44,7 +44,10 @@ authRoutes.post("/login", async (c) => {
   } catch (error) {
     // Rejected credentials are a 401, not a server fault — the catch-all
     // error handler would otherwise report them as 500.
-    return c.json({ message: error instanceof Error ? error.message : "Sign in failed" }, 401);
+    if (!(error instanceof Error && error.message === "Invalid email or password")) {
+      console.error("[auth/login] sign-in failed:", error);
+    }
+    return c.json({ message: "Invalid email or password" }, 401);
   }
 });
 

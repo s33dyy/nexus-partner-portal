@@ -135,6 +135,8 @@ type GoogleUserInfo = {
   name?: string;
 };
 
+class PublicGoogleAuthError extends Error {}
+
 function isEmailVerified(value: GoogleUserInfo["email_verified"]): boolean {
   return value === true || value === "true";
 }
@@ -175,7 +177,7 @@ async function linkGoogleAccountToCurrentUser(
   userInfo: GoogleUserInfo,
 ): Promise<void> {
   if (!userInfo.email) {
-    throw new Error("Google did not share an email address for this account");
+    throw new PublicGoogleAuthError("Google did not share an email address for this account");
   }
 
   const existing = await pool.query<{ id: string }>(
@@ -183,7 +185,9 @@ async function linkGoogleAccountToCurrentUser(
     [userInfo.sub],
   );
   if (existing.rows[0] && existing.rows[0].id !== currentUserId) {
-    throw new Error("This Google account is already connected to a different LIVEY account");
+    throw new PublicGoogleAuthError(
+      "This Google account is already connected to a different LIVEY account",
+    );
   }
 
   await pool.query(
@@ -212,7 +216,9 @@ async function findOrCreateUserForGoogle(userInfo: GoogleUserInfo): Promise<stri
     const matched = byEmail.rows[0];
     if (matched) {
       if (matched.google_id && matched.google_id !== userInfo.sub) {
-        throw new Error("This email is already linked to a different Google account");
+        throw new PublicGoogleAuthError(
+          "This email is already linked to a different Google account",
+        );
       }
       await pool.query(
         `UPDATE profiles SET google_id = $1, google_email = $2, google_linked_at = now() WHERE id = $3`,
@@ -223,7 +229,9 @@ async function findOrCreateUserForGoogle(userInfo: GoogleUserInfo): Promise<stri
   }
 
   if (!userInfo.email) {
-    throw new Error("Google did not share an email address — cannot create an account");
+    throw new PublicGoogleAuthError(
+      "Google did not share an email address — cannot create an account",
+    );
   }
 
   // Matches signUpLocal's exact non-transactional shape (four sequential
@@ -286,7 +294,7 @@ export async function handleGoogleCallback(request: Request): Promise<Response> 
     userInfo = await exchangeCodeForUserInfo(code);
   } catch (err) {
     console.error("[Google OAuth callback] token exchange failed:", err);
-    return failWith(err instanceof Error ? err.message : "Google sign-in failed");
+    return failWith("Google sign-in failed");
   }
 
   try {
@@ -303,6 +311,6 @@ export async function handleGoogleCallback(request: Request): Promise<Response> 
     ]);
   } catch (err) {
     console.error("[Google OAuth callback] error:", err);
-    return failWith(err instanceof Error ? err.message : "Google sign-in failed");
+    return failWith(err instanceof PublicGoogleAuthError ? err.message : "Google sign-in failed");
   }
 }

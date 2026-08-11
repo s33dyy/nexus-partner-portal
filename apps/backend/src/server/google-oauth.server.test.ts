@@ -143,7 +143,17 @@ function installFakeGoogleFetch(userInfo: {
       return new Response(JSON.stringify(userInfo), { status: 200 });
     }
     throw new Error(`Unexpected fetch call: ${url}`);
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+function installFailingGoogleFetch(message: string) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    throw new Error(message);
+  }) as unknown as typeof fetch;
   return () => {
     globalThis.fetch = originalFetch;
   };
@@ -183,6 +193,25 @@ test("Google callback rejects a state mismatch (CSRF guard)", async () => {
     );
   } finally {
     harness.restore();
+  }
+});
+
+test("Google callback does not reflect provider or infrastructure errors", async () => {
+  const harness = await installFakePool({})();
+  const restoreFetch = installFailingGoogleFetch("provider secret leaked");
+  try {
+    const { handleGoogleCallback } = await import("@/server/google-oauth.server");
+    const response = await handleGoogleCallback(
+      callbackRequest(`code=auth-code&state=${STATE}`, STATE_COOKIE_HEADER),
+    );
+    const location = decodeURIComponent(response.headers.get("Location") ?? "");
+
+    expect(response.status).toBe(302);
+    expect(location).toContain("googleError=Google sign-in failed");
+    expect(location).not.toContain("provider secret leaked");
+  } finally {
+    harness.restore();
+    restoreFetch();
   }
 });
 
