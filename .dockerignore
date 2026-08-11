@@ -1,5 +1,5 @@
 node_modules
-apps/frontend/dist
+.output
 .vinxi
 .tanstack
 .nitro
@@ -24,8 +24,6 @@ graphify-out
 output
 tmp
 !tmp/dummy-docs
-db/dumps
-**/db/dumps
 e2e
 playwright-report
 test-results

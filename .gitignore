@@ -17,14 +17,8 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
+/docs/
 .superpowers/
-
-# Local-only working docs, except the checked-in reference docs below.
-/docs/*
-!/docs/API.md
-!/docs/architecture/
-/docs/architecture/*
-!/docs/architecture/frontend-backend-split.md
 
 # Wrangler / Cloudflare
 .wrangler/
@@ -45,13 +39,8 @@ dist-ssr
 /tmp/
 /output/
 /graphify-out/
-db/dumps/
-**/db/dumps/
+/db/dumps/
 
 # Local tool config/state — environment-specific, not shared
 /.claude/
 /.lovable/
-apps/frontend/dist/
-apps/frontend/.env.local
-playwright-report/
-test-results/
