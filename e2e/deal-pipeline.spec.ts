@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+import { login } from "./helpers";
+
 /**
  * Deal Pipeline E2E Tests
  *
@@ -16,14 +18,6 @@ const ADMIN_PASSWORD = process.env.E2E_SUPER_ADMIN_PASSWORD ?? "test-admin-pw";
 const PARTNER_EMAIL = process.env.E2E_PARTNER_USER_EMAIL ?? "partner@example.com";
 const PARTNER_PASSWORD = process.env.E2E_PARTNER_USER_PASSWORD ?? "test-partner-pw";
 
-async function login(page: import("@playwright/test").Page, email: string, password: string) {
-  await page.goto("/auth");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/password/i).fill(password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/auth"), { timeout: 10_000 });
-}
-
 // ─── Partner: Deal Registration ────────────────────────────────────────────────
 
 test.describe("Partner can register and view a deal", () => {
@@ -38,11 +32,9 @@ test.describe("Partner can register and view a deal", () => {
 
   test("deal registration form is accessible", async ({ page }) => {
     await page.goto("/deals");
-    const registerButton = page.getByRole("button", { name: /Register Deal|New Deal/i });
-    await expect(registerButton).toBeVisible();
-    await registerButton.click();
-    // Dialog or form should open
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole("heading", { name: /Deals/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Create deal/i })).toBeVisible();
+    await expect(page.getByLabel(/Amount/i)).toBeVisible();
   });
 });
 
@@ -55,7 +47,7 @@ test.describe("Admin can view and manage deals pipeline", () => {
 
   test("admin deals page loads correctly", async ({ page }) => {
     await page.goto("/admin/deals");
-    await expect(page.getByRole("heading", { name: /Deals/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Deal approvals/i })).toBeVisible();
   });
 
   test("pipeline view is accessible", async ({ page }) => {
@@ -65,8 +57,8 @@ test.describe("Admin can view and manage deals pipeline", () => {
 
   test("partner deals are visible in admin view", async ({ page }) => {
     await page.goto("/admin/deals");
-    // Should render a table/list with at least column headers
-    await expect(page.getByRole("table")).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText("Approval queue", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Northstar Cloud Suite/i })).toBeVisible();
   });
 });
 
@@ -79,15 +71,11 @@ test.describe("Support ticket creation and reply flow", () => {
 
   test("support page loads", async ({ page }) => {
     await page.goto("/support");
-    await expect(page.getByRole("heading", { name: /Support/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Portal tickets/i })).toBeVisible();
   });
 
   test("new ticket form shows product SKU and serial fields", async ({ page }) => {
     await page.goto("/support");
-    const newTicketButton = page.getByRole("button", { name: /New Ticket|Create Ticket/i });
-    await expect(newTicketButton).toBeVisible();
-    await newTicketButton.click();
-    // Wait for the form to appear
     await expect(page.getByLabel(/Product SKU/i)).toBeVisible({ timeout: 5_000 });
     await expect(page.getByLabel(/Serial Number/i)).toBeVisible();
   });
@@ -113,7 +101,7 @@ test.describe("Admin sees internal note toggle on tickets", () => {
       await expect(page.getByText(/internal note/i)).toBeVisible({ timeout: 5_000 });
     } else {
       // No tickets present yet — just ensure the page renders
-      await expect(page.getByRole("heading", { name: /Support/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Portal tickets/i })).toBeVisible();
     }
   });
 });

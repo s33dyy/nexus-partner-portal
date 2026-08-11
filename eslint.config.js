@@ -7,7 +7,21 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  {
+    ignores: [
+      "**/node_modules",
+      ".claude",
+      "**/dist",
+      ".output",
+      ".vinxi",
+      "**/routeTree.gen.ts",
+      // A self-contained Remotion project with its own toolchain and deps.
+      "remotion-training-videos",
+      "graphify-out",
+      "output",
+      "tmp",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

@@ -1,0 +1,26 @@
+{
+  "name": "@livey/backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "db:migrate": "bun scripts/apply-migrations.ts",
+    "db:bootstrap": "bun scripts/bootstrap-db.ts",
+    "inventory": "bun scripts/inventory.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@livey/shared": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "hono": "^4.6.14",
+    "pg": "^8.22.0",
+    "twilio": "^6.0.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}
