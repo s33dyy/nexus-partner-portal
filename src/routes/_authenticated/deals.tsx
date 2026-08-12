@@ -28,6 +28,8 @@ import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { DealParticipantTags } from "@/components/deal-participant-tags";
 import { DealActivityTimeline } from "@/components/deal-activity-timeline";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
+import { GroupHeader, RecordList, RecordRow } from "@/components/record-list";
+import { DEAL_STAGE_TONE } from "@/lib/status-tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -294,17 +296,6 @@ type BadgeTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger"
 // discovery stages read as informational, the committed mid-funnel stages as
 // brand, the last live stage as "needs attention", and the two terminal
 // stages as success/danger.
-const DEAL_STAGE_TONE: Record<DealStage, BadgeTone> = {
-  sourced: "neutral",
-  demo: "info",
-  testing: "info",
-  qualified: "brand",
-  proposal: "brand",
-  negotiation: "warning",
-  won: "success",
-  lost: "danger",
-};
-
 const dealSearchSchema = z.object({
   q: z.string().optional(),
   stage: z.enum(["all", ...DEAL_STAGE_ORDER]).optional(),
@@ -659,6 +650,8 @@ function DealsPage() {
     setImportMessage(null);
   }, []);
 
+  // Preserves DEAL_STAGE_ORDER so the groups read as a funnel top-to-bottom
+  // rather than in whatever order the rows happened to arrive.
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
@@ -695,6 +688,20 @@ function DealsPage() {
       status: statusFilter,
     });
   }, [regionScopedDeals, query, stageFilter, statusFilter]);
+
+  const groupedDeals = useMemo(() => {
+    const byStage = new Map<DealStage, DealRecord[]>();
+    for (const deal of filteredDeals) {
+      const stage = deal.stage as DealStage;
+      const bucket = byStage.get(stage);
+      if (bucket) bucket.push(deal);
+      else byStage.set(stage, [deal]);
+    }
+    return DEAL_STAGE_ORDER.filter((stage) => byStage.has(stage)).map((stage) => ({
+      stage,
+      deals: byStage.get(stage) as DealRecord[],
+    }));
+  }, [filteredDeals]);
 
   useEffect(() => {
     if (draft.currency_code === "USD") {
@@ -1873,39 +1880,50 @@ function DealsPage() {
               }
             />
           ) : (
-            <div className="divide-y">
-              {filteredDeals.map((deal) => (
-                <button
-                  key={deal.id}
-                  onClick={() => {
-                    setSelectedId(deal.id);
-                    setNote(deal.notes);
-                    setSelectedDealEditing(false);
-                    setSelectedDealOpen(true);
-                  }}
-                  className={`flex w-full flex-col gap-1 px-5 py-3 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
-                    selectedDeal?.id === deal.id ? "bg-muted/40" : ""
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <div className="truncate text-sm font-medium">{deal.account_name}</div>
-                      <Badge tone={DEAL_STAGE_TONE[deal.stage]}>{deal.stage}</Badge>
-                    </div>
-                    <div className="mt-0.5 text-[13px] text-muted-foreground">
-                      {deal.contact_name} · {deal.owner_name} · {deal.region}
-                    </div>
-                  </div>
-                  <div className="text-left sm:text-right">
-                    <div className="text-sm font-medium" data-numeric>
-                      {deal.amount}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatDealProbability(deal.probability)} · closes{" "}
-                      {formatDateLabel(deal.close_date)}
-                    </div>
-                  </div>
-                </button>
+            // Grouped by stage, newest group first — a flat 40-row list gave
+            // no sense of where the pipeline is actually bunched up.
+            <div className="space-y-4 p-3">
+              {groupedDeals.map((group) => (
+                <section key={group.stage}>
+                  <GroupHeader
+                    label={group.stage.replace(/_/g, " ")}
+                    count={group.deals.length}
+                    tone={DEAL_STAGE_TONE[group.stage]}
+                  />
+                  <RecordList>
+                    {group.deals.map((deal) => (
+                      <RecordRow
+                        key={deal.id}
+                        tone={DEAL_STAGE_TONE[deal.stage]}
+                        owner={deal.owner_name}
+                        selected={selectedDeal?.id === deal.id}
+                        onClick={() => {
+                          setSelectedId(deal.id);
+                          setNote(deal.notes);
+                          setSelectedDealEditing(false);
+                          setSelectedDealOpen(true);
+                        }}
+                        title={deal.account_name}
+                        subtitle={`${deal.contact_name} · ${deal.region}`}
+                        meta={
+                          <>
+                            <span>{formatDealProbability(deal.probability)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>closes {formatDateLabel(deal.close_date)}</span>
+                          </>
+                        }
+                        trailing={
+                          <>
+                            <span className="text-[13px] font-semibold" data-numeric>
+                              {deal.amount}
+                            </span>
+                            <Badge tone={DEAL_STAGE_TONE[deal.stage]}>{deal.stage}</Badge>
+                          </>
+                        }
+                      />
+                    ))}
+                  </RecordList>
+                </section>
               ))}
             </div>
           )}

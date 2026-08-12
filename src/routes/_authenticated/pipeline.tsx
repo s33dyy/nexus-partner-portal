@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
+import { BoardColumn, OwnerAvatar } from "@/components/record-list";
+import { DEAL_STAGE_TONE } from "@/lib/status-tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -517,18 +519,12 @@ function PipelinePage() {
           ) : (
             <div className="flex gap-3 pb-1">
               {grouped.map((column) => (
-                <div
+                <BoardColumn
                   key={column.stage}
-                  className="flex w-[248px] shrink-0 flex-col gap-2 rounded-lg border bg-secondary/40 p-2"
+                  label={column.stage.replace(/_/g, " ")}
+                  count={column.deals.length}
+                  tone={DEAL_STAGE_TONE[column.stage]}
                 >
-                  <div className="flex items-center justify-between gap-2 rounded-md bg-card px-2.5 py-1.5">
-                    <span className="truncate text-[13px] font-semibold capitalize">
-                      {column.stage}
-                    </span>
-                    <Badge variant="outline" data-numeric>
-                      {column.deals.length}
-                    </Badge>
-                  </div>
                   {column.deals.length === 0 ? (
                     <p className="rounded-md border border-dashed px-2.5 py-4 text-center text-xs text-muted-foreground">
                       No deals in this stage.
@@ -543,16 +539,20 @@ function PipelinePage() {
                           <div className="min-w-0 truncate text-[13px] font-medium">
                             {deal.account_name}
                           </div>
-                          <Badge variant="outline" className="shrink-0" data-numeric>
+                          <span className="shrink-0 text-[13px] font-semibold" data-numeric>
                             {deal.amount}
-                          </Badge>
+                          </span>
                         </div>
-                        <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
-                          <div className="truncate">{deal.owner_name}</div>
-                          <div className="truncate">
-                            {deal.region} · {deal.product}
-                          </div>
-                          <div className="truncate">{formatDealProbability(deal.probability)}</div>
+                        <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <OwnerAvatar name={deal.owner_name} size="xs" />
+                          <span className="truncate">{deal.owner_name}</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                          <Badge tone="neutral">{deal.region}</Badge>
+                          <Badge tone="neutral">{deal.product}</Badge>
+                          <Badge tone={DEAL_STAGE_TONE[deal.stage]}>
+                            {formatDealProbability(deal.probability)}
+                          </Badge>
                         </div>
                         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                           <Button
@@ -587,7 +587,7 @@ function PipelinePage() {
                       </div>
                     ))
                   )}
-                </div>
+                </BoardColumn>
               ))}
             </div>
           )}

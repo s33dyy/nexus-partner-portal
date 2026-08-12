@@ -153,3 +153,29 @@ export function resolveStatusTone(
   }
   return fallback;
 }
+
+/**
+ * Deal stages, coloured as a funnel rather than by generic status matching.
+ *
+ * resolveStatusTone() would map most of these correctly on its own, but the
+ * pipeline reads better when the mid-funnel stages escalate deliberately
+ * (info -> brand -> warning) instead of every open stage sharing one colour.
+ * Kept here rather than private to a route so Deals, Pipeline and the board
+ * can never drift apart on what "negotiation" looks like.
+ */
+export const DEAL_STAGE_TONE: Record<string, StatusTone> = {
+  sourced: "neutral",
+  demo: "info",
+  testing: "info",
+  qualified: "brand",
+  proposal: "brand",
+  negotiation: "warning",
+  approved: "brand",
+  won: "success",
+  lost: "danger",
+};
+
+export function resolveDealStageTone(stage: string | null | undefined): StatusTone {
+  if (!stage) return "neutral";
+  return DEAL_STAGE_TONE[normalizeStatusKey(stage)] ?? resolveStatusTone(stage);
+}

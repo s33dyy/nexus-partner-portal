@@ -120,11 +120,15 @@ export function StatTile({
         className,
       )}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
-        <div className="mt-1.5 text-2xl font-semibold leading-none tracking-tight" data-numeric>
+        <div
+          className="mt-1.5 truncate text-xl font-semibold leading-tight tracking-tight sm:text-2xl"
+          title={typeof value === "string" || typeof value === "number" ? String(value) : undefined}
+          data-numeric
+        >
           {value}
         </div>
         {hint ? <div className="mt-1.5 text-xs text-muted-foreground">{hint}</div> : null}
