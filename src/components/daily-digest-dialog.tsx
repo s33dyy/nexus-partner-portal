@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { Loader2, Mic, Sparkles, Square, Volume2 } from "lucide-react";
+import {
+  CalendarClock,
+  CheckCircle2,
+  Loader2,
+  Mic,
+  Moon,
+  Sparkles,
+  Square,
+  Volume2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AssistantChatMessage } from "@/domain/contracts/assistant";
-import type { UserDigest } from "@/domain/contracts/digest";
+import { DIGEST_EVENING_HOUR, type UserDigest } from "@/domain/contracts/digest";
 import { useAuth } from "@/hooks/use-auth";
 import { useVoice } from "@/hooks/use-voice";
 import { sendAssistantMessage } from "@/integrations/local/assistant";
@@ -22,19 +31,28 @@ import { getUserDigest } from "@/integrations/local/digest";
 
 const STORAGE_PREFIX = "livey.digest-seen";
 
-function todayKey(userId: string) {
+// The digest auto-opens once per SLOT, not once per day: the morning
+// briefing looks forward and the evening one looks back at what actually got
+// done, so seeing the morning one must not suppress the evening one.
+type DigestSlot = "morning" | "evening";
+
+function currentSlot(now: Date = new Date()): DigestSlot {
+  return now.getHours() >= DIGEST_EVENING_HOUR ? "evening" : "morning";
+}
+
+function slotKey(userId: string, slot: DigestSlot) {
   const date = new Date().toISOString().slice(0, 10);
-  return `${STORAGE_PREFIX}.${userId}.${date}`;
+  return `${STORAGE_PREFIX}.${userId}.${date}.${slot}`;
 }
 
-function hasSeenToday(userId: string): boolean {
+function hasSeenSlot(userId: string, slot: DigestSlot): boolean {
   if (typeof window === "undefined") return true;
-  return window.localStorage.getItem(todayKey(userId)) === "1";
+  return window.localStorage.getItem(slotKey(userId, slot)) === "1";
 }
 
-function markSeenToday(userId: string) {
+function markSeenSlot(userId: string, slot: DigestSlot) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(todayKey(userId), "1");
+  window.localStorage.setItem(slotKey(userId, slot), "1");
 }
 
 type VoiceExchange = { question: string; answer: string };
@@ -55,12 +73,18 @@ export function DailyDigestDialog({
   const [exchanges, setExchanges] = useState<VoiceExchange[]>([]);
   const [askBusy, setAskBusy] = useState(false);
 
-  // First thing a user sees on login: auto-open once per day per account.
-  // Re-opening later the same day (via the header's manual trigger) is
-  // still allowed — this effect only decides whether to open automatically.
+  // The server decides which mode this is (it owns APP_TIMEZONE); the client
+  // only reflects it.
+  const isEvening = digest?.mode === "evening";
+
+  // First thing a user sees on login: auto-open once per slot per account —
+  // once in the morning for the forward-looking briefing, once again after
+  // the evening cutoff for the day's wrap-up. Re-opening manually (via the
+  // header trigger) is still allowed; this effect only decides whether to
+  // open automatically.
   useEffect(() => {
     if (!profile?.id) return;
-    if (!hasSeenToday(profile.id)) {
+    if (!hasSeenSlot(profile.id, currentSlot())) {
       onOpenChange(true);
     }
     // Only re-check on account change, not on every onOpenChange identity
@@ -93,7 +117,11 @@ export function DailyDigestDialog({
     if (!next) {
       stopSpeaking();
       setExchanges([]);
-      if (profile?.id) markSeenToday(profile.id);
+      // Marks the slot the SERVER decided this digest belongs to, not the
+      // browser's own clock — otherwise a user whose machine is in a
+      // different timezone from APP_TIMEZONE could dismiss the evening
+      // briefing and have it immediately re-open as "the morning one".
+      if (profile?.id) markSeenSlot(profile.id, digest?.mode ?? currentSlot());
     }
     onOpenChange(next);
   };
@@ -134,10 +162,14 @@ export function DailyDigestDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4" />
+            {isEvening ? <Moon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
             {digest?.greeting || "Your briefing"}
           </DialogTitle>
-          <DialogDescription>Here's what needs your attention today.</DialogDescription>
+          <DialogDescription>
+            {isEvening
+              ? "Here's how today went, and what's waiting tomorrow."
+              : "Here's what needs your attention today."}
+          </DialogDescription>
         </DialogHeader>
 
         {loading && (
@@ -160,8 +192,33 @@ export function DailyDigestDialog({
           <div className="space-y-4">
             <p className="text-sm leading-relaxed">{digest.narrative}</p>
 
+            {isEvening && (
+              <div className="grid gap-3">
+                <DigestSection
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                  title="Done today"
+                  emptyLabel="No activity logged today."
+                  items={digest.completedToday.map((entry) => entry.label)}
+                />
+                <DigestSection
+                  icon={<CalendarClock className="h-3.5 w-3.5" />}
+                  title="Tomorrow"
+                  emptyLabel="Nothing scheduled to land."
+                  items={digest.tomorrow.map(
+                    (entry) =>
+                      `${entry.title}${
+                        entry.reason === "proposed_completion" ? " (proposed completion)" : " (due)"
+                      }`,
+                  )}
+                />
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2">
-              {digest.pipeline && digest.pipeline.openDealCount > 0 && (
+              {isEvening && digest.completedToday.length > 0 && (
+                <Badge variant="outline">{digest.completedToday.length} logged today</Badge>
+              )}
+              {!isEvening && digest.pipeline && digest.pipeline.openDealCount > 0 && (
                 <Badge variant="outline">
                   {digest.pipeline.openDealCount} open{" "}
                   {digest.pipeline.openDealCount === 1 ? "deal" : "deals"}
@@ -260,5 +317,44 @@ export function DailyDigestDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// A labelled list with an explicit empty state. The empty state matters as
+// much as the list here: "Done today — no activity logged" is the thing the
+// evening briefing's sarcastic narrative is talking about, so leaving the
+// section out entirely would make the joke read as a bug.
+function DigestSection({
+  icon,
+  title,
+  items,
+  emptyLabel,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  items: string[];
+  emptyLabel: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {icon}
+        {title}
+      </div>
+      {items.length === 0 ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <ul className="mt-1.5 space-y-1">
+          {items.slice(0, 6).map((item, index) => (
+            <li key={index} className="text-xs leading-relaxed">
+              {item}
+            </li>
+          ))}
+          {items.length > 6 && (
+            <li className="text-xs text-muted-foreground">+{items.length - 6} more</li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }

@@ -22,7 +22,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { EmptyState, PageHeader, StatTile } from "@/components/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -68,12 +68,14 @@ type ActivityEventRow = {
   created_at: string;
 };
 
+type MetricTone = "neutral" | "brand" | "success" | "warning" | "danger";
+
 type DashboardMetric = {
   id: string;
   label: string;
   value: string;
   hint: string;
-  tone: "default" | "primary" | "success" | "warning" | "info";
+  tone: MetricTone;
 };
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -337,7 +339,7 @@ function DashboardPage() {
             ? `Open opportunities at current DTP · ${pipelineMetric.missingDtpCount} missing DTP`
             : "Open opportunities at current DTP"
           : "Unable to load scoped Pipeline",
-        tone: pipelineMetric ? "primary" : "warning",
+        tone: pipelineMetric ? "brand" : "warning",
       };
 
       // Build metrics based on access level
@@ -362,7 +364,7 @@ function DashboardPage() {
           label: "Customers",
           value: String(regionFilteredCustomerRows.length),
           hint: `${totalFocusAreas} focus areas mapped`,
-          tone: "info",
+          tone: "neutral",
         },
         {
           id: "rewards",
@@ -386,14 +388,14 @@ function DashboardPage() {
           label: "News Posts",
           value: String(newsRows.length),
           hint: "Latest LIVEY updates",
-          tone: "info",
+          tone: "neutral",
         },
         {
           id: "profile",
           label: "Profile Status",
           value: getStatusLabel(status),
           hint: `${getStatusProgress(status)}% complete`,
-          tone: "primary",
+          tone: "brand",
         },
       ];
 
@@ -430,62 +432,59 @@ function DashboardPage() {
   const activityEmpty = activityEvents.length === 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Activity className="h-3 w-3" /> {roleLabel} · Overview
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Welcome back, {profile?.full_name?.split(" ")[0] ?? "Partner"}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Here's what's happening across {profile?.company_name ?? "your workspace"} today.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary" className="gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          {hasRole("super_admin") && (
-            <Button asChild variant="outline" size="sm">
-              <Link to="/admin/news">
-                <Megaphone className="mr-2 h-4 w-4" />
-                Publish news
-              </Link>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setRefreshing(true);
-              void loadDashboard();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow={`${roleLabel} · Overview`}
+        icon={<Activity className="h-3.5 w-3.5" />}
+        title={`Welcome back, ${profile?.full_name?.split(" ")[0] ?? "Partner"}`}
+        description={`Here's what's happening across ${profile?.company_name ?? "your workspace"} today.`}
+        actions={
+          <>
+            <Badge tone={source === "database" ? "success" : "neutral"} className="gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            {hasRole("super_admin") && (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/admin/news">
+                  <Megaphone className="mr-2 h-4 w-4" />
+                  Publish news
+                </Link>
+              </Button>
             )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRefreshing(true);
+                void loadDashboard();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {(access.isPartialApproval || access.isPendingAgreement || access.isSignedPendingReview) && (
-        <Card className="border-amber-500/40 bg-amber-500/5 mb-6">
-          <CardContent className="flex items-center gap-4 p-4">
-            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium">
+        <Card className="border-warning/50">
+          <CardContent className="flex flex-wrap items-center gap-4 p-5">
+            <span className="tint-warning flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-warning-foreground">
+              <AlertCircle className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">
                 {access.isSignedPendingReview
                   ? "Agreement Under Review"
                   : "Partner Agreement Required"}
               </p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">
                 {access.isPartialApproval &&
                   "Your partner profile has been partially approved. Open the agreement page to sign with Zoho Sign."}
                 {access.isPendingAgreement &&
@@ -495,7 +494,7 @@ function DashboardPage() {
               </p>
             </div>
             {!access.isSignedPendingReview && (
-              <Button asChild variant="default">
+              <Button asChild variant="default" size="sm">
                 <Link to="/partner/agreement">{getAgreementCtaLabel(status)}</Link>
               </Button>
             )}
@@ -503,50 +502,69 @@ function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={
+          metrics.length > 3
+            ? "grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5"
+            : "grid grid-cols-2 gap-4 lg:grid-cols-3"
+        }
+      >
         {metrics.length > 0 ? (
-          metrics.map((metric) => (
-            <Kpi
-              key={metric.id}
-              to={getDashboardMetricDestination(metric.id, hasRole("super_admin"))}
-              label={metric.label}
-              value={metric.value}
-              hint={metric.hint}
-              icon={iconForMetric(metric.label)}
-              tone={metric.tone}
-            />
-          ))
+          metrics.map((metric) => {
+            const destination = getDashboardMetricDestination(metric.id, hasRole("super_admin"));
+            const MetricIcon = iconForMetric(metric.label);
+            const tile = (
+              <StatTile
+                label={metric.label}
+                value={metric.value}
+                hint={metric.hint}
+                icon={<MetricIcon className="h-4 w-4" />}
+                tone={metric.tone}
+                className={
+                  destination
+                    ? "h-full transition-colors hover:border-ring/40 hover:bg-secondary/40"
+                    : "h-full"
+                }
+              />
+            );
+
+            return destination ? (
+              <Link key={metric.id} to={destination} className="block">
+                {tile}
+              </Link>
+            ) : (
+              <div key={metric.id}>{tile}</div>
+            );
+          })
         ) : (
-          <Card className="sm:col-span-2 xl:col-span-4">
-            <CardContent className="flex items-center justify-between gap-4 p-5">
-              <div>
-                <div className="text-sm font-medium">No workspace data yet</div>
-                <div className="text-xs text-muted-foreground">
-                  Create partners, customers, or deals to populate the overview.
-                </div>
-              </div>
-              <Badge variant="outline">Empty</Badge>
+          <Card className="col-span-2 lg:col-span-3">
+            <CardContent className="p-0">
+              <EmptyState
+                icon={<Activity className="h-5 w-5" />}
+                title="No workspace data yet"
+                description="Create partners, customers, or deals to populate the overview."
+              />
             </CardContent>
           </Card>
         )}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_360px]">
-        <div className="space-y-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_360px]">
+        <div className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <CardTitle className="text-base">Feed</CardTitle>
+                <CardTitle>Feed</CardTitle>
                 <CardDescription>
                   LIVEY editorial updates and system activity events.
                 </CardDescription>
               </div>
-              <Badge variant="secondary" className="gap-1">
+              <Badge tone="success" className="gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
                 Live
               </Badge>
             </CardHeader>
-            <CardContent className="pt-0">
+            <CardContent>
               <Tabs defaultValue="news">
                 <TabsList className="mb-4">
                   <TabsTrigger value="news">News</TabsTrigger>
@@ -554,10 +572,18 @@ function DashboardPage() {
                 </TabsList>
                 <TabsContent value="news">
                   {feedEmpty ? (
-                    <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                      No news posts yet. LIVEY admins can publish photo updates from the admin news
-                      page.
-                    </div>
+                    <EmptyState
+                      icon={<Megaphone className="h-5 w-5" />}
+                      title="No news posts yet"
+                      description="LIVEY admins can publish photo updates from the admin news page."
+                      action={
+                        hasRole("super_admin") ? (
+                          <Button asChild size="sm">
+                            <Link to="/admin/news">Publish news</Link>
+                          </Button>
+                        ) : undefined
+                      }
+                    />
                   ) : (
                     <ScrollArea className="h-[28rem] pr-4">
                       <div className="space-y-4">
@@ -573,19 +599,21 @@ function DashboardPage() {
                 </TabsContent>
                 <TabsContent value="activity">
                   {activityEmpty ? (
-                    <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                      No activity events yet.
-                    </div>
+                    <EmptyState
+                      icon={<Activity className="h-5 w-5" />}
+                      title="No activity events yet"
+                      description="System events land here as records change across the workspace."
+                    />
                   ) : (
                     <ScrollArea className="h-[28rem] pr-4">
                       <div className="divide-y">
                         {activityEvents.map((event) => (
-                          <div key={event.id} className="flex items-start gap-3 py-3">
-                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                              <Activity className="h-3.5 w-3.5 text-primary" />
+                          <div key={event.id} className="flex items-start gap-3 py-2.5">
+                            <div className="tint-brand mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-primary">
+                              <Activity className="h-3.5 w-3.5" />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium">
+                              <div className="text-[13px] font-medium">
                                 {event.event_name
                                   .replace(/_/g, " ")
                                   .replace(/^./, (c) => c.toUpperCase())}
@@ -605,26 +633,28 @@ function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Partner spotlight</CardTitle>
+            <CardHeader>
+              <CardTitle>Partner spotlight</CardTitle>
               <CardDescription>Active partner records in the live workspace.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className={spotlights.length > 0 ? "space-y-3" : "p-0"}>
               {spotlights.length > 0 ? (
                 spotlights.map((partner) => <SpotlightRow key={partner.id} partner={partner} />)
               ) : (
-                <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                  No partner spotlight rows yet.
-                </div>
+                <EmptyState
+                  icon={<Building2 className="h-5 w-5" />}
+                  title="No partner spotlight rows yet"
+                  description="Approved partner records appear here as they join the workspace."
+                />
               )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-6 xl:sticky xl:top-20 xl:self-start">
+        <div className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Your profile</CardTitle>
+            <CardHeader>
+              <CardTitle>Your profile</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center gap-3">
@@ -652,8 +682,8 @@ function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Quick actions</CardTitle>
+            <CardHeader>
+              <CardTitle>Quick actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {access.canAccessDeals && (
@@ -683,12 +713,12 @@ function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
                 <Clock className="h-4 w-4" /> Getting started
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+            <CardContent className="space-y-2 text-[13px]">
               <Step done label="Create your account" />
               {hasRole("partner_admin") ? (
                 <>
@@ -733,53 +763,17 @@ function DashboardPage() {
   );
 }
 
-function Kpi({
-  to,
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone = "default",
-}: {
-  to?: string | null;
-  label: string;
-  value: string;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: "default" | "primary" | "success" | "warning" | "info";
-}) {
-  const toneClass = {
-    default: "bg-muted text-foreground",
-    primary: "bg-primary/10 text-primary",
-    success: "bg-success/15 text-success",
-    warning: "bg-warning/20 text-warning-foreground",
-    info: "bg-info/15 text-info",
-  }[tone];
-
-  const content = (
-    <Card
-      className={to ? "transition-colors hover:border-primary/40 hover:bg-accent/30" : undefined}
-    >
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {label}
-          </div>
-          <div className={`rounded-md p-1.5 ${toneClass}`}>
-            <Icon className="h-4 w-4" />
-          </div>
-        </div>
-        <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
-      </CardContent>
-    </Card>
-  );
-
-  if (!to) {
-    return content;
-  }
-
-  return <Link to={to}>{content}</Link>;
+function partnerStatusTone(status: string): "neutral" | "success" | "warning" | "danger" {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("approved") && !normalized.includes("partial")) return "success";
+  if (normalized.includes("rejected") || normalized.includes("suspended")) return "danger";
+  if (
+    normalized.includes("pending") ||
+    normalized.includes("partial") ||
+    normalized.includes("review")
+  )
+    return "warning";
+  return "neutral";
 }
 
 function SpotlightRow({ partner }: { partner: PartnerSpotlight }) {
@@ -797,14 +791,16 @@ function SpotlightRow({ partner }: { partner: PartnerSpotlight }) {
             {partner.annual_turnover ?? "Turnover not set"}
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-sm font-medium">{partner.status}</div>
+        <div className="flex flex-col items-end gap-1">
+          <Badge tone={partnerStatusTone(partner.status)} className="capitalize">
+            {partner.status}
+          </Badge>
           <div className="text-xs text-muted-foreground">{formatDateLabel(partner.created_at)}</div>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {(partner.business_focus ?? []).slice(0, 3).map((focus) => (
-          <Badge key={focus} variant="secondary">
+          <Badge key={focus} variant="outline">
             {focus}
           </Badge>
         ))}
@@ -818,7 +814,7 @@ function SpotlightRow({ partner }: { partner: PartnerSpotlight }) {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex items-center justify-between text-[13px]">
       <span className="text-muted-foreground">{label}</span>
       <span className="max-w-[60%] truncate text-right font-medium">{value}</span>
     </div>
@@ -837,13 +833,13 @@ function QuickAction({
   return (
     <Link
       to={to}
-      className="flex items-center justify-between rounded-md border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-accent"
+      className="flex items-center justify-between rounded-md border bg-card px-3 py-2 text-[13px] transition-colors hover:border-ring/40 hover:bg-secondary"
     >
       <span className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-muted-foreground" />
         {label}
       </span>
-      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
     </Link>
   );
 }
@@ -853,7 +849,7 @@ function Step({ label, done }: { label: string; done?: boolean }) {
     <div className="flex items-center gap-2">
       <div
         className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
-          done ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"
+          done ? "bg-success text-success-foreground" : "bg-secondary text-muted-foreground"
         }`}
       >
         {done ? <CheckCircle2 className="h-3 w-3" /> : "•"}
@@ -874,7 +870,12 @@ function iconForMetric(label: string) {
     case "Customers":
       return Users;
     case "Reward points":
+    case "Reward Points":
       return Trophy;
+    case "News Posts":
+      return Megaphone;
+    case "Profile Status":
+      return Building2;
     default:
       return Activity;
   }

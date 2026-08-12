@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -239,57 +240,53 @@ function AdminNewsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">News feed</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Publish updates with optional images. Text-only posts render like a social feed card.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-news"
-            columns={NEWS_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredPosts.map((post) => ({
-                title: post.title,
-                caption: post.caption,
-                image_path: post.image_path,
-                image_alt: post.image_alt,
-                posted_by_name: post.posted_by_name,
-                posted_by_role: post.posted_by_role,
-                created_at: post.created_at,
-                updated_at: post.updated_at,
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="News feed"
+        description="Publish updates with optional images. Text-only posts render like a social feed card."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-news"
+              columns={NEWS_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredPosts.map((post) => ({
+                  title: post.title,
+                  caption: post.caption,
+                  image_path: post.image_path,
+                  image_alt: post.image_alt,
+                  posted_by_name: post.posted_by_name,
+                  posted_by_role: post.posted_by_role,
+                  created_at: post.created_at,
+                  updated_at: post.updated_at,
+                }))
+              }
+              variant="outline"
+            />
+          </>
+        }
+      />
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>

@@ -4,6 +4,7 @@ import { ExternalLink, FileText, Loader2, RefreshCw, Search, Trash2, Upload } fr
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -246,57 +247,52 @@ function DocumentsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" />
-            Workspace
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Onboarding documents</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Manage onboarding compliance files, preview uploads, and remove old records when you
-            need to reset the workspace.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "empty" ? "No documents found" : "Live docs"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-documents"
-            columns={DOC_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredDocs.map((doc) => ({
-                partner_name: partnerById.get(doc.partner_id) ?? doc.partner_id,
-                doc_type: doc.doc_type,
-                file_name: doc.file_name,
-                file_path: doc.file_path,
-                mime_type: doc.mime_type,
-                size_bytes: doc.size_bytes,
-                created_at: doc.created_at,
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<FileText className="h-3.5 w-3.5" />}
+        title="Onboarding documents"
+        description="Manage onboarding compliance files, preview uploads, and remove old records when you need to reset the workspace."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "empty" ? "No documents found" : "Live docs"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-documents"
+              columns={DOC_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredDocs.map((doc) => ({
+                  partner_name: partnerById.get(doc.partner_id) ?? doc.partner_id,
+                  doc_type: doc.doc_type,
+                  file_name: doc.file_name,
+                  file_path: doc.file_path,
+                  mime_type: doc.mime_type,
+                  size_bytes: doc.size_bytes,
+                  created_at: doc.created_at,
+                }))
+              }
+              variant="outline"
+            />
+          </>
+        }
+      />
 
       <div>
         <Card>
@@ -328,9 +324,11 @@ function DocumentsPage() {
                 Loading documents...
               </div>
             ) : filteredDocs.length === 0 ? (
-              <div className="p-8 text-sm text-muted-foreground">
-                No matching documents are available.
-              </div>
+              <EmptyState
+                icon={<FileText className="h-5 w-5" />}
+                title="No matching documents"
+                description="Try clearing the search or filters to see every onboarding document."
+              />
             ) : (
               <div className="divide-y">
                 {filteredDocs.map((doc) => (

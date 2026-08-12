@@ -1,11 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, Download, Loader2, Printer, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import {
+  BarChart3,
+  Download,
+  Handshake,
+  HeartPulse,
+  Loader2,
+  Package,
+  Printer,
+  RefreshCw,
+  Sparkles,
+  TrendingUp,
+  Trophy,
+  Users,
+} from "lucide-react";
 import * as XLSX from "xlsx";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState, PageHeader, StatTile } from "@/components/page-header";
 import { supabase } from "@/integrations/local/client";
 import { buildAnalyticsWorkbook } from "@/lib/analytics-export";
 import { buildExportFilename } from "@/lib/export-files";
@@ -157,11 +171,22 @@ function AnalyticsPage() {
     }));
   }, [deals]);
 
-  const winLossFunnel = useMemo(() => [
-    { label: "Won", count: deals.filter((d) => d.stage === "won").length, color: "bg-emerald-500" },
-    { label: "Lost", count: deals.filter((d) => d.stage === "lost").length, color: "bg-destructive" },
-    { label: "Open", count: totals.open, color: "bg-primary" },
-  ], [deals, totals.open]);
+  const winLossFunnel = useMemo(
+    () => [
+      {
+        label: "Won",
+        count: deals.filter((d) => d.stage === "won").length,
+        color: "bg-success",
+      },
+      {
+        label: "Lost",
+        count: deals.filter((d) => d.stage === "lost").length,
+        color: "bg-destructive",
+      },
+      { label: "Open", count: totals.open, color: "bg-primary" },
+    ],
+    [deals, totals.open],
+  );
 
   const maxWinLoss = Math.max(1, ...winLossFunnel.map((i) => i.count));
 
@@ -213,59 +238,86 @@ function AnalyticsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <BarChart3 className="h-3.5 w-3.5" />
-            Workspace
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<BarChart3 className="h-3.5 w-3.5" />}
+        title="Analytics"
+        description="Review revenue, health, and catalog trends using the live records that power the rest of the portal."
+        actions={
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <Badge tone={source === "database" ? "success" : "neutral"}>
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportExcel()}
+              disabled={loading}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export Excel
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()} disabled={loading}>
+              <Printer className="mr-2 h-4 w-4" />
+              Export PDF
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
           </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Analytics</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Review revenue, health, and catalog trends using the live records that power the rest of
-            the portal.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 print:hidden">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button variant="outline" onClick={() => void exportExcel()} disabled={loading}>
-            <Download className="mr-2 h-4 w-4" />
-            Export Excel
-          </Button>
-          <Button variant="outline" onClick={() => window.print()} disabled={loading}>
-            <Printer className="mr-2 h-4 w-4" />
-            Export PDF
-          </Button>
-          <button
-            className="inline-flex items-center rounded-md border px-3 py-2 text-sm shadow-sm transition hover:bg-muted"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
+        <StatTile
           label="Pipeline value"
           value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
           hint="Current deal rows"
+          icon={<Sparkles className="h-4 w-4" />}
+          tone="brand"
         />
-        <Metric label="Won deals" value={String(totals.won)} hint="Closed opportunities" />
-        <Metric label="Open deals" value={String(totals.open)} hint="Still moving" />
-        <Metric label="Win rate" value={`${totals.winRate}%`} hint="Won vs. Won+Lost" />
-        <Metric label="Avg. health" value={`${totals.avgHealth}%`} hint="Across live customers" />
+        <StatTile
+          label="Won deals"
+          value={String(totals.won)}
+          hint="Closed opportunities"
+          icon={<Trophy className="h-4 w-4" />}
+          tone="success"
+        />
+        <StatTile
+          label="Open deals"
+          value={String(totals.open)}
+          hint="Still moving"
+          icon={<Handshake className="h-4 w-4" />}
+          tone="neutral"
+        />
+        <StatTile
+          label="Win rate"
+          value={`${totals.winRate}%`}
+          hint="Won vs. Won+Lost"
+          icon={<TrendingUp className="h-4 w-4" />}
+          tone="success"
+        />
+        <StatTile
+          label="Avg. health"
+          value={`${totals.avgHealth}%`}
+          hint="Across live customers"
+          icon={<HeartPulse className="h-4 w-4" />}
+          tone="neutral"
+        />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -327,7 +379,7 @@ function AnalyticsPage() {
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-emerald-500"
+                      className="h-full rounded-full bg-success"
                       style={{ width: `${(band.count / maxHealth) * 100}%` }}
                     />
                   </div>
@@ -347,9 +399,11 @@ function AnalyticsPage() {
         </CardHeader>
         <CardContent className="space-y-4 pt-6">
           {deals.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-              No deal records yet.
-            </div>
+            <EmptyState
+              icon={<BarChart3 className="h-5 w-5" />}
+              title="No deal records yet"
+              description="Analytics fill in as deals are registered and move through the pipeline."
+            />
           ) : (
             <div className="grid gap-4 sm:grid-cols-3">
               {winLossFunnel.map((item) => (
@@ -396,7 +450,7 @@ function AnalyticsPage() {
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-amber-500"
+                      className="h-full rounded-full bg-warning"
                       style={{ width: `${(item.count / maxTier) * 100}%` }}
                     />
                   </div>

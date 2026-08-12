@@ -52,6 +52,28 @@ const transitionTaskFn = createServerFn({ method: "POST" })
     });
   });
 
+const setTaskProposedCompletionFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      taskId: string;
+      expectedVersion: number;
+      proposedCompletionAt: string | null;
+      reason?: string | null;
+    }) => input,
+  )
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { setTaskProposedCompletion } = await import("@/server/task-commands.server");
+    return setTaskProposedCompletion({
+      actor: actorResult.actor,
+      taskId: data.taskId,
+      expectedVersion: data.expectedVersion,
+      proposedCompletionAt: data.proposedCompletionAt,
+      reason: data.reason ?? null,
+    });
+  });
+
 export async function createTask(input: CreateTaskInput): Promise<CommandExecutionResult> {
   return createTaskFn({ data: input });
 }
@@ -63,4 +85,13 @@ export async function transitionTask(input: {
   reason?: string | null;
 }): Promise<CommandExecutionResult> {
   return transitionTaskFn({ data: input });
+}
+
+export async function setTaskProposedCompletion(input: {
+  taskId: string;
+  expectedVersion: number;
+  proposedCompletionAt: string | null;
+  reason?: string | null;
+}): Promise<CommandExecutionResult> {
+  return setTaskProposedCompletionFn({ data: input });
 }

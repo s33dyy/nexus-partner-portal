@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -267,47 +268,41 @@ function PartnerPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Building2 className="h-3.5 w-3.5" />
-            Company
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            {partner?.company_name ?? profile?.company_name ?? "Company profile"}
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Keep your partner record, documents, and review status aligned in one place.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/partner/onboarding">
-              <Upload className="mr-2 h-4 w-4" />
-              Continue onboarding
-            </Link>
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Company"
+        icon={<Building2 className="h-3.5 w-3.5" />}
+        title={partner?.company_name ?? profile?.company_name ?? "Company profile"}
+        description="Keep your partner record, documents, and review status aligned in one place."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/partner/onboarding">
+                <Upload className="mr-2 h-4 w-4" />
+                Continue onboarding
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.length > 0 ? (

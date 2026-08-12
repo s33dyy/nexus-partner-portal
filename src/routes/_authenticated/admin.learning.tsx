@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page-header";
+import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -92,23 +94,12 @@ function AdminLearningPage() {
   const [savingSubject, setSavingSubject] = useState(false);
   const [editSubjectId, setEditSubjectId] = useState<string | null>(null);
 
-  if (!hasRole("super_admin")) {
-    return (
-      <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
-        Access restricted to Super Admin.
-      </div>
-    );
-  }
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [trackRes, subjectRes, lessonRes] = await Promise.all([
         supabase.from("learning_tracks").select("*").order("created_at", { ascending: true }),
-        supabase
-          .from("learning_subjects")
-          .select("*")
-          .order("order_index", { ascending: true }),
+        supabase.from("learning_subjects").select("*").order("order_index", { ascending: true }),
         supabase
           .from("learning_lessons")
           .select("id, subject_id, title, content_type, order_index, is_required")
@@ -228,7 +219,7 @@ function AdminLearningPage() {
         title: subjectDraft.title.trim(),
         description: subjectDraft.description.trim() || null,
         order_index: editSubjectId
-          ? subjects.find((s) => s.id === editSubjectId)?.order_index ?? trackSubjects.length
+          ? (subjects.find((s) => s.id === editSubjectId)?.order_index ?? trackSubjects.length)
           : trackSubjects.length,
         updated_at: new Date().toISOString(),
       };
@@ -265,42 +256,56 @@ function AdminLearningPage() {
     ? lessons.filter((l) => l.subject_id === selectedSubject.id)
     : [];
 
+  // Placed AFTER every hook, not before them.
+  //
+  // This early return used to sit between the useState block and the
+  // useCallback/useEffect below it, which is a crash waiting to happen rather
+  // than a lint nit: `hasRole` reads async-loaded auth state, so the first
+  // render (roles still empty) ran 14 hooks and took this branch, and the
+  // render after auth resolved ran 16 — "rendered more hooks than during the
+  // previous render", and the page dies. Every hook now runs on both paths.
+  if (!hasRole("super_admin")) {
+    return (
+      <AccessDeniedPage
+        title="Learning management"
+        roleLabel="Super Admin"
+        description="Content authoring is available to LIVEY super admins only."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <GraduationCap className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Learning management</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Create and manage tracks, subjects, and lessons for the LIVEY Insight Hub.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={openNewTrack}>
-            <Plus className="mr-2 h-4 w-4" />
-            New track
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Administration"
+        icon={<GraduationCap className="h-3.5 w-3.5" />}
+        title="Learning management"
+        description="Create and manage tracks, subjects, and lessons for the LIVEY Insight Hub."
+        actions={
+          <>
+            <Button onClick={openNewTrack}>
+              <Plus className="mr-2 h-4 w-4" />
+              New track
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr_0.8fr]">
         {/* Tracks column */}
@@ -417,7 +422,9 @@ function AdminLearningPage() {
           </CardHeader>
           <CardContent className="p-0">
             {!selectedTrackId ? (
-              <div className="p-6 text-sm text-muted-foreground">Select a track to see its subjects.</div>
+              <div className="p-6 text-sm text-muted-foreground">
+                Select a track to see its subjects.
+              </div>
             ) : trackSubjects.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">No subjects yet.</div>
             ) : (
@@ -483,18 +490,29 @@ function AdminLearningPage() {
           </CardHeader>
           <CardContent className="p-0">
             {!selectedSubjectId ? (
-              <div className="p-6 text-sm text-muted-foreground">Select a subject to see its lessons.</div>
+              <div className="p-6 text-sm text-muted-foreground">
+                Select a subject to see its lessons.
+              </div>
             ) : subjectLessons.length === 0 ? (
-              <div className="p-6 text-sm text-muted-foreground">No lessons yet in this subject.</div>
+              <div className="p-6 text-sm text-muted-foreground">
+                No lessons yet in this subject.
+              </div>
             ) : (
               <div className="divide-y">
                 {subjectLessons.map((lesson) => (
-                  <div key={lesson.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div
+                    key={lesson.id}
+                    className="flex items-center justify-between gap-3 px-5 py-3"
+                  >
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{lesson.title}</div>
                       <div className="flex gap-2 text-xs text-muted-foreground">
                         <span className="capitalize">{lesson.content_type.replace(/_/g, " ")}</span>
-                        {lesson.is_required && <Badge variant="outline" className="text-[10px] h-4">Required</Badge>}
+                        {lesson.is_required && (
+                          <Badge variant="outline" className="text-[10px] h-4">
+                            Required
+                          </Badge>
+                        )}
                       </div>
                     </div>
                     <span className="shrink-0 text-xs text-muted-foreground">
@@ -583,9 +601,7 @@ function AdminLearningPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editSubjectId ? "Edit subject" : "New subject"}</DialogTitle>
-            <DialogDescription>
-              Subjects group related lessons within a track.
-            </DialogDescription>
+            <DialogDescription>Subjects group related lessons within a track.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">

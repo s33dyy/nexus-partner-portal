@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Loader2, ShieldQuestion } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader, Toolbar } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   FEATURE_KEYS,
   FEATURE_LABELS,
@@ -136,88 +145,91 @@ function AdminRolesPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-          <ShieldQuestion className="h-3.5 w-3.5" />
-          Administration
-        </div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Role permissions</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Choose a role and set what it can Create/Read/Update/Delete per feature. Changes take
-          effect immediately for every active user on that role. Region access is set per user — see
-          a user's own record in Users &amp; roles.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Label htmlFor="role-select" className="text-sm">
-          Selected role
-        </Label>
-        <Select value={selectedRole} onValueChange={(value) => setSelectedRole(value as RoleKey)}>
-          <SelectTrigger id="role-select" className="w-64">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ROLE_KEYS.map((role) => (
-              <SelectItem key={role} value={role}>
-                {ROLE_KEY_LABELS[role]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldQuestion className="h-3.5 w-3.5" />}
+        title="Role permissions"
+        description={
+          <>
+            Choose a role and set what it can Create/Read/Update/Delete per feature. Changes take
+            effect immediately for every active user on that role. Region access is set per user —
+            see a user's own record in Users &amp; roles.
+          </>
+        }
+        actions={
+          <Button onClick={() => void save()} disabled={saving || loading}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save {ROLE_KEY_LABELS[selectedRole]} permissions
+          </Button>
+        }
+      />
 
       <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="text-base">Feature access</CardTitle>
-          <CardDescription>
-            Create, Read, Update, and Delete permission per feature for{" "}
-            {ROLE_KEY_LABELS[selectedRole]}.
-          </CardDescription>
+        <CardHeader className="space-y-4 border-b">
+          <div className="space-y-1">
+            <CardTitle>Feature access</CardTitle>
+            <CardDescription>
+              Create, Read, Update, and Delete permission per feature for{" "}
+              {ROLE_KEY_LABELS[selectedRole]}.
+            </CardDescription>
+          </div>
+          <Toolbar>
+            <Label htmlFor="role-select" className="text-xs font-medium">
+              Selected role
+            </Label>
+            <Select
+              value={selectedRole}
+              onValueChange={(value) => setSelectedRole(value as RoleKey)}
+            >
+              <SelectTrigger id="role-select" className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_KEYS.map((role) => (
+                  <SelectItem key={role} value={role}>
+                    {ROLE_KEY_LABELS[role]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          </Toolbar>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/30 text-left">
-                  <th className="px-4 py-2 font-medium">Feature</th>
-                  {CRUD_OPERATIONS.map((operation) => (
-                    <th key={operation} className="px-4 py-2 text-center font-medium">
-                      {CRUD_LABELS[operation]}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {FEATURE_KEYS.map((feature) => (
-                  <tr key={feature} className="border-b last:border-0">
-                    <td className="px-4 py-2.5">{FEATURE_LABELS[feature]}</td>
-                    {CRUD_OPERATIONS.map((operation) => (
-                      <td key={operation} className="px-4 py-2.5 text-center">
-                        <Checkbox
-                          checked={draftCapabilities[feature]?.[operation] ?? false}
-                          onCheckedChange={(value) =>
-                            setCapability(feature, operation, value === true)
-                          }
-                        />
-                      </td>
-                    ))}
-                  </tr>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Feature</TableHead>
+                {CRUD_OPERATIONS.map((operation) => (
+                  <TableHead key={operation} className="w-24 text-center">
+                    {CRUD_LABELS[operation]}
+                  </TableHead>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {FEATURE_KEYS.map((feature) => (
+                <TableRow key={feature}>
+                  <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+                  {CRUD_OPERATIONS.map((operation) => (
+                    <TableCell key={operation} className="text-center">
+                      <Checkbox
+                        className="mx-auto"
+                        aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
+                        checked={draftCapabilities[feature]?.[operation] ?? false}
+                        onCheckedChange={(value) =>
+                          setCapability(feature, operation, value === true)
+                        }
+                      />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
-
-      <div className="flex justify-end">
-        <Button onClick={() => void save()} disabled={saving || loading}>
-          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          Save {ROLE_KEY_LABELS[selectedRole]} permissions
-        </Button>
-      </div>
     </div>
   );
 }

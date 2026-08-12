@@ -1,4 +1,17 @@
-import { createHash } from "node:crypto";
+// This module must stay free of node: builtins.
+//
+// It is reachable from the CLIENT graph — every integrations/local/*-commands.ts
+// does `await import("@/domain/contracts/telemetry")` inside actorDenialResult,
+// which sits in the module body rather than inside a createServerFn handler, so
+// TanStack Start does not strip it. A single `import { createHash } from
+// "node:crypto"` at the top of this file therefore made Vite serve a
+// browser-externalized stub to the client, and EVERY route in the app died at
+// the error boundary in `bun run dev` with:
+//   Module "node:crypto" has been externalized for browser compatibility
+// The production build was unaffected (it bundles for the server), which is why
+// this went unnoticed. createEventHash — the only thing here that needed
+// node:crypto, and which had zero callers — now lives in
+// src/server/event-hash.server.ts.
 
 export const CORRELATION_ID_HEADER = "x-correlation-id";
 
@@ -59,8 +72,4 @@ export function redactLogValue(value: unknown): unknown {
   }
 
   return clone;
-}
-
-export function createEventHash(payload: unknown) {
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }

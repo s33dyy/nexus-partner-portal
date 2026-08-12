@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  DollarSign,
   Download,
   FileSpreadsheet,
   Loader2,
+  Percent,
   Plus,
   RefreshCw,
   Search,
@@ -25,11 +27,13 @@ import { DealRegistrationBadge } from "@/components/deal-registration-badge";
 import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { DealParticipantTags } from "@/components/deal-participant-tags";
 import { DealActivityTimeline } from "@/components/deal-activity-timeline";
+import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
+import { FormDialog } from "@/components/ui/form-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -50,6 +54,7 @@ import {
   markDealWon,
   moveDealStageBackward,
   moveDealStageForward,
+  setDealProposedCompletion,
 } from "@/integrations/local/deal-commands";
 import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -121,6 +126,7 @@ type DealForm = {
   fx_rate_fetched_at: string | null;
   customer_budget: string;
   possible_close_date: string;
+  proposed_completion_date: string;
   probability: number;
   close_date: string;
   source: string;
@@ -147,6 +153,7 @@ type DealEditForm = {
   fx_rate_fetched_at: string | null;
   customer_budget: string;
   possible_close_date: string;
+  proposed_completion_date: string;
   probability: number;
   source: string;
   notes: string;
@@ -175,6 +182,7 @@ const EMPTY_FORM: DealForm = {
   fx_rate_fetched_at: null,
   customer_budget: "",
   possible_close_date: "",
+  proposed_completion_date: "",
   probability: 25,
   close_date: "",
   source: "Partner referral",
@@ -235,6 +243,7 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     fx_rate_fetched_at: deal.fx_rate_fetched_at ?? null,
     customer_budget: deal.customer_budget ?? "",
     possible_close_date: toDateInputValue(deal.possible_close_date),
+    proposed_completion_date: toDateInputValue(deal.proposed_completion_date),
     probability: normalizeDealProbability(deal.probability),
     source: deal.source,
     notes: deal.notes,
@@ -279,6 +288,23 @@ const DEAL_STATUS_FILTER_OPTIONS = [
   "lost",
 ] as const satisfies readonly DealListStatusFilter[];
 
+type BadgeTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger";
+
+// A stage pill is a STATE, not a label, so it carries meaning: the early
+// discovery stages read as informational, the committed mid-funnel stages as
+// brand, the last live stage as "needs attention", and the two terminal
+// stages as success/danger.
+const DEAL_STAGE_TONE: Record<DealStage, BadgeTone> = {
+  sourced: "neutral",
+  demo: "info",
+  testing: "info",
+  qualified: "brand",
+  proposal: "brand",
+  negotiation: "warning",
+  won: "success",
+  lost: "danger",
+};
+
 const dealSearchSchema = z.object({
   q: z.string().optional(),
   stage: z.enum(["all", ...DEAL_STAGE_ORDER]).optional(),
@@ -303,6 +329,7 @@ function DealsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<DealForm>(EMPTY_FORM);
   const [draftCollaborators, setDraftCollaborators] = useState<DealCollaboratorDraft[]>([]);
@@ -845,6 +872,8 @@ function DealsPage() {
         label: "Pipeline",
         value: formatUsdAmount(pipeline),
         hint: "Current USD-equivalent opportunity value",
+        icon: <DollarSign className="h-4 w-4" />,
+        tone: "brand" as const,
         status: "open" as const,
         stage: "all" as const,
       },
@@ -852,6 +881,8 @@ function DealsPage() {
         label: "Open deals",
         value: String(open),
         hint: "Across all active stages",
+        icon: <Target className="h-4 w-4" />,
+        tone: "neutral" as const,
         status: "open" as const,
         stage: "all" as const,
       },
@@ -859,6 +890,8 @@ function DealsPage() {
         label: "Won deals",
         value: String(won),
         hint: "Closed this cycle",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        tone: "success" as const,
         status: "won" as const,
         stage: "won" as const,
       },
@@ -866,6 +899,8 @@ function DealsPage() {
         label: "Avg. probability",
         value: `${avgProbability}%`,
         hint: "Current weighted mix",
+        icon: <Percent className="h-4 w-4" />,
+        tone: "neutral" as const,
         status: "open" as const,
         stage: "all" as const,
       },
@@ -1328,6 +1363,7 @@ function DealsPage() {
         amountUsd: resolvedAmountUsd,
         customerBudget: draft.customer_budget.trim() || null,
         possibleCloseDate: draft.possible_close_date || null,
+        proposedCompletionDate: draft.proposed_completion_date || null,
         closeDate: draft.possible_close_date || draft.close_date || null,
         source: draft.source || "manual",
         notes: draft.notes || null,
@@ -1445,6 +1481,20 @@ function DealsPage() {
         })
         .eq("id", selectedDeal.id);
       if (error) throw error;
+
+      const nextProposed = selectedDealDraft.proposed_completion_date || null;
+      if (nextProposed !== (toDateInputValue(selectedDeal.proposed_completion_date) || null)) {
+        const result = await setDealProposedCompletion({
+          dealId: selectedDeal.id,
+          expectedVersion: selectedDeal.version,
+          proposedCompletionDate: nextProposed,
+        });
+        if (!result.ok) {
+          toast.error(result.failure.message);
+          return;
+        }
+      }
+
       if (!selectedDealCollaboratorEditingLocked) {
         await persistCollaboratorsSafely(selectedDeal.id, selectedDealCollaborators);
       }
@@ -1659,76 +1709,101 @@ function DealsPage() {
   const selectedIndex = filteredDeals.findIndex((deal) => deal.id === selectedId);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Target className="h-3.5 w-3.5" />
-            Workspace
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Deals</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Register opportunities, move them through the pipeline, and keep every deal tied to a
-            real next step.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-deals"
-            columns={DEAL_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredDeals.map((deal) => ({
-                account_name: deal.account_name,
-                contact_name: deal.contact_name,
-                owner_name: deal.owner_name,
-                country: deal.country,
-                region: deal.region,
-                product: deal.product,
-                stage: deal.stage,
-                status: deal.status,
-                quantity: deal.quantity,
-                amount: deal.amount,
-                currency_code: deal.currency_code,
-                amount_usd: deal.amount_usd,
-                customer_budget: deal.customer_budget,
-                possible_close_date: deal.possible_close_date,
-                close_date: deal.close_date,
-                source: deal.source,
-                last_touch: deal.last_touch,
-                notes: deal.notes,
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<Target className="h-3.5 w-3.5" />}
+        title="Deals"
+        description="Register opportunities, move them through the pipeline, and keep every deal tied to a real next step."
+        actions={
+          <>
+            <Badge tone="neutral">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-deals"
+              columns={DEAL_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredDeals.map((deal) => ({
+                  account_name: deal.account_name,
+                  contact_name: deal.contact_name,
+                  owner_name: deal.owner_name,
+                  country: deal.country,
+                  region: deal.region,
+                  product: deal.product,
+                  stage: deal.stage,
+                  status: deal.status,
+                  quantity: deal.quantity,
+                  amount: deal.amount,
+                  currency_code: deal.currency_code,
+                  amount_usd: deal.amount_usd,
+                  customer_budget: deal.customer_budget,
+                  possible_close_date: deal.possible_close_date,
+                  close_date: deal.close_date,
+                  source: deal.source,
+                  last_touch: deal.last_touch,
+                  notes: deal.notes,
+                }))
+              }
+              variant="outline"
+            />
+            <Button type="button" variant="outline" onClick={downloadImportTemplate}>
+              <Download className="mr-2 h-4 w-4" />
+              Download template
+            </Button>
+            <Button asChild type="button" variant="outline" disabled={importing}>
+              <label htmlFor="deal-import-file">
+                {importing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                Import CSV/XLSX
+              </label>
+            </Button>
+            <input
+              id="deal-import-file"
+              type="file"
+              accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => void handleImportFile(event)}
+            />
+            {canCreateDeals ? (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> New deal
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <ImportFeedback successMessage={importMessage} errors={importErrors} />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {kpis.map((kpi) => (
-          <MetricCard
+          <StatTile
             key={kpi.label}
             label={kpi.label}
             value={kpi.value}
             hint={kpi.hint}
+            icon={kpi.icon}
+            tone={kpi.tone}
             onClick={() =>
               updateListFilters({
                 q: "",
@@ -1740,855 +1815,518 @@ function DealsPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.45fr_0.9fr]">
-        <Card className="h-fit">
-          <CardHeader className="space-y-4 border-b pb-5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-base">Pipeline queue</CardTitle>
-                <CardDescription>
-                  Search live deals, filter by status, or jump in from the KPI cards above.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <LookupCombobox
-                  fieldName={LOOKUP_FIELDS.dealStage}
-                  label="Stage"
-                  value={stageFilter === "all" ? "" : stageFilter}
-                  onValueChange={(value) =>
-                    updateListFilters({ stage: (value || "all") as DealStage | "all" })
-                  }
-                  placeholder="All stages"
-                  clearLabel="All stages"
-                  allowClear
-                  options={DEAL_STAGE_ORDER.map((stage) => stage)}
-                  triggerClassName="w-44"
-                />
-                <LookupCombobox
-                  fieldName="deal.status_filter"
-                  label="Status"
-                  value={statusFilter === "all" ? "" : statusFilter}
-                  onValueChange={(value) =>
-                    updateListFilters({ status: (value || "all") as DealListStatusFilter })
-                  }
-                  placeholder="All statuses"
-                  clearLabel="All statuses"
-                  allowClear
-                  allowCreate={false}
-                  options={DEAL_STATUS_FILTER_OPTIONS.filter((option) => option !== "all")}
-                  triggerClassName="w-44"
-                />
-              </div>
+      <Card>
+        <CardHeader className="space-y-3 border-b">
+          <div className="space-y-1">
+            <CardTitle>Pipeline queue</CardTitle>
+            <CardDescription>
+              Search live deals, filter by status, or jump in from the KPI cards above.
+            </CardDescription>
+          </div>
+          <Toolbar>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealStage}
+              label="Stage"
+              value={stageFilter === "all" ? "" : stageFilter}
+              onValueChange={(value) =>
+                updateListFilters({ stage: (value || "all") as DealStage | "all" })
+              }
+              placeholder="All stages"
+              clearLabel="All stages"
+              allowClear
+              options={DEAL_STAGE_ORDER.map((stage) => stage)}
+              triggerClassName="w-44"
+            />
+            <LookupCombobox
+              fieldName="deal.status_filter"
+              label="Status"
+              value={statusFilter === "all" ? "" : statusFilter}
+              onValueChange={(value) =>
+                updateListFilters({ status: (value || "all") as DealListStatusFilter })
+              }
+              placeholder="All statuses"
+              clearLabel="All statuses"
+              allowClear
+              allowCreate={false}
+              options={DEAL_STATUS_FILTER_OPTIONS.filter((option) => option !== "all")}
+              triggerClassName="w-44"
+            />
+          </Toolbar>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading deals...
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading deals...
+          ) : filteredDeals.length === 0 ? (
+            <EmptyState
+              icon={<Search className="h-5 w-5" />}
+              title="No deals match this view."
+              description="Try a different filter, or create a new deal using the form below."
+              action={
+                canCreateDeals ? (
+                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> New deal
+                  </Button>
+                ) : null
+              }
+            />
+          ) : (
+            <div className="divide-y">
+              {filteredDeals.map((deal) => (
+                <button
+                  key={deal.id}
+                  onClick={() => {
+                    setSelectedId(deal.id);
+                    setNote(deal.notes);
+                    setSelectedDealEditing(false);
+                    setSelectedDealOpen(true);
+                  }}
+                  className={`flex w-full flex-col gap-1 px-5 py-3 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
+                    selectedDeal?.id === deal.id ? "bg-muted/40" : ""
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-sm font-medium">{deal.account_name}</div>
+                      <Badge tone={DEAL_STAGE_TONE[deal.stage]}>{deal.stage}</Badge>
+                    </div>
+                    <div className="mt-0.5 text-[13px] text-muted-foreground">
+                      {deal.contact_name} · {deal.owner_name} · {deal.region}
+                    </div>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <div className="text-sm font-medium" data-numeric>
+                      {deal.amount}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatDealProbability(deal.probability)} · closes{" "}
+                      {formatDateLabel(deal.close_date)}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={selectedDealOpen} onOpenChange={setSelectedDealOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <DialogTitle>
+                  {selectedDeal ? `Focused on ${selectedDeal.account_name}` : "Selected deal"}
+                </DialogTitle>
+                <DialogDescription>
+                  Inspect and advance the selected opportunity without expanding the page.
+                </DialogDescription>
               </div>
-            ) : filteredDeals.length === 0 ? (
-              <div className="space-y-3 p-8 text-sm text-muted-foreground">
-                <div className="font-medium text-foreground">No deals match this view.</div>
-                <div>Try a different filter, or create a new deal using the form below.</div>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {filteredDeals.map((deal) => (
-                  <button
-                    key={deal.id}
-                    onClick={() => {
-                      setSelectedId(deal.id);
-                      setNote(deal.notes);
+              {selectedDeal && canEditSelectedDeal ? (
+                <Button
+                  variant={selectedDealEditing ? "outline" : "secondary"}
+                  size="sm"
+                  onClick={() => {
+                    if (!selectedDealDraft) return;
+                    if (selectedDealEditing) {
+                      setSelectedDealDraft(dealToEditForm(selectedDeal));
+                      setSelectedDealCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
                       setSelectedDealEditing(false);
-                      setSelectedDealOpen(true);
-                    }}
-                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
-                      selectedDeal?.id === deal.id ? "bg-muted/40" : ""
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate font-medium">{deal.account_name}</div>
-                        <Badge variant="outline">{deal.stage}</Badge>
-                      </div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {deal.contact_name} · {deal.owner_name} · {deal.region}
-                      </div>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <div className="font-medium">{deal.amount}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatDealProbability(deal.probability)} · closes{" "}
-                        {formatDateLabel(deal.close_date)}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <CardTitle className="text-base">Create deal</CardTitle>
-                  <CardDescription>
-                    Add a new live opportunity or import a validated workbook.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <Button type="button" variant="outline" onClick={downloadImportTemplate}>
-                    <Download className="mr-2 h-4 w-4" />
-                    Download template
-                  </Button>
-                  <Button asChild type="button" variant="outline" disabled={importing}>
-                    <label htmlFor="deal-import-file">
-                      {importing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Upload className="mr-2 h-4 w-4" />
-                      )}
-                      Import CSV/XLSX
-                    </label>
-                  </Button>
-                  <input
-                    id="deal-import-file"
-                    type="file"
-                    accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    className="hidden"
-                    onChange={(event) => void handleImportFile(event)}
-                  />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <ImportFeedback successMessage={importMessage} errors={importErrors} />
-              <div className="grid gap-3 md:grid-cols-2">
-                {(hasRole("super_admin") || hasRole("partner_admin")) && (
-                  <div className="space-y-2">
-                    <Label htmlFor="account_name">Account</Label>
-                    <LookupCombobox
-                      fieldName={LOOKUP_FIELDS.dealAccount}
-                      source="account"
-                      label="Account"
-                      value={draft.account_name}
-                      onValueChange={(value) =>
-                        setDraft((current) => ({ ...current, account_name: value }))
-                      }
-                      onSelectionChange={(selection) =>
-                        setDraft((current) => ({
-                          ...current,
-                          partner_id: selection?.id ?? null,
-                          account_name: selection?.label ?? current.account_name,
-                        }))
-                      }
-                      placeholder="Select or create account"
-                      allowCreate={false}
-                    />
-                  </div>
-                )}
-                {hasRole("partner_user") && (
-                  <div className="space-y-2">
-                    <Label htmlFor="account_name">Account</Label>
-                    <Input
-                      value={profile?.full_name ?? draft.account_name}
-                      readOnly
-                      placeholder="Auto-selected account"
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="contact_name">Client</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealContact}
-                    source="client"
-                    label="Client"
-                    value={draft.contact_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, contact_name: value }))
+                      return;
                     }
-                    onSelectionChange={(selection) =>
-                      setDraft((current) => ({
-                        ...current,
-                        customer_id: selection?.id ?? null,
-                        contact_name: selection?.label ?? current.contact_name,
-                      }))
-                    }
-                    onCreateRequest={(value) => {
-                      setClientCreateSeed(value);
-                      setClientCreateOpen(true);
-                    }}
-                    placeholder="Select or create client"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="owner_name">POC</Label>
-                  {hasRole("super_admin") ? (
-                    <LookupCombobox
-                      fieldName={LOOKUP_FIELDS.dealOwner}
-                      source="poc"
-                      label="POC"
-                      value={draft.owner_name}
-                      onValueChange={(value) =>
-                        setDraft((current) => ({ ...current, owner_name: value }))
-                      }
-                      onSelectionChange={(selection) =>
-                        setDraft((current) => ({
-                          ...current,
-                          poc_profile_id: selection?.id ?? null,
-                          owner_name: selection?.label ?? current.owner_name,
-                        }))
-                      }
-                      placeholder="Select POC"
-                      allowCreate={false}
-                    />
-                  ) : hasRole("partner_admin") ? (
-                    <Input value={profile?.full_name ?? draft.owner_name} readOnly />
-                  ) : (
-                    <Input
-                      value={partnerAdminName ?? draft.owner_name}
-                      readOnly
-                      placeholder="Auto-selected POC"
-                    />
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="country">Country</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.countryCode}
-                    label="Country"
-                    value={draft.country}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({
-                        ...current,
-                        country: value,
-                        region: current.country === value ? current.region : "",
-                      }))
-                    }
-                    placeholder="Select a country"
-                    options={editOptions.countries}
-                    allowCreate={false}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="region">Region</Label>
-                  <LookupCombobox
-                    fieldName={dealRegionLookupField(draft.country)}
-                    label="Region"
-                    value={draft.region}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, region: value }))
-                    }
-                    placeholder={
-                      draft.country === "India"
-                        ? "Select an Indian region"
-                        : "Select or create region"
-                    }
-                    options={regionOptions}
-                  />
-                </div>
-              </div>
-              {hasRole("partner_user") && (
-                <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  Account and POC are assigned automatically for partner users.
-                </div>
-              )}
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="product">Product</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogProduct}
-                    label="Product"
-                    value={draft.product}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, product: value }))
-                    }
-                    placeholder="Select or create product or combo"
-                    source="catalog"
-                    catalogKind="all"
-                    allowCreate={hasRole("super_admin")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantity</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={1}
-                    value={draft.quantity}
-                    onChange={(e) =>
-                      setDraft((current) => ({
-                        ...current,
-                        quantity: Number(e.target.value) || 1,
-                      }))
-                    }
-                    placeholder="1"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Amount</Label>
-                  <Input
-                    id="amount"
-                    value={draft.amount}
-                    onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
-                    placeholder="$9,200"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="currency_code">Currency</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealSource}
-                    label="Currency"
-                    value={draft.currency_code}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, currency_code: value || "USD" }))
-                    }
-                    options={[...DEAL_CURRENCY_OPTIONS]}
-                    allowCreate={false}
-                  />
-                </div>
-              </div>
-              {draft.currency_code !== "USD" ? (
-                <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                  <div className="font-medium">USD equivalent</div>
-                  <div className="mt-1 text-muted-foreground">
-                    {convertingCurrency
-                      ? "Fetching the latest FX rate..."
-                      : currencyPreviewError
-                        ? currencyPreviewError
-                        : draft.amount_usd
-                          ? `${formatUsdAmount(draft.amount_usd)} via ${draft.fx_provider ?? "provider"}`
-                          : "Enter a valid amount to preview the USD equivalent."}
-                  </div>
-                </div>
-              ) : null}
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="stage">Stage</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealStage}
-                    label="Stage"
-                    value={draft.stage}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, stage: value as DealStage }))
-                    }
-                    placeholder="Select or create stage"
-                    options={DEAL_STAGE_ORDER.map((stage) => stage)}
-                    allowCreate={false}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="probability">Probability</Label>
-                  <DealProbabilitySelect
-                    value={draft.probability}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, probability: value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="customer_budget">Customer budget</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealCustomerBudget}
-                    label="Customer budget"
-                    value={draft.customer_budget}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, customer_budget: value }))
-                    }
-                    placeholder="Select or create budget"
-                    options={editOptions.budgets}
-                    allowCreate={hasRole("super_admin")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="possible_close_date">Possible close date</Label>
-                  <Input
-                    id="possible_close_date"
-                    type="date"
-                    value={draft.possible_close_date}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, possible_close_date: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="source">Source</Label>
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.dealSource}
-                    label="Source"
-                    value={draft.source}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, source: value }))
-                    }
-                    placeholder="Select or create source"
-                    options={editOptions.sources}
-                    allowCreate={hasRole("super_admin")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="close_date">Close date</Label>
-                  <Input
-                    id="close_date"
-                    value={draft.close_date}
-                    disabled
-                    placeholder="Auto-set on closure"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={draft.notes}
-                  onChange={(e) => setDraft((value) => ({ ...value, notes: e.target.value }))}
-                  placeholder="Why this deal matters..."
-                />
-              </div>
-              <DealCollaboratorEditor
-                title="Collaborators"
-                collaborators={draftCollaborators}
-                availableMembers={teamMembers}
-                excludeUserId={profile?.id ?? null}
-                hiddenToTeam={draft.is_hidden_to_team}
-                rewardRatePercent={draft.reward_rate_percent}
-                showRewardRate
-                allowEditRewardRate={hasRole("super_admin")}
-                disabled={creating}
-                onCollaboratorsChange={setDraftCollaborators}
-                onHiddenToTeamChange={(hidden) =>
-                  setDraft((current) => ({ ...current, is_hidden_to_team: hidden }))
-                }
-                onRewardRateChange={(percent) =>
-                  setDraft((current) => ({ ...current, reward_rate_percent: percent }))
-                }
-              />
-              {canCreateDeals ? (
-                <Button onClick={() => void createDeal()} disabled={creating}>
-                  {creating ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 h-4 w-4" />
-                  )}
-                  Create deal
+                    setSelectedDealEditing(true);
+                  }}
+                >
+                  {selectedDealEditing ? "Cancel edit" : "Edit details"}
                 </Button>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Your role doesn't have permission to create deals.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Dialog open={selectedDealOpen} onOpenChange={setSelectedDealOpen}>
-            <DialogContent className="sm:max-w-3xl">
-              <DialogHeader>
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <DialogTitle>
-                      {selectedDeal ? `Focused on ${selectedDeal.account_name}` : "Selected deal"}
-                    </DialogTitle>
-                    <DialogDescription>
-                      Inspect and advance the selected opportunity without expanding the page.
-                    </DialogDescription>
-                  </div>
-                  {selectedDeal && canEditSelectedDeal ? (
-                    <Button
-                      variant={selectedDealEditing ? "outline" : "secondary"}
-                      size="sm"
-                      onClick={() => {
-                        if (!selectedDealDraft) return;
-                        if (selectedDealEditing) {
-                          setSelectedDealDraft(dealToEditForm(selectedDeal));
-                          setSelectedDealCollaborators(
-                            collaboratorsByDealId[selectedDeal.id] ?? [],
-                          );
-                          setSelectedDealEditing(false);
-                          return;
-                        }
-                        setSelectedDealEditing(true);
-                      }}
-                    >
-                      {selectedDealEditing ? "Cancel edit" : "Edit details"}
-                    </Button>
+              ) : null}
+            </div>
+          </DialogHeader>
+          <div className="space-y-4">
+            {selectedDeal ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DealRegistrationBadge
+                    dealId={selectedDeal.id}
+                    status={selectedDeal.status}
+                    commercialApproved={selectedDeal.commercial_approved}
+                    onUpdated={load}
+                  />
+                  <Badge tone={DEAL_STAGE_TONE[selectedDeal.stage]}>{selectedDeal.stage}</Badge>
+                  <Badge variant="outline">{selectedDeal.amount}</Badge>
+                  <Badge variant="outline">{selectedDeal.currency_code || "USD"}</Badge>
+                  {selectedDeal.customer_budget ? (
+                    <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
                   ) : null}
                 </div>
-              </DialogHeader>
-              <div className="space-y-4">
-                {selectedDeal ? (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DealRegistrationBadge
-                        dealId={selectedDeal.id}
-                        status={selectedDeal.status}
-                        commercialApproved={selectedDeal.commercial_approved}
-                        onUpdated={load}
+                {selectedDealEditing && selectedDealDraft ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label="Account">
+                      <Input
+                        value={selectedDealDraft.account_name}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, account_name: e.target.value } : current,
+                          )
+                        }
                       />
-                      <Badge>{selectedDeal.stage}</Badge>
-                      <Badge variant="secondary">{selectedDeal.amount}</Badge>
-                      <Badge variant="outline">{selectedDeal.currency_code || "USD"}</Badge>
-                      {selectedDeal.customer_budget ? (
-                        <Badge variant="outline">{selectedDeal.customer_budget}</Badge>
-                      ) : null}
+                    </Field>
+                    <Field label="Client">
+                      <Input
+                        value={selectedDealDraft.contact_name}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, contact_name: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Owner">
+                      <Input
+                        value={selectedDealDraft.owner_name}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, owner_name: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Country">
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.countryCode}
+                        label="Country"
+                        value={selectedDealDraft.country}
+                        onValueChange={(value) =>
+                          setSelectedDealDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  country: value,
+                                  region: current.country === value ? current.region : "",
+                                }
+                              : current,
+                          )
+                        }
+                        placeholder="Select a country"
+                        allowCreate={false}
+                      />
+                    </Field>
+                    <Field label="Region">
+                      <LookupCombobox
+                        fieldName={dealRegionLookupField(selectedDealDraft.country)}
+                        label="Region"
+                        value={selectedDealDraft.region}
+                        onValueChange={(value) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, region: value } : current,
+                          )
+                        }
+                        placeholder={
+                          selectedDealDraft.country === "India"
+                            ? "Select an Indian region"
+                            : "Select or create region"
+                        }
+                      />
+                    </Field>
+                    <Field label="Product">
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.catalogProduct}
+                        label="Product"
+                        value={selectedDealDraft.product}
+                        onValueChange={(value) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, product: value } : current,
+                          )
+                        }
+                        placeholder="Select or create product or combo"
+                        source="catalog"
+                        catalogKind="all"
+                        allowCreate={hasRole("super_admin")}
+                      />
+                    </Field>
+                    <Field label="Quantity">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={selectedDealDraft.quantity}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current
+                              ? { ...current, quantity: Number(e.target.value) || 1 }
+                              : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Amount">
+                      <Input
+                        value={selectedDealDraft.amount}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, amount: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Currency">
+                      <LookupCombobox
+                        fieldName={LOOKUP_FIELDS.dealSource}
+                        label="Currency"
+                        value={selectedDealDraft.currency_code}
+                        onValueChange={(value) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, currency_code: value || "USD" } : current,
+                          )
+                        }
+                        options={[...DEAL_CURRENCY_OPTIONS]}
+                        allowCreate={false}
+                      />
+                    </Field>
+                    <Field label="Customer budget">
+                      <Input
+                        value={selectedDealDraft.customer_budget}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, customer_budget: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Possible close date">
+                      <Input
+                        type="date"
+                        value={selectedDealDraft.possible_close_date}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, possible_close_date: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Proposed completion date">
+                      <Input
+                        type="date"
+                        value={selectedDealDraft.proposed_completion_date}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current
+                              ? { ...current, proposed_completion_date: e.target.value }
+                              : current,
+                          )
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Reminders are sent against this date.
+                      </p>
+                    </Field>
+                    <Field label="Source">
+                      <Input
+                        value={selectedDealDraft.source}
+                        onChange={(e) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, source: e.target.value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Probability">
+                      <DealProbabilitySelect
+                        value={selectedDealDraft.probability}
+                        onValueChange={(value) =>
+                          setSelectedDealDraft((current) =>
+                            current ? { ...current, probability: value } : current,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Close date">
+                      <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
+                    </Field>
+                  </div>
+                ) : null}
+                {selectedDealEditing &&
+                selectedDealDraft &&
+                selectedDealDraft.currency_code !== "USD" ? (
+                  <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                    <div className="font-medium">USD equivalent</div>
+                    <div className="mt-1 text-muted-foreground">
+                      {selectedDealConvertingCurrency
+                        ? "Fetching the latest FX rate..."
+                        : selectedCurrencyPreviewError
+                          ? selectedCurrencyPreviewError
+                          : selectedDealDraft.amount_usd
+                            ? `${formatUsdAmount(selectedDealDraft.amount_usd)} via ${selectedDealDraft.fx_provider ?? "provider"}`
+                            : "Enter a valid amount to preview the USD equivalent."}
                     </div>
-                    {selectedDealEditing && selectedDealDraft ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Field label="Account">
-                          <Input
-                            value={selectedDealDraft.account_name}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, account_name: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Client">
-                          <Input
-                            value={selectedDealDraft.contact_name}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, contact_name: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Owner">
-                          <Input
-                            value={selectedDealDraft.owner_name}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, owner_name: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Country">
-                          <LookupCombobox
-                            fieldName={LOOKUP_FIELDS.countryCode}
-                            label="Country"
-                            value={selectedDealDraft.country}
-                            onValueChange={(value) =>
-                              setSelectedDealDraft((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      country: value,
-                                      region: current.country === value ? current.region : "",
-                                    }
-                                  : current,
-                              )
-                            }
-                            placeholder="Select a country"
-                            allowCreate={false}
-                          />
-                        </Field>
-                        <Field label="Region">
-                          <LookupCombobox
-                            fieldName={dealRegionLookupField(selectedDealDraft.country)}
-                            label="Region"
-                            value={selectedDealDraft.region}
-                            onValueChange={(value) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, region: value } : current,
-                              )
-                            }
-                            placeholder={
-                              selectedDealDraft.country === "India"
-                                ? "Select an Indian region"
-                                : "Select or create region"
-                            }
-                          />
-                        </Field>
-                        <Field label="Product">
-                          <LookupCombobox
-                            fieldName={LOOKUP_FIELDS.catalogProduct}
-                            label="Product"
-                            value={selectedDealDraft.product}
-                            onValueChange={(value) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, product: value } : current,
-                              )
-                            }
-                            placeholder="Select or create product or combo"
-                            source="catalog"
-                            catalogKind="all"
-                            allowCreate={hasRole("super_admin")}
-                          />
-                        </Field>
-                        <Field label="Quantity">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={selectedDealDraft.quantity}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current
-                                  ? { ...current, quantity: Number(e.target.value) || 1 }
-                                  : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Amount">
-                          <Input
-                            value={selectedDealDraft.amount}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, amount: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Currency">
-                          <LookupCombobox
-                            fieldName={LOOKUP_FIELDS.dealSource}
-                            label="Currency"
-                            value={selectedDealDraft.currency_code}
-                            onValueChange={(value) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, currency_code: value || "USD" } : current,
-                              )
-                            }
-                            options={[...DEAL_CURRENCY_OPTIONS]}
-                            allowCreate={false}
-                          />
-                        </Field>
-                        <Field label="Customer budget">
-                          <Input
-                            value={selectedDealDraft.customer_budget}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, customer_budget: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Possible close date">
-                          <Input
-                            type="date"
-                            value={selectedDealDraft.possible_close_date}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current
-                                  ? { ...current, possible_close_date: e.target.value }
-                                  : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Source">
-                          <Input
-                            value={selectedDealDraft.source}
-                            onChange={(e) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, source: e.target.value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Probability">
-                          <DealProbabilitySelect
-                            value={selectedDealDraft.probability}
-                            onValueChange={(value) =>
-                              setSelectedDealDraft((current) =>
-                                current ? { ...current, probability: value } : current,
-                              )
-                            }
-                          />
-                        </Field>
-                        <Field label="Close date">
-                          <Input value={formatDateLabel(selectedDeal.close_date)} disabled />
-                        </Field>
-                      </div>
-                    ) : null}
-                    {selectedDealEditing &&
-                    selectedDealDraft &&
-                    selectedDealDraft.currency_code !== "USD" ? (
-                      <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                        <div className="font-medium">USD equivalent</div>
-                        <div className="mt-1 text-muted-foreground">
-                          {selectedDealConvertingCurrency
-                            ? "Fetching the latest FX rate..."
-                            : selectedCurrencyPreviewError
-                              ? selectedCurrencyPreviewError
-                              : selectedDealDraft.amount_usd
-                                ? `${formatUsdAmount(selectedDealDraft.amount_usd)} via ${selectedDealDraft.fx_provider ?? "provider"}`
-                                : "Enter a valid amount to preview the USD equivalent."}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 text-sm md:grid-cols-2">
-                        <Meta label="Country" value={selectedDeal.country} />
-                        <Meta label="Region" value={selectedDeal.region} />
-                        <Meta label="Contact" value={selectedDeal.contact_name} />
-                        <Meta label="Owner" value={selectedDeal.owner_name} />
-                        <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
-                        <Meta label="Currency" value={selectedDeal.currency_code || "USD"} />
-                        <Meta
-                          label="USD equivalent"
-                          value={formatUsdAmount(normalizeNullableNumber(selectedDeal.amount_usd))}
-                        />
-                        <Meta
-                          label="Possible close date"
-                          value={formatDateLabel(selectedDeal.possible_close_date)}
-                        />
-                        <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
-                        <Meta label="Source" value={selectedDeal.source} />
-                        <Meta
-                          label="Probability"
-                          value={formatDealProbability(selectedDeal.probability)}
-                        />
-                      </div>
-                    )}
-                    <DealCollaboratorEditor
-                      title="Visibility & collaborators"
-                      collaborators={selectedDealCollaborators}
-                      availableMembers={teamMembers}
-                      excludeUserId={profile?.id ?? null}
-                      hiddenToTeam={
-                        selectedDealDraft?.is_hidden_to_team ?? selectedDeal.is_hidden_to_team
-                      }
-                      rewardRatePercent={
-                        selectedDealDraft?.reward_rate_percent ?? selectedDeal.reward_rate_percent
-                      }
-                      showRewardRate
-                      allowEditRewardRate={
-                        selectedDealEditing &&
-                        hasRole("super_admin") &&
-                        !selectedDealCollaboratorEditingLocked
-                      }
-                      allowEditCollaborators={
-                        selectedDealEditing && !selectedDealCollaboratorEditingLocked
-                      }
-                      disabled={
-                        saving ||
-                        selectedDealCollaboratorEditingLocked ||
-                        !selectedDealEditing ||
-                        !canEditSelectedDeal
-                      }
-                      onCollaboratorsChange={setSelectedDealCollaborators}
-                      onHiddenToTeamChange={(hidden) =>
-                        setSelectedDealDraft((current) =>
-                          current ? { ...current, is_hidden_to_team: hidden } : current,
-                        )
-                      }
-                      onRewardRateChange={(percent) =>
-                        setSelectedDealDraft((current) =>
-                          current ? { ...current, reward_rate_percent: percent } : current,
-                        )
-                      }
-                    />
-                    <Separator />
-                    <DealLineItems dealId={selectedDeal.id} dealStage={selectedDeal.stage} />
-                    <Separator />
-                    <DealParticipantTags dealId={selectedDeal.id} />
-                    <Separator />
-                    <DealOutcomeReview
-                      dealId={selectedDeal.id}
-                      dealStage={selectedDeal.stage}
-                      commercialApproved={selectedDeal.commercial_approved}
-                    />
-                    <Separator />
-                    <DealActivityTimeline dealId={selectedDeal.id} />
-                    <Separator />
-                    <div className="space-y-2">
-                      <Label>Quick note</Label>
-                      {selectedDealEditing && selectedDealDraft ? (
-                        <Textarea
-                          value={selectedDealDraft.notes}
-                          onChange={(e) =>
-                            setSelectedDealDraft((current) =>
-                              current ? { ...current, notes: e.target.value } : current,
-                            )
-                          }
-                          rows={4}
-                        />
-                      ) : (
-                        <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                          {selectedDeal.notes ||
-                            "Capture the latest status, blockers, or next steps."}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedDealEditing && canEditSelectedDeal ? (
-                        <Button onClick={() => void saveSelectedDeal()} disabled={saving}>
-                          {saving ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                          )}
-                          Save changes
-                        </Button>
-                      ) : null}
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setNote(selectedDeal.notes);
-                          setNoteOpen(true);
-                        }}
-                      >
-                        Edit note
-                      </Button>
-                      <Button onClick={() => void advance()} disabled={saving}>
-                        {saving ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <ArrowRight className="mr-2 h-4 w-4" />
-                        )}
-                        Advance stage
-                      </Button>
-                      {getValidBackwardStages(selectedDeal.stage).length > 0 ? (
-                        <Button variant="outline" onClick={openBackwardDialog} disabled={saving}>
-                          <ArrowLeft className="mr-2 h-4 w-4" />
-                          Move backward
-                        </Button>
-                      ) : null}
-                      <Button
-                        variant="outline"
-                        onClick={() => openCloseDialog("won")}
-                        disabled={saving}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Mark won
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        onClick={() => openCloseDialog("lost")}
-                        disabled={saving}
-                      >
-                        <XCircle className="mr-2 h-4 w-4" />
-                        Mark lost
-                      </Button>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                      Viewing item {selectedIndex + 1} of {filteredDeals.length}
-                    </div>
-                  </>
+                  </div>
                 ) : (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    No deal selected yet. Choose a row from the table to inspect the opportunity.
+                  <div className="grid gap-3 text-sm md:grid-cols-2">
+                    <Meta label="Country" value={selectedDeal.country} />
+                    <Meta label="Region" value={selectedDeal.region} />
+                    <Meta label="Contact" value={selectedDeal.contact_name} />
+                    <Meta label="Owner" value={selectedDeal.owner_name} />
+                    <Meta label="Quantity" value={String(selectedDeal.quantity ?? 1)} />
+                    <Meta label="Currency" value={selectedDeal.currency_code || "USD"} />
+                    <Meta
+                      label="USD equivalent"
+                      value={formatUsdAmount(normalizeNullableNumber(selectedDeal.amount_usd))}
+                    />
+                    <Meta
+                      label="Possible close date"
+                      value={formatDateLabel(selectedDeal.possible_close_date)}
+                    />
+                    <Meta
+                      label="Proposed completion"
+                      value={
+                        selectedDeal.proposed_completion_date
+                          ? formatDateLabel(selectedDeal.proposed_completion_date)
+                          : "Not set"
+                      }
+                    />
+                    <Meta label="Close date" value={formatDateLabel(selectedDeal.close_date)} />
+                    <Meta label="Source" value={selectedDeal.source} />
+                    <Meta
+                      label="Probability"
+                      value={formatDealProbability(selectedDeal.probability)}
+                    />
                   </div>
                 )}
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
+                <DealCollaboratorEditor
+                  title="Visibility & collaborators"
+                  collaborators={selectedDealCollaborators}
+                  availableMembers={teamMembers}
+                  excludeUserId={profile?.id ?? null}
+                  hiddenToTeam={
+                    selectedDealDraft?.is_hidden_to_team ?? selectedDeal.is_hidden_to_team
+                  }
+                  rewardRatePercent={
+                    selectedDealDraft?.reward_rate_percent ?? selectedDeal.reward_rate_percent
+                  }
+                  showRewardRate
+                  allowEditRewardRate={
+                    selectedDealEditing &&
+                    hasRole("super_admin") &&
+                    !selectedDealCollaboratorEditingLocked
+                  }
+                  allowEditCollaborators={
+                    selectedDealEditing && !selectedDealCollaboratorEditingLocked
+                  }
+                  disabled={
+                    saving ||
+                    selectedDealCollaboratorEditingLocked ||
+                    !selectedDealEditing ||
+                    !canEditSelectedDeal
+                  }
+                  onCollaboratorsChange={setSelectedDealCollaborators}
+                  onHiddenToTeamChange={(hidden) =>
+                    setSelectedDealDraft((current) =>
+                      current ? { ...current, is_hidden_to_team: hidden } : current,
+                    )
+                  }
+                  onRewardRateChange={(percent) =>
+                    setSelectedDealDraft((current) =>
+                      current ? { ...current, reward_rate_percent: percent } : current,
+                    )
+                  }
+                />
+                <Separator />
+                <DealLineItems dealId={selectedDeal.id} dealStage={selectedDeal.stage} />
+                <Separator />
+                <DealParticipantTags dealId={selectedDeal.id} />
+                <Separator />
+                <DealOutcomeReview
+                  dealId={selectedDeal.id}
+                  dealStage={selectedDeal.stage}
+                  commercialApproved={selectedDeal.commercial_approved}
+                />
+                <Separator />
+                <DealActivityTimeline dealId={selectedDeal.id} />
+                <Separator />
+                <div className="space-y-2">
+                  <Label>Quick note</Label>
+                  {selectedDealEditing && selectedDealDraft ? (
+                    <Textarea
+                      value={selectedDealDraft.notes}
+                      onChange={(e) =>
+                        setSelectedDealDraft((current) =>
+                          current ? { ...current, notes: e.target.value } : current,
+                        )
+                      }
+                      rows={4}
+                    />
+                  ) : (
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                      {selectedDeal.notes || "Capture the latest status, blockers, or next steps."}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedDealEditing && canEditSelectedDeal ? (
+                    <Button onClick={() => void saveSelectedDeal()} disabled={saving}>
+                      {saving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                      )}
+                      Save changes
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setNote(selectedDeal.notes);
+                      setNoteOpen(true);
+                    }}
+                  >
+                    Edit note
+                  </Button>
+                  <Button onClick={() => void advance()} disabled={saving}>
+                    {saving ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="mr-2 h-4 w-4" />
+                    )}
+                    Advance stage
+                  </Button>
+                  {getValidBackwardStages(selectedDeal.stage).length > 0 ? (
+                    <Button variant="outline" onClick={openBackwardDialog} disabled={saving}>
+                      <ArrowLeft className="mr-2 h-4 w-4" />
+                      Move backward
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={() => openCloseDialog("won")}
+                    disabled={saving}
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Mark won
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => openCloseDialog("lost")}
+                    disabled={saving}
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Mark lost
+                  </Button>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  Viewing item {selectedIndex + 1} of {filteredDeals.length}
+                </div>
+              </>
+            ) : (
+              <EmptyState
+                icon={<FileSpreadsheet className="h-5 w-5" />}
+                title="No deal selected yet."
+                description="Choose a row from the table to inspect the opportunity."
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
         <DialogContent className="sm:max-w-xl">
@@ -2795,15 +2533,355 @@ function DealsPage() {
           }))
         }
       />
+
+      <FormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Create deal"
+        description="Add a new live opportunity. Everything here can be edited afterwards."
+        busy={creating}
+        submitLabel="Create deal"
+        busyLabel="Creating…"
+        submitDisabled={!canCreateDeals}
+        onSubmit={createDeal}
+        size="xl"
+        footerNote={canCreateDeals ? null : "Your role doesn't have permission to create deals."}
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          {(hasRole("super_admin") || hasRole("partner_admin")) && (
+            <div className="space-y-2">
+              <Label htmlFor="account_name">Account</Label>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.dealAccount}
+                source="account"
+                label="Account"
+                value={draft.account_name}
+                onValueChange={(value) =>
+                  setDraft((current) => ({ ...current, account_name: value }))
+                }
+                onSelectionChange={(selection) =>
+                  setDraft((current) => ({
+                    ...current,
+                    partner_id: selection?.id ?? null,
+                    account_name: selection?.label ?? current.account_name,
+                  }))
+                }
+                placeholder="Select or create account"
+                allowCreate={false}
+              />
+            </div>
+          )}
+          {hasRole("partner_user") && (
+            <div className="space-y-2">
+              <Label htmlFor="account_name">Account</Label>
+              <Input
+                value={profile?.full_name ?? draft.account_name}
+                readOnly
+                placeholder="Auto-selected account"
+              />
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="contact_name">Client</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealContact}
+              source="client"
+              label="Client"
+              value={draft.contact_name}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, contact_name: value }))
+              }
+              onSelectionChange={(selection) =>
+                setDraft((current) => ({
+                  ...current,
+                  customer_id: selection?.id ?? null,
+                  contact_name: selection?.label ?? current.contact_name,
+                }))
+              }
+              onCreateRequest={(value) => {
+                setClientCreateSeed(value);
+                setClientCreateOpen(true);
+              }}
+              placeholder="Select or create client"
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="owner_name">POC</Label>
+            {hasRole("super_admin") ? (
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.dealOwner}
+                source="poc"
+                label="POC"
+                value={draft.owner_name}
+                onValueChange={(value) =>
+                  setDraft((current) => ({ ...current, owner_name: value }))
+                }
+                onSelectionChange={(selection) =>
+                  setDraft((current) => ({
+                    ...current,
+                    poc_profile_id: selection?.id ?? null,
+                    owner_name: selection?.label ?? current.owner_name,
+                  }))
+                }
+                placeholder="Select POC"
+                allowCreate={false}
+              />
+            ) : hasRole("partner_admin") ? (
+              <Input value={profile?.full_name ?? draft.owner_name} readOnly />
+            ) : (
+              <Input
+                value={partnerAdminName ?? draft.owner_name}
+                readOnly
+                placeholder="Auto-selected POC"
+              />
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="country">Country</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.countryCode}
+              label="Country"
+              value={draft.country}
+              onValueChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  country: value,
+                  region: current.country === value ? current.region : "",
+                }))
+              }
+              placeholder="Select a country"
+              options={editOptions.countries}
+              allowCreate={false}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="region">Region</Label>
+            <LookupCombobox
+              fieldName={dealRegionLookupField(draft.country)}
+              label="Region"
+              value={draft.region}
+              onValueChange={(value) => setDraft((current) => ({ ...current, region: value }))}
+              placeholder={
+                draft.country === "India" ? "Select an Indian region" : "Select or create region"
+              }
+              options={regionOptions}
+            />
+          </div>
+        </div>
+        {hasRole("partner_user") && (
+          <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Account and POC are assigned automatically for partner users.
+          </div>
+        )}
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="product">Product</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.catalogProduct}
+              label="Product"
+              value={draft.product}
+              onValueChange={(value) => setDraft((current) => ({ ...current, product: value }))}
+              placeholder="Select or create product or combo"
+              source="catalog"
+              catalogKind="all"
+              allowCreate={hasRole("super_admin")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="quantity">Quantity</Label>
+            <Input
+              id="quantity"
+              type="number"
+              min={1}
+              value={draft.quantity}
+              onChange={(e) =>
+                setDraft((current) => ({
+                  ...current,
+                  quantity: Number(e.target.value) || 1,
+                }))
+              }
+              placeholder="1"
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="amount">Amount</Label>
+            <Input
+              id="amount"
+              value={draft.amount}
+              onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
+              placeholder="$9,200"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="currency_code">Currency</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealSource}
+              label="Currency"
+              value={draft.currency_code}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, currency_code: value || "USD" }))
+              }
+              options={[...DEAL_CURRENCY_OPTIONS]}
+              allowCreate={false}
+            />
+          </div>
+        </div>
+        {draft.currency_code !== "USD" ? (
+          <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+            <div className="font-medium">USD equivalent</div>
+            <div className="mt-1 text-muted-foreground">
+              {convertingCurrency
+                ? "Fetching the latest FX rate..."
+                : currencyPreviewError
+                  ? currencyPreviewError
+                  : draft.amount_usd
+                    ? `${formatUsdAmount(draft.amount_usd)} via ${draft.fx_provider ?? "provider"}`
+                    : "Enter a valid amount to preview the USD equivalent."}
+            </div>
+          </div>
+        ) : null}
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="stage">Stage</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealStage}
+              label="Stage"
+              value={draft.stage}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, stage: value as DealStage }))
+              }
+              placeholder="Select or create stage"
+              options={DEAL_STAGE_ORDER.map((stage) => stage)}
+              allowCreate={false}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="probability">Probability</Label>
+            <DealProbabilitySelect
+              value={draft.probability}
+              onValueChange={(value) => setDraft((current) => ({ ...current, probability: value }))}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="customer_budget">Customer budget</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealCustomerBudget}
+              label="Customer budget"
+              value={draft.customer_budget}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, customer_budget: value }))
+              }
+              placeholder="Select or create budget"
+              options={editOptions.budgets}
+              allowCreate={hasRole("super_admin")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="possible_close_date">Possible close date</Label>
+            <Input
+              id="possible_close_date"
+              type="date"
+              value={draft.possible_close_date}
+              onChange={(e) =>
+                setDraft((value) => ({ ...value, possible_close_date: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="source">Source</Label>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealSource}
+              label="Source"
+              value={draft.source}
+              onValueChange={(value) => setDraft((current) => ({ ...current, source: value }))}
+              placeholder="Select or create source"
+              options={editOptions.sources}
+              allowCreate={hasRole("super_admin")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="close_date">Close date</Label>
+            <Input
+              id="close_date"
+              value={draft.close_date}
+              disabled
+              placeholder="Auto-set on closure"
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="proposed_completion_date">Proposed completion date</Label>
+          <Input
+            id="proposed_completion_date"
+            type="date"
+            value={draft.proposed_completion_date}
+            onChange={(e) =>
+              setDraft((value) => ({
+                ...value,
+                proposed_completion_date: e.target.value,
+              }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Your own forecast for when this deal completes — separate from the probable close date
+            above. Reminders are sent against this date.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="notes">Notes</Label>
+          <Textarea
+            id="notes"
+            value={draft.notes}
+            onChange={(e) => setDraft((value) => ({ ...value, notes: e.target.value }))}
+            placeholder="Why this deal matters..."
+          />
+        </div>
+        <DealCollaboratorEditor
+          title="Collaborators"
+          collaborators={draftCollaborators}
+          availableMembers={teamMembers}
+          excludeUserId={profile?.id ?? null}
+          hiddenToTeam={draft.is_hidden_to_team}
+          rewardRatePercent={draft.reward_rate_percent}
+          showRewardRate
+          allowEditRewardRate={hasRole("super_admin")}
+          disabled={creating}
+          onCollaboratorsChange={setDraftCollaborators}
+          onHiddenToTeamChange={(hidden) =>
+            setDraft((current) => ({ ...current, is_hidden_to_team: hidden }))
+          }
+          onRewardRateChange={(percent) =>
+            setDraft((current) => ({ ...current, reward_rate_percent: percent }))
+          }
+        />
+      </FormDialog>
     </div>
   );
 }
 
+/**
+ * Read-only detail cell inside the deal dialog. Kept local (rather than
+ * swapped for a shared primitive) because the dialog reads it a dozen times
+ * and the shared `Field` is an input wrapper, not a display one — this just
+ * adopts the system's 11px uppercase label scale.
+ */
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
+    <div className="rounded-md border bg-muted/30 px-3 py-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-0.5 text-[13px] font-medium">{value}</div>
     </div>
   );
 }
@@ -2818,39 +2896,9 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={`space-y-2 ${className ?? ""}`}>
+    <div className={`space-y-1.5 ${className ?? ""}`}>
       <Label>{label}</Label>
       {children}
     </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  hint,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  onClick?: () => void;
-}) {
-  const content = (
-    <CardContent className="space-y-1 p-5 text-left">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="text-2xl font-semibold tracking-tight">{value}</div>
-      <div className="text-sm text-muted-foreground">{hint}</div>
-    </CardContent>
-  );
-
-  return onClick ? (
-    <Card className="transition hover:-translate-y-0.5 hover:shadow-md">
-      <button type="button" className="w-full text-left" onClick={onClick}>
-        {content}
-      </button>
-    </Card>
-  ) : (
-    <Card>{content}</Card>
   );
 }

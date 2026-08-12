@@ -13,7 +13,7 @@ export function UnderReviewPage() {
     <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.14),_transparent_38%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.22))] px-4">
       <Card className="w-full max-w-xl border-dashed shadow-sm">
         <CardHeader className="space-y-4 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+          <div className="tint-warning mx-auto flex h-14 w-14 items-center justify-center rounded-full text-warning-foreground">
             <ShieldAlert className="h-7 w-7" />
           </div>
           <div className="space-y-2">

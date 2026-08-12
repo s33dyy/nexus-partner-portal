@@ -14,18 +14,20 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { PageHeader } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGrid, FormDialog } from "@/components/ui/form-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { type TeamMemberRecord } from "@/lib/portal-records";
 import {
   buildImportSummaryMessage,
@@ -94,6 +96,7 @@ function PartnerTeamPage() {
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<TeamForm>(EMPTY_FORM);
   const [adding, setAdding] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -211,6 +214,7 @@ function PartnerTeamPage() {
       if (error) throw error;
       toast.success("Teammate invited");
       setDraft(EMPTY_FORM);
+      setInviteOpen(false);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add teammate");
@@ -313,88 +317,86 @@ function PartnerTeamPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Company
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Team</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Invite colleagues, manage access, and keep partner responsibilities clear for{" "}
-            {companyLabel}.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-team-members"
-            columns={TEAM_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredMembers.map((member) => ({
-                company_name: member.company_name,
-                full_name: member.full_name,
-                email: member.email,
-                role_title: member.role_title,
-                portal_role: member.portal_role,
-                responsibility: member.responsibility,
-                status: member.status,
-                last_active: member.last_active,
-                phone: member.phone,
-                permissions: member.permissions,
-                created_at: member.created_at,
-                updated_at: member.updated_at,
-              }))
-            }
-            variant="outline"
-          />
-          <Button variant="outline" onClick={downloadImportTemplate}>
-            <Download className="mr-2 h-4 w-4" />
-            Download template CSV
-          </Button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importTeamMembers(file);
-            }}
-          />
-          <Button
-            variant="outline"
-            onClick={() => importInputRef.current?.click()}
-            disabled={importing}
-          >
-            {importing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="mr-2 h-4 w-4" />
-            )}
-            Import CSV/XLSX
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Company"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Team"
+        description={`Invite colleagues, manage access, and keep partner responsibilities clear for ${companyLabel}.`}
+        actions={
+          <>
+            <Button onClick={() => setInviteOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Invite teammate
+            </Button>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-team-members"
+              columns={TEAM_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredMembers.map((member) => ({
+                  company_name: member.company_name,
+                  full_name: member.full_name,
+                  email: member.email,
+                  role_title: member.role_title,
+                  portal_role: member.portal_role,
+                  responsibility: member.responsibility,
+                  status: member.status,
+                  last_active: member.last_active,
+                  phone: member.phone,
+                  permissions: member.permissions,
+                  created_at: member.created_at,
+                  updated_at: member.updated_at,
+                }))
+              }
+              variant="outline"
+            />
+            <Button variant="outline" onClick={downloadImportTemplate}>
+              <Download className="mr-2 h-4 w-4" />
+              Download template CSV
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importTeamMembers(file);
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Import CSV/XLSX
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric label="Members" value={String(members.length)} hint="Current roster" />
@@ -440,7 +442,7 @@ function PartnerTeamPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="truncate font-medium">{member.full_name}</div>
-                        <Badge variant="outline">{member.status}</Badge>
+                        <Badge tone={resolveStatusTone(member.status)}>{member.status}</Badge>
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
                         {member.role_title} · {member.email}
@@ -474,91 +476,7 @@ function PartnerTeamPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Invite teammate</CardTitle>
-              <CardDescription>
-                Add a live record for a new partner user or partner admin.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ImportFeedback successMessage={importMessage} errors={importErrors} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Name">
-                  <Input
-                    value={draft.full_name}
-                    onChange={(e) => setDraft((value) => ({ ...value, full_name: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Email">
-                  <Input
-                    value={draft.email}
-                    onChange={(e) => setDraft((value) => ({ ...value, email: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Password">
-                  <Input
-                    type="password"
-                    value={draft.password || ""}
-                    onChange={(e) => setDraft((value) => ({ ...value, password: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Role title">
-                  <Input
-                    value={draft.role_title}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, role_title: e.target.value }))
-                    }
-                    placeholder="Operations Manager"
-                  />
-                </Field>
-                <Field label="Portal role">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.teamRole}
-                    label="Portal role"
-                    value={draft.portal_role}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, portal_role: value }))
-                    }
-                    options={["partner_user", "partner_admin"]}
-                  />
-                </Field>
-                <Field label="Responsibility">
-                  <Input
-                    value={draft.responsibility}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, responsibility: e.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label="Phone">
-                  <Input
-                    value={draft.phone}
-                    onChange={(e) => setDraft((value) => ({ ...value, phone: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Status">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.teamStatus}
-                    label="Status"
-                    value={draft.status}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, status: value }))
-                    }
-                    options={["invited", "active", "paused"]}
-                  />
-                </Field>
-              </div>
-              <Button onClick={() => void addMember()} disabled={adding}>
-                {adding ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Invite teammate
-              </Button>
-            </CardContent>
-          </Card>
+          <ImportFeedback successMessage={importMessage} errors={importErrors} />
 
           <Card>
             <CardHeader className="border-b">
@@ -576,6 +494,93 @@ function PartnerTeamPage() {
           </Card>
         </div>
       </div>
+
+      <FormDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        title="Invite teammate"
+        description="Add a live record for a new partner user or partner admin."
+        busy={adding}
+        submitLabel="Invite teammate"
+        busyLabel="Inviting…"
+        submitDisabled={
+          !draft.full_name.trim() ||
+          !draft.email.trim() ||
+          !draft.role_title.trim() ||
+          !draft.password?.trim()
+        }
+        onSubmit={addMember}
+        size="lg"
+      >
+        <FieldGrid>
+          <Field label="Name" htmlFor="team-name" required>
+            <Input
+              id="team-name"
+              value={draft.full_name}
+              onChange={(e) => setDraft((value) => ({ ...value, full_name: e.target.value }))}
+              autoFocus
+            />
+          </Field>
+          <Field label="Email" htmlFor="team-email" required>
+            <Input
+              id="team-email"
+              type="email"
+              value={draft.email}
+              onChange={(e) => setDraft((value) => ({ ...value, email: e.target.value }))}
+            />
+          </Field>
+          <Field label="Password" htmlFor="team-password" required>
+            <Input
+              id="team-password"
+              type="password"
+              autoComplete="new-password"
+              value={draft.password || ""}
+              onChange={(e) => setDraft((value) => ({ ...value, password: e.target.value }))}
+            />
+          </Field>
+          <Field label="Role title" htmlFor="team-role-title" required>
+            <Input
+              id="team-role-title"
+              value={draft.role_title}
+              onChange={(e) => setDraft((value) => ({ ...value, role_title: e.target.value }))}
+              placeholder="Operations Manager"
+            />
+          </Field>
+          <Field label="Portal role">
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.teamRole}
+              label="Portal role"
+              value={draft.portal_role}
+              onValueChange={(value) => setDraft((current) => ({ ...current, portal_role: value }))}
+              options={["partner_user", "partner_admin"]}
+            />
+          </Field>
+          <Field label="Responsibility" htmlFor="team-responsibility">
+            <Input
+              id="team-responsibility"
+              value={draft.responsibility}
+              onChange={(e) => setDraft((value) => ({ ...value, responsibility: e.target.value }))}
+            />
+          </Field>
+          <Field label="Phone" htmlFor="team-phone">
+            <Input
+              id="team-phone"
+              type="tel"
+              value={draft.phone}
+              onChange={(e) => setDraft((value) => ({ ...value, phone: e.target.value }))}
+            />
+          </Field>
+          <Field label="Status">
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.teamStatus}
+              label="Status"
+              value={draft.status}
+              onValueChange={(value) => setDraft((current) => ({ ...current, status: value }))}
+              options={["invited", "active", "paused"]}
+            />
+          </Field>
+        </FieldGrid>
+      </FormDialog>
     </div>
   );
 }
@@ -593,14 +598,5 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }

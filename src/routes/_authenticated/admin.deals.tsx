@@ -1,11 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, RefreshCw, Search, ShieldCheck, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ClipboardList,
+  Inbox,
+  Loader2,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { DealProbabilitySelect } from "@/components/deal-probability-select";
+import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldGrid } from "@/components/ui/form-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +46,7 @@ import {
   type DealCollaboratorDraft,
 } from "@/lib/deal-collaboration";
 import { formatDealProbability, normalizeDealProbability } from "@/lib/deal-probability";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
@@ -352,46 +364,54 @@ function AdminDealsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Deal approvals</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Review strategic opportunities, request more detail, and clear approved deals.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Deal approvals"
+        description="Review strategic opportunities, request more detail, and clear approved deals."
+        actions={
+          <>
+            <Badge tone={source === "database" ? "success" : "neutral"}>
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Metric label="Queue" value={String(metrics.queue)} hint="Awaiting decision" />
-        <Metric label="Reviewed" value={String(metrics.reviewed)} hint="Handled by admin" />
+        <StatTile
+          label="Queue"
+          value={String(metrics.queue)}
+          hint="Awaiting decision"
+          icon={<ClipboardList className="h-4 w-4" />}
+          tone="warning"
+        />
+        <StatTile
+          label="Reviewed"
+          value={String(metrics.reviewed)}
+          hint="Handled by admin"
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          tone="success"
+        />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.95fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.95fr]">
         <Card>
           <CardHeader className="space-y-4 border-b">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -441,7 +461,7 @@ function AdminDealsPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="truncate font-medium">{deal.account_name}</div>
-                        <Badge variant="outline">{deal.status}</Badge>
+                        <Badge tone={resolveStatusTone(deal.status)}>{deal.status}</Badge>
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
                         {deal.owner_name} · {deal.region} · {deal.stage}
@@ -474,8 +494,10 @@ function AdminDealsPage() {
               {selectedDeal ? (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge>{selectedDeal.stage}</Badge>
-                    <Badge variant="outline">{selectedDeal.status}</Badge>
+                    <Badge tone={resolveStatusTone(selectedDeal.stage)}>{selectedDeal.stage}</Badge>
+                    <Badge tone={resolveStatusTone(selectedDeal.status)}>
+                      {selectedDeal.status}
+                    </Badge>
                     <Badge variant="secondary">{selectedDeal.amount}</Badge>
                   </div>
                   <div className="grid gap-3 text-sm md:grid-cols-2">
@@ -814,15 +836,6 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }
 

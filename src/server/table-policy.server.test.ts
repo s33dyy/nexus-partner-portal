@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 
 import { FEATURE_KEYS } from "@/domain/contracts/features";
 import { GOVERNANCE_GEOGRAPHY_NODE_IDS } from "@/domain/contracts/governance";
+import type { TablePolicyAuthContext } from "@/server/table-policy.server";
 
 process.env.DATABASE_URL ??= "postgres://localhost/test";
 
@@ -812,7 +813,7 @@ test("§2.9/§10.2: generic update path rejects a direct write to tasks.status, 
       { table: "tasks", operation: "update", values: { status: "cancelled" }, filters: [] },
       superAdminAuth,
     ),
-  ).rejects.toThrow(/named transition command/i);
+  ).rejects.toThrow(/named task command/i);
 });
 
 test("§2.9/§10.2: generic update path rejects direct writes to version/blocked_reason/completed_at/cancelled_at too", async () => {
@@ -832,7 +833,7 @@ test("§2.9/§10.2: generic update path rejects direct writes to version/blocked
         { table: "tasks", operation: "update", values: { [column]: "x" }, filters: [] },
         auth,
       ),
-    ).rejects.toThrow(/named transition command/i);
+    ).rejects.toThrow(/named task command/i);
   }
 });
 
@@ -1131,7 +1132,14 @@ test("generic Task updates reject every lifecycle-owned field even for super_adm
     governedRoleKey: "super_admin" as const,
   };
 
-  for (const field of ["status", "blocked_reason", "completed_at", "cancelled_at", "version"]) {
+  for (const field of [
+    "status",
+    "blocked_reason",
+    "completed_at",
+    "cancelled_at",
+    "proposed_completion_at",
+    "version",
+  ]) {
     await expect(
       applyTablePolicy(
         {
@@ -1142,7 +1150,7 @@ test("generic Task updates reject every lifecycle-owned field even for super_adm
         },
         auth,
       ),
-    ).rejects.toThrow("Task lifecycle fields require the named transition command");
+    ).rejects.toThrow("Task lifecycle fields require a named task command");
   }
 });
 
@@ -1165,7 +1173,7 @@ test("generic Task update is wholly denied when ordinary and lifecycle fields ar
         governedRoleKey: "super_admin",
       },
     ),
-  ).rejects.toThrow("Task lifecycle fields require the named transition command");
+  ).rejects.toThrow("Task lifecycle fields require a named task command");
 });
 
 test("generic Task update still allows ordinary metadata through existing policy", async () => {
@@ -1426,4 +1434,84 @@ test("creating a deal is unaffected by the owner-or-tag restriction (insert stil
   );
   expect(result.scopeOwnerOrParticipantTag).toBeUndefined();
   expect((result.values as Record<string, unknown>).partner_id).toBe("partner-1");
+});
+
+// setDealProposedCompletion is the only path allowed to move a Deal's
+// proposed completion date, for the same reason transitionTask owns Task
+// status: it is the field the reminder sweep fires against, and a date that
+// has slipped repeatedly is only visible if every change left evidence.
+test("generic Deal update rejects a direct write to proposed_completion_date, even for super_admin", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth: TablePolicyAuthContext = {
+    userId: "admin-1",
+    roles: ["super_admin"],
+    partnerId: null,
+    companyName: null,
+    hasGovernedContext: true,
+    governedRoleKey: "super_admin",
+  };
+
+  await expect(
+    applyTablePolicy(
+      {
+        table: "portal_deals",
+        operation: "update",
+        filters: [{ column: "id", value: "deal-1", operator: "eq" }],
+        values: { proposed_completion_date: "2026-09-01" },
+      },
+      auth,
+    ),
+  ).rejects.toThrow(/named deal command/i);
+
+  // Mixing it with ordinary fields must not smuggle it through.
+  await expect(
+    applyTablePolicy(
+      {
+        table: "portal_deals",
+        operation: "update",
+        filters: [{ column: "id", value: "deal-1", operator: "eq" }],
+        values: { notes: "fine", proposed_completion_date: "2026-09-01" },
+      },
+      auth,
+    ),
+  ).rejects.toThrow(/named deal command/i);
+
+  // Clearing the date is still a change, so it is equally protected.
+  await expect(
+    applyTablePolicy(
+      {
+        table: "portal_deals",
+        operation: "update",
+        filters: [{ column: "id", value: "deal-1", operator: "eq" }],
+        values: { proposed_completion_date: null },
+      },
+      auth,
+    ),
+  ).rejects.toThrow(/named deal command/i);
+});
+
+test("generic Deal update still allows the neighbouring date columns through", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const result = await applyTablePolicy(
+    {
+      table: "portal_deals",
+      operation: "update",
+      filters: [{ column: "id", value: "deal-1", operator: "eq" }],
+      // possible_close_date and close_date carry no reminder obligation, so
+      // deals.tsx's bulk edit save keeps writing them generically.
+      values: { possible_close_date: "2026-09-01", notes: "Updated" },
+    },
+    {
+      userId: "admin-1",
+      roles: ["super_admin"],
+      partnerId: null,
+      companyName: null,
+      hasGovernedContext: true,
+      governedRoleKey: "super_admin",
+    },
+  );
+  expect(result.values).toEqual({
+    possible_close_date: "2026-09-01",
+    notes: "Updated",
+  });
 });

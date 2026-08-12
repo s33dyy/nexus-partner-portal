@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { newId } from "@/domain/contracts/ids";
 
 import { validatePricingImportRows } from "@/lib/pricing-domain";
 
@@ -196,7 +196,7 @@ function normalizeSku(value: string) {
     .replace(/[^A-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 32);
-  return normalized || `CAT-${randomUUID().slice(0, 8).toUpperCase()}`;
+  return normalized || `CAT-${newId().slice(0, 8).toUpperCase()}`;
 }
 
 export function buildCatalogCreateValues(input: {
@@ -229,7 +229,7 @@ export function buildCatalogCreateValues(input: {
 export function buildCatalogInsertRow(input: CatalogCreateValues): CatalogInsertRow {
   const now = new Date().toISOString();
   return {
-    id: randomUUID(),
+    id: newId(),
     ...input,
     is_seed: false,
     created_at: now,

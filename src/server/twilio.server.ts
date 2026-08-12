@@ -13,19 +13,26 @@ import {
 } from "@/server/whatsapp-wizard.server";
 import type { AssistantChatMessage } from "@/domain/contracts/assistant";
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID ?? "";
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN ?? "";
-const VERIFY_SERVICE_SID = process.env.TWILIO_VERIFY_SERVICE_SID ?? "";
-const WHATSAPP_FROM = process.env.TWILIO_WHATSAPP_FROM ?? "";
+// Read lazily rather than captured at module load. Freezing them at import
+// time meant isWhatsappVerificationConfigured() could disagree with what
+// getClient() would actually do if the environment were populated after this
+// module was first imported — and made the signup-verification tests
+// untestable, since they have to drive both the configured and unconfigured
+// cases in one process. In production the environment is set before boot, so
+// this changes nothing about live behavior.
+const accountSid = () => process.env.TWILIO_ACCOUNT_SID ?? "";
+const authToken = () => process.env.TWILIO_AUTH_TOKEN ?? "";
+const verifyServiceSid = () => process.env.TWILIO_VERIFY_SERVICE_SID ?? "";
+const whatsappFrom = () => process.env.TWILIO_WHATSAPP_FROM ?? "";
 
 let clientSingleton: ReturnType<typeof twilio> | null = null;
 
 function getClient() {
-  if (!ACCOUNT_SID || !AUTH_TOKEN) {
+  if (!accountSid() || !authToken()) {
     throw new Error("Twilio is not configured (missing TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN)");
   }
   if (!clientSingleton) {
-    clientSingleton = twilio(ACCOUNT_SID, AUTH_TOKEN);
+    clientSingleton = twilio(accountSid(), authToken());
   }
   return clientSingleton;
 }
@@ -36,36 +43,48 @@ export function isValidE164(value: string): boolean {
   return E164_RE.test(value.trim());
 }
 
+/**
+ * Whether Twilio Verify is wired up in this environment.
+ *
+ * Signup consults this before deciding to demand an OTP: a deployment with
+ * no Twilio credentials (local dev, a preview environment, a fresh install)
+ * must still be able to create accounts rather than locking everyone out
+ * behind a code that can never arrive.
+ */
+export function isWhatsappVerificationConfigured(): boolean {
+  return Boolean(accountSid() && authToken() && verifyServiceSid());
+}
+
 // OTP delivered by SMS, not WhatsApp — decouples account-linking from the
 // WhatsApp sandbox's own "join <code>" quirk, and works before the user has
 // joined the sandbox at all. No local OTP-code table: Twilio Verify is
 // stateful on Twilio's own side (a Verification resource keyed by phone
 // number), so nothing needs to be persisted here until it's confirmed.
 export async function startWhatsappVerification(phoneE164: string) {
-  if (!VERIFY_SERVICE_SID) {
+  if (!verifyServiceSid()) {
     throw new Error("Twilio Verify is not configured (missing TWILIO_VERIFY_SERVICE_SID)");
   }
   const client = getClient();
   return client.verify.v2
-    .services(VERIFY_SERVICE_SID)
+    .services(verifyServiceSid())
     .verifications.create({ to: phoneE164, channel: "sms" });
 }
 
 export async function checkWhatsappVerification(phoneE164: string, code: string) {
-  if (!VERIFY_SERVICE_SID) {
+  if (!verifyServiceSid()) {
     throw new Error("Twilio Verify is not configured (missing TWILIO_VERIFY_SERVICE_SID)");
   }
   const client = getClient();
   return client.verify.v2
-    .services(VERIFY_SERVICE_SID)
+    .services(verifyServiceSid())
     .verificationChecks.create({ to: phoneE164, code });
 }
 
 function requireWhatsappFrom(): string {
-  if (!WHATSAPP_FROM) {
+  if (!whatsappFrom()) {
     throw new Error("Twilio WhatsApp sender is not configured (missing TWILIO_WHATSAPP_FROM)");
   }
-  return `whatsapp:${WHATSAPP_FROM}`;
+  return `whatsapp:${whatsappFrom()}`;
 }
 
 export async function sendWhatsappMessage(toE164: string, body: string) {
@@ -152,7 +171,7 @@ async function setAppSetting(key: string, value: string): Promise<void> {
 }
 
 async function createContent(body: Record<string, unknown>): Promise<string> {
-  const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString("base64");
+  const auth = Buffer.from(`${accountSid()}:${authToken()}`).toString("base64");
   const res = await fetch("https://content.twilio.com/v1/Content", {
     method: "POST",
     headers: {
@@ -352,11 +371,11 @@ async function realizeSends(toE164: string, sends: SendInstruction[]): Promise<v
 // so an invalid/unverifiable signature must fail closed (reject), never be
 // treated as valid.
 export function verifyTwilioSignature(request: Request, params: Record<string, string>): boolean {
-  if (!AUTH_TOKEN) return false;
+  if (!authToken()) return false;
   const signature = request.headers.get("x-twilio-signature") ?? "";
   if (!signature) return false;
   const url = request.url;
-  return twilio.validateRequest(AUTH_TOKEN, signature, url, params);
+  return twilio.validateRequest(authToken(), signature, url, params);
 }
 
 function escapeXml(value: string): string {

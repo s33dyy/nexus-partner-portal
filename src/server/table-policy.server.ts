@@ -1235,11 +1235,16 @@ function appendGeographyFilter(
 // scoped caller (including Super Admin) forge a status/version change with
 // none of that evidence, so it's rejected here, before every other branch
 // including the super_admin bypasses below.
+// proposed_completion_at is here for a different reason than the rest: it's
+// not a state-machine field, but it IS the field the reminder sweep fires
+// off, and "this date has already slipped three times" is only answerable if
+// every change lands through setTaskProposedCompletion's evidence path.
 const TASK_LIFECYCLE_UPDATE_FIELDS = new Set([
   "status",
   "blocked_reason",
   "completed_at",
   "cancelled_at",
+  "proposed_completion_at",
   "version",
 ]);
 
@@ -1253,7 +1258,23 @@ function assertNoProtectedLifecycleUpdate(query: TableQueryLike): void {
     TASK_LIFECYCLE_UPDATE_FIELDS.has(field),
   );
   if (attempted.length > 0) {
-    throw new Error("Task lifecycle fields require the named transition command");
+    throw new Error("Task lifecycle fields require a named task command");
+  }
+}
+
+// portal_deals.proposed_completion_date gets the same treatment as
+// tasks.proposed_completion_at for the same reason: it is the field the
+// reminder sweep acts on, and a date that has already slipped three times is
+// only visible if every change went through setDealProposedCompletion's
+// lock/version/evidence path. Every other portal_deals column stays on the
+// generic update path (deals.tsx's edit panel writes them in bulk).
+function assertNoProtectedDealDateUpdate(query: TableQueryLike): void {
+  if (query.table !== "portal_deals" || query.operation !== "update") return;
+  if (typeof query.values !== "object" || query.values === null || Array.isArray(query.values)) {
+    return;
+  }
+  if ("proposed_completion_date" in query.values) {
+    throw new Error("The proposed completion date requires the named deal command");
   }
 }
 
@@ -1289,6 +1310,7 @@ export async function applyTablePolicy(
   auth: TablePolicyAuthContext,
 ): Promise<TableQueryLike> {
   assertNoProtectedLifecycleUpdate(query);
+  assertNoProtectedDealDateUpdate(query);
   assertNoProtectedRewardMutation(query);
   await assertGovernedFeatureCapability(query, auth);
   const result = await applyTablePolicyInner(query, auth);

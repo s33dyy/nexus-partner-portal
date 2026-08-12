@@ -27,6 +27,7 @@ function buildDeal(overrides: Partial<DealRecord>): DealRecord {
     customer_budget: null,
     probability: 50,
     possible_close_date: "2026-08-01",
+    proposed_completion_date: null,
     close_date: "2026-08-01",
     source: "Partner referral",
     last_touch: "New",

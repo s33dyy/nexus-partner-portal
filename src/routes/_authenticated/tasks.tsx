@@ -1,22 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckSquare, Loader2, Plus } from "lucide-react";
+import { CalendarClock, CheckSquare, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Field, FieldGrid, FormDialog } from "@/components/ui/form-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -28,8 +20,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/local/client";
-import { createTask, transitionTask } from "@/integrations/local/task-commands";
-import { formatDateTimeLabel } from "@/lib/date-utils";
+import {
+  createTask,
+  setTaskProposedCompletion,
+  transitionTask,
+} from "@/integrations/local/task-commands";
+import { formatDateLabel, formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import type { TaskStatus } from "@/server/task-commands.server";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
@@ -43,6 +39,7 @@ type TaskRecord = {
   status: TaskStatus;
   priority: string;
   due_at: string | null;
+  proposed_completion_at: string | null;
   blocked_reason: string | null;
   version: number;
   created_at: string;
@@ -56,15 +53,40 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   cancelled: "Cancelled",
 };
 
-const STATUS_TONE: Record<TaskStatus, "secondary" | "outline" | "destructive" | "default"> = {
-  to_do: "outline",
-  in_progress: "default",
-  blocked: "destructive",
-  completed: "secondary",
-  cancelled: "destructive",
+type BadgeTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger";
+
+const STATUS_TONE: Record<TaskStatus, BadgeTone> = {
+  to_do: "neutral",
+  in_progress: "brand",
+  blocked: "danger",
+  completed: "success",
+  cancelled: "danger",
 };
 
-const EMPTY_DRAFT = { title: "", description: "", priority: "medium", due_at: "" };
+const PRIORITY_TONE: Record<string, BadgeTone> = {
+  low: "neutral",
+  medium: "info",
+  high: "warning",
+  urgent: "danger",
+};
+
+const EMPTY_DRAFT = {
+  title: "",
+  description: "",
+  priority: "medium",
+  due_at: "",
+  proposed_completion_at: "",
+};
+
+// A date input yields "YYYY-MM-DD" with no time. Anchoring it at midday
+// rather than midnight means the stored instant lands on the intended
+// calendar day in every timezone from UTC-11 to UTC+13, instead of silently
+// slipping to the day before for anyone west of Greenwich.
+function dateInputToIso(value: string): string | null {
+  if (!value) return null;
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
 
 function TasksPage() {
   const { profile } = useAuth();
@@ -80,6 +102,8 @@ function TasksPage() {
   } | null>(null);
   const [reason, setReason] = useState("");
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [dateEdit, setDateEdit] = useState<{ task: TaskRecord; value: string } | null>(null);
+  const [savingDate, setSavingDate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -118,7 +142,8 @@ function TasksPage() {
         title: draft.title,
         description: draft.description || null,
         priority: draft.priority,
-        dueAt: draft.due_at ? new Date(draft.due_at).toISOString() : null,
+        dueAt: dateInputToIso(draft.due_at),
+        proposedCompletionAt: dateInputToIso(draft.proposed_completion_at),
         assigneeId: profile?.id ?? null,
       });
       if (!result.ok) {
@@ -133,6 +158,31 @@ function TasksPage() {
       toast.error(error instanceof Error ? error.message : "Failed to create task");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const saveProposedDate = async () => {
+    if (!dateEdit) return;
+    setSavingDate(true);
+    try {
+      const result = await setTaskProposedCompletion({
+        taskId: dateEdit.task.id,
+        expectedVersion: dateEdit.task.version,
+        proposedCompletionAt: dateInputToIso(dateEdit.value),
+      });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success(
+        dateEdit.value ? "Proposed completion date updated" : "Proposed completion date cleared",
+      );
+      setDateEdit(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update the date");
+    } finally {
+      setSavingDate(false);
     }
   };
 
@@ -280,87 +330,92 @@ function TasksPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <CheckSquare className="h-3.5 w-3.5" /> Work management
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">My Tasks</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Track work items through to do, in progress, blocked, completed, and cancelled.
-          </p>
-        </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" /> New task
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create task</DialogTitle>
-              <DialogDescription>Add a new work item to your queue.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <Label htmlFor="task-title">Title</Label>
-                <Input
-                  id="task-title"
-                  value={draft.title}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
-                />
-              </div>
-              <div>
-                <Label htmlFor="task-description">Description</Label>
-                <Textarea
-                  id="task-description"
-                  value={draft.description}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, description: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Priority</Label>
-                  <Select
-                    value={draft.priority}
-                    onValueChange={(value) => setDraft((prev) => ({ ...prev, priority: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="task-due">Due date</Label>
-                  <Input
-                    id="task-due"
-                    type="date"
-                    value={draft.due_at}
-                    onChange={(event) =>
-                      setDraft((prev) => ({ ...prev, due_at: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button disabled={creating} onClick={() => void create()}>
-                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Create task
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Work management"
+        icon={<CheckSquare className="h-3.5 w-3.5" />}
+        title="My Tasks"
+        description="Track work items through to do, in progress, blocked, completed, and cancelled."
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> New task
+          </Button>
+        }
+      />
+
+      <FormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Create task"
+        description="Add a new work item to your queue."
+        busy={creating}
+        submitLabel="Create task"
+        busyLabel="Creating…"
+        submitDisabled={!draft.title.trim()}
+        onCancel={() => setDraft(EMPTY_DRAFT)}
+        onSubmit={create}
+      >
+        <Field label="Title" htmlFor="task-title" required>
+          <Input
+            id="task-title"
+            value={draft.title}
+            onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
+            autoFocus
+          />
+        </Field>
+        <Field label="Description" htmlFor="task-description">
+          <Textarea
+            id="task-description"
+            rows={3}
+            value={draft.description}
+            onChange={(event) => setDraft((prev) => ({ ...prev, description: event.target.value }))}
+          />
+        </Field>
+        <FieldGrid>
+          <Field label="Priority">
+            <Select
+              value={draft.priority}
+              onValueChange={(value) => setDraft((prev) => ({ ...prev, priority: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field
+            label="Due date"
+            htmlFor="task-due"
+            hint="The hard deadline, if one was set for you."
+          >
+            <Input
+              id="task-due"
+              type="date"
+              value={draft.due_at}
+              onChange={(event) => setDraft((prev) => ({ ...prev, due_at: event.target.value }))}
+            />
+          </Field>
+        </FieldGrid>
+        <Field
+          label="Proposed completion date"
+          htmlFor="task-proposed"
+          hint="Your own forecast for when this lands. Reminders are sent against this date."
+        >
+          <Input
+            id="task-proposed"
+            type="date"
+            value={draft.proposed_completion_at}
+            onChange={(event) =>
+              setDraft((prev) => ({ ...prev, proposed_completion_at: event.target.value }))
+            }
+          />
+        </Field>
+      </FormDialog>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
         <TabsList className="flex-wrap">
@@ -384,21 +439,36 @@ function TasksPage() {
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : visibleTasks.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No tasks in this view.
-            </div>
+            <EmptyState
+              icon={<CheckSquare className="h-5 w-5" />}
+              title="No tasks in this view"
+              description={
+                tab === "all"
+                  ? "Create a task to start tracking work and get reminders on its proposed completion date."
+                  : "Nothing sits in this status right now. Try another tab."
+              }
+              action={
+                tab === "all" ? (
+                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> New task
+                  </Button>
+                ) : null
+              }
+            />
           ) : (
             <div className="divide-y">
               {visibleTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="flex flex-wrap items-start justify-between gap-3 px-6 py-4"
+                  className="flex flex-wrap items-start justify-between gap-3 px-5 py-4"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{task.title}</span>
-                      <Badge variant={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
-                      <Badge variant="outline">{task.priority}</Badge>
+                      <span className="text-sm font-medium">{task.title}</span>
+                      <Badge tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+                      <Badge tone={PRIORITY_TONE[task.priority] ?? "neutral"}>
+                        {task.priority}
+                      </Badge>
                     </div>
                     {task.description && (
                       <p className="mt-1 text-sm text-muted-foreground">{task.description}</p>
@@ -408,9 +478,26 @@ function TasksPage() {
                         Blocked: {task.blocked_reason}
                       </p>
                     )}
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {task.due_at ? `Due ${formatDateTimeLabel(task.due_at)}` : "No due date"}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span>
+                        {task.due_at ? `Due ${formatDateTimeLabel(task.due_at)}` : "No due date"}
+                      </span>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-sm underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={() =>
+                          setDateEdit({
+                            task,
+                            value: toDateInputValue(task.proposed_completion_at),
+                          })
+                        }
+                      >
+                        <CalendarClock className="h-3 w-3" />
+                        {task.proposed_completion_at
+                          ? `Proposed ${formatDateLabel(task.proposed_completion_at)}`
+                          : "Set proposed completion"}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {busyTaskId === task.id ? (
@@ -426,24 +513,60 @@ function TasksPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={reasonPrompt !== null} onOpenChange={(open) => !open && setReasonPrompt(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {reasonPrompt ? `Move to ${STATUS_LABEL[reasonPrompt.toStatus]}` : ""}
-            </DialogTitle>
-            <DialogDescription>A reason is required for this change.</DialogDescription>
-          </DialogHeader>
+      <FormDialog
+        open={reasonPrompt !== null}
+        onOpenChange={(open) => !open && setReasonPrompt(null)}
+        title={reasonPrompt ? `Move to ${STATUS_LABEL[reasonPrompt.toStatus]}` : ""}
+        description="A reason is required for this change."
+        submitLabel="Confirm"
+        submitDisabled={!reason.trim()}
+        onSubmit={confirmReasonPrompt}
+      >
+        <Field label="Reason" htmlFor="task-reason" required>
           <Textarea
+            id="task-reason"
+            rows={3}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             placeholder="Why is this changing?"
+            autoFocus
           />
-          <DialogFooter>
-            <Button onClick={() => void confirmReasonPrompt()}>Confirm</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </Field>
+      </FormDialog>
+
+      <FormDialog
+        open={dateEdit !== null}
+        onOpenChange={(open) => !open && setDateEdit(null)}
+        title="Proposed completion date"
+        description={
+          dateEdit
+            ? `When do you expect "${dateEdit.task.title}" to be finished?`
+            : "When do you expect this to be finished?"
+        }
+        busy={savingDate}
+        submitLabel="Save date"
+        busyLabel="Saving…"
+        footerNote="Reminders go out 3 days and 1 day before, on the day, and if it slips."
+        onSubmit={saveProposedDate}
+      >
+        <Field
+          label="Proposed completion date"
+          htmlFor="task-proposed-edit"
+          hint="Leave empty to clear the date and stop reminders for this task."
+        >
+          <Input
+            id="task-proposed-edit"
+            type="date"
+            value={dateEdit?.value ?? ""}
+            onChange={(event) =>
+              setDateEdit((current) =>
+                current ? { ...current, value: event.target.value } : current,
+              )
+            }
+            autoFocus
+          />
+        </Field>
+      </FormDialog>
     </div>
   );
 }

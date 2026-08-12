@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { type AuditEventRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -90,58 +92,54 @@ function AdminAuditPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Audit logs</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Trace important workspace actions, approvals, and access changes.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-audit-events"
-            columns={AUDIT_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredEvents.map((event) => ({
-                created_at: event.created_at,
-                actor_name: event.actor_name,
-                actor_role: event.actor_role,
-                action: event.action,
-                target_type: event.target_type,
-                target_name: event.target_name,
-                outcome: event.outcome,
-                severity: event.severity,
-                details: event.details,
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Audit logs"
+        description="Trace important workspace actions, approvals, and access changes."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-audit-events"
+              columns={AUDIT_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredEvents.map((event) => ({
+                  created_at: event.created_at,
+                  actor_name: event.actor_name,
+                  actor_role: event.actor_role,
+                  action: event.action,
+                  target_type: event.target_type,
+                  target_name: event.target_name,
+                  outcome: event.outcome,
+                  severity: event.severity,
+                  details: event.details,
+                }))
+              }
+              variant="outline"
+            />
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric label="Events" value={String(stats.total)} hint="Recorded actions" />
@@ -191,8 +189,8 @@ function AdminAuditPage() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="font-medium">{event.action}</div>
-                        <Badge variant="outline">{event.severity}</Badge>
-                        <Badge>{event.outcome}</Badge>
+                        <Badge tone={resolveStatusTone(event.severity)}>{event.severity}</Badge>
+                        <Badge tone={resolveStatusTone(event.outcome)}>{event.outcome}</Badge>
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
                         {event.actor_name} · {event.actor_role} · {event.target_type}:{" "}

@@ -105,6 +105,28 @@ const markDealLostFn = createServerFn({ method: "POST" })
     });
   });
 
+const setDealProposedCompletionFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      dealId: string;
+      expectedVersion: number;
+      proposedCompletionDate: string | null;
+      reason?: string | null;
+    }) => input,
+  )
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { setDealProposedCompletion } = await import("@/server/deal-commands.server");
+    return setDealProposedCompletion({
+      actor: actorResult.actor,
+      dealId: data.dealId,
+      expectedVersion: data.expectedVersion,
+      proposedCompletionDate: data.proposedCompletionDate,
+      reason: data.reason ?? null,
+    });
+  });
+
 export async function createDeal(input: CreateDealInput): Promise<CommandExecutionResult> {
   return createDealFn({ data: input });
 }
@@ -186,4 +208,13 @@ export async function reviewDealRegistration(input: {
   reason?: string | null;
 }): Promise<CommandExecutionResult> {
   return reviewDealRegistrationFn({ data: input });
+}
+
+export async function setDealProposedCompletion(input: {
+  dealId: string;
+  expectedVersion: number;
+  proposedCompletionDate: string | null;
+  reason?: string | null;
+}): Promise<CommandExecutionResult> {
+  return setDealProposedCompletionFn({ data: input });
 }

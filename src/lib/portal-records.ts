@@ -44,6 +44,10 @@ export type DealRecord = {
   customer_budget: string | null;
   probability: number;
   possible_close_date: string | null;
+  // The owner's forecast for when this deal actually completes. Distinct from
+  // close_date (the committed close) and possible_close_date (the probable
+  // close used for pipeline weighting) — reminders fire off this one.
+  proposed_completion_date: string | null;
   close_date: string;
   source: string;
   last_touch: string;

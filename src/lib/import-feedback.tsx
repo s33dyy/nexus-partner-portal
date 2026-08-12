@@ -11,7 +11,7 @@ export function ImportFeedback(props: {
   return (
     <>
       {props.successMessage ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <div className="tint-success rounded-md border border-success/30 px-3 py-2 text-[13px] text-success">
           {props.successMessage}
         </div>
       ) : null}

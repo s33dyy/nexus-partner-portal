@@ -134,7 +134,11 @@ export function AppSidebar() {
     if (!list.length) return null;
     return (
       <SidebarGroup>
-        {!collapsed && <SidebarGroupLabel>{label}</SidebarGroupLabel>}
+        {!collapsed && (
+          <SidebarGroupLabel className="px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45">
+            {label}
+          </SidebarGroupLabel>
+        )}
         <SidebarGroupContent>
           <SidebarMenu>
             {list.map((item) => {
@@ -159,14 +163,14 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-primary/10 ring-1 ring-sidebar-border/70">
-            <BrandLogo variant="icon" className="h-7 w-7 rounded-md object-cover" />
+        <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border/60 px-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/15 ring-1 ring-sidebar-border/60">
+            <BrandLogo variant="icon" className="h-6 w-6 rounded object-cover" />
           </div>
           {!collapsed && (
-            <div className="flex flex-col leading-tight">
-              <BrandLogo variant="wordmark" className="h-5 w-auto max-w-[140px] object-contain" />
-              <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
+            <div className="flex min-w-0 flex-col leading-tight">
+              <BrandLogo variant="wordmark" className="h-4 w-auto max-w-[130px] object-contain" />
+              <span className="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-sidebar-foreground/50">
                 Partner Portal
               </span>
             </div>

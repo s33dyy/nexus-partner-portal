@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -136,21 +137,21 @@ function StateBadge({ state }: { state: ConnectionState }) {
   switch (state) {
     case "connected":
       return (
-        <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
+        <Badge tone="success">
           <CheckCircle2 className="mr-1 h-3 w-3" />
           Connected
         </Badge>
       );
     case "attention_needed":
       return (
-        <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+        <Badge tone="danger">
           <AlertTriangle className="mr-1 h-3 w-3" />
           Attention Needed
         </Badge>
       );
     case "paused":
       return (
-        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+        <Badge tone="warning">
           <PauseCircle className="mr-1 h-3 w-3" />
           Paused
         </Badge>
@@ -173,13 +174,16 @@ function AdminIntegrationsPage() {
   if (!hasRole("super_admin")) {
     return (
       <div className="flex h-[50vh] flex-col items-center justify-center gap-2 text-muted-foreground">
-        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <AlertTriangle className="h-8 w-8 text-warning" />
         <p>You must be a Super Admin to view the Integration Operations Centre.</p>
       </div>
     );
   }
 
-  const handleAction = async (id: string, action: "pause" | "resume" | "disconnect" | "reconnect") => {
+  const handleAction = async (
+    id: string,
+    action: "pause" | "resume" | "disconnect" | "reconnect",
+  ) => {
     setProcessingId(id);
     // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -212,23 +216,13 @@ function AdminIntegrationsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Activity className="h-3.5 w-3.5" />
-            Operations Centre
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">External Integrations</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Monitor and control durable provider adapters. Never share secrets or leak payloads.
-          </p>
-        </div>
-        <Button variant="outline">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Reconcile All
-        </Button>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Operations Centre"
+        icon={<Activity className="h-3.5 w-3.5" />}
+        title="External Integrations"
+        description="Monitor and control durable provider adapters. Never share secrets or leak payloads."
+      />
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {providers.map((provider) => {
@@ -273,19 +267,29 @@ function AdminIntegrationsPage() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
                       <div className="text-2xl font-semibold">{provider.queueDepth}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Queued</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Queued
+                      </div>
                     </div>
                     <div>
-                      <div className={`text-2xl font-semibold ${provider.deadLetterCount > 0 ? "text-red-600" : ""}`}>
+                      <div
+                        className={`text-2xl font-semibold ${provider.deadLetterCount > 0 ? "text-destructive" : ""}`}
+                      >
                         {provider.deadLetterCount}
                       </div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Failed</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Failed
+                      </div>
                     </div>
                     <div>
-                      <div className={`text-2xl font-semibold ${provider.conflicts > 0 ? "text-amber-600" : ""}`}>
+                      <div
+                        className={`text-2xl font-semibold ${provider.conflicts > 0 ? "text-warning" : ""}`}
+                      >
                         {provider.conflicts}
                       </div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Conflicts</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Conflicts
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -233,44 +234,39 @@ function InsightHubPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Page header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <GraduationCap className="h-3.5 w-3.5" />
-            Learning & Certification
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Insight Hub</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Master LIVEY products, grow your partnership tier, and earn certifications that unlock
-            partner rewards.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {hasRole("super_admin") && (
-            <Button asChild variant="outline" size="sm">
-              <Link to="/admin/learning">Manage content</Link>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
+      <PageHeader
+        eyebrow="Learning & Certification"
+        icon={<GraduationCap className="h-3.5 w-3.5" />}
+        title="Insight Hub"
+        description="Master LIVEY products, grow your partnership tier, and earn certifications that unlock partner rewards."
+        actions={
+          <>
+            {hasRole("super_admin") && (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/admin/learning">Manage content</Link>
+              </Button>
             )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {/* Learner progress summary */}
       {totalEnrolled > 0 && (
@@ -289,7 +285,7 @@ function InsightHubPage() {
               <div className="text-xs uppercase tracking-widest text-muted-foreground">
                 Completed
               </div>
-              <div className="text-2xl font-semibold text-emerald-600">{totalCompleted}</div>
+              <div className="text-2xl font-semibold text-success">{totalCompleted}</div>
               <div className="text-sm text-muted-foreground">Tracks finished and certified</div>
             </CardContent>
           </Card>
@@ -354,21 +350,19 @@ function InsightHubPage() {
               return (
                 <Card
                   key={track.id}
-                  className={`flex flex-col transition-shadow hover:shadow-md ${isCompleted ? "border-emerald-200 bg-emerald-50/30 dark:border-emerald-900 dark:bg-emerald-950/20" : ""}`}
+                  className={`flex flex-col transition-shadow hover:shadow-md ${isCompleted ? "border-success/30 tint-success" : ""}`}
                 >
                   <CardHeader className="space-y-2 pb-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                         {isCompleted ? (
-                          <Trophy className="h-5 w-5 text-emerald-600" />
+                          <Trophy className="h-5 w-5 text-success" />
                         ) : (
                           <Layers className="h-5 w-5 text-primary" />
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {isCompleted && (
-                          <Badge className="bg-emerald-600 text-white">Certified</Badge>
-                        )}
+                        {isCompleted && <Badge tone="success">Certified</Badge>}
                         {isEnrolled && !isCompleted && (
                           <Badge variant="secondary">In progress</Badge>
                         )}
@@ -434,7 +428,7 @@ function InsightHubPage() {
                           className="w-full"
                           onClick={() => handleViewCertificate(track, enrollment)}
                         >
-                          <Star className="mr-2 h-4 w-4 text-amber-500" />
+                          <Star className="mr-2 h-4 w-4 text-warning" />
                           View certificate
                         </Button>
                       ) : isEnrolled ? (
@@ -500,7 +494,7 @@ function TrackDetailPanel({
   const progress = enrollment?.progress_percent ?? 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-2">
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -558,7 +552,7 @@ function TrackDetailPanel({
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3">
                             {done ? (
-                              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
                             ) : (
                               <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/40" />
                             )}

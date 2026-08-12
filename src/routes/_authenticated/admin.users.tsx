@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Building2,
   Download,
   Loader2,
   RefreshCw,
@@ -8,10 +9,12 @@ import {
   ShieldCheck,
   Upload,
   UserRoundCog,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +27,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldGrid } from "@/components/ui/form-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/local/client";
 import { assignGovernedRole } from "@/integrations/local/role-assignment-commands";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -38,7 +41,6 @@ import {
   validateImportTemplate,
   type ImportValidationError,
 } from "@/lib/spreadsheet-import";
-import { cn } from "@/lib/utils";
 import {
   USER_IMPORT_TEMPLATE_COLUMNS,
   USER_IMPORT_TEMPLATE_SAMPLE,
@@ -93,6 +95,27 @@ type AssignmentRow = {
 
 const ROLE_OPTIONS = [...ROLE_KEYS] as const;
 const PARTNER_STATUS_OPTIONS = [...PARTNER_STATUSES] as const;
+
+/**
+ * Partner lifecycle state → semantic pill tone. Grey means nothing has been
+ * submitted yet, blue means it is moving through review, amber means someone
+ * is being waited on, green is done and red is rejected — so a directory of
+ * 200 users can be triaged by colour without reading a single label.
+ */
+const PARTNER_STATUS_TONES: Record<
+  PartnerStatus,
+  "neutral" | "brand" | "success" | "warning" | "info" | "danger"
+> = {
+  pending_partner_registration: "neutral",
+  submitted: "info",
+  under_review: "info",
+  need_more_info: "warning",
+  partial_approval: "warning",
+  pending_agreement: "warning",
+  signed_pending_review: "warning",
+  approved: "success",
+  rejected: "danger",
+};
 
 type GeographyMode = "global" | "region" | "country";
 
@@ -443,120 +466,122 @@ function AdminUsersPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Users & roles</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Manage internal and partner access, workspace roles, and account ownership.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">Live access</Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-users"
-            columns={USER_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredUsers.map((user) => ({
-                full_name: user.full_name,
-                email: user.email,
-                phone: user.phone,
-                company_name: user.company_name,
-                partner_id: user.partner_id,
-                partner_status: user.partner_status,
-                roles: user.roles.join(", "),
-                created_at: user.created_at,
-              }))
-            }
-            variant="outline"
-          />
-          <Button variant="outline" onClick={downloadImportTemplate}>
-            <Download className="mr-2 h-4 w-4" />
-            Download template CSV
-          </Button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importUsers(file);
-            }}
-          />
-          <Button
-            variant="outline"
-            onClick={() => importInputRef.current?.click()}
-            disabled={importing}
-          >
-            {importing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="mr-2 h-4 w-4" />
-            )}
-            Import CSV/XLSX
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Users & roles"
+        description="Manage internal and partner access, workspace roles, and account ownership."
+        actions={
+          <>
+            <Badge variant="secondary">Live access</Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-users"
+              columns={USER_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredUsers.map((user) => ({
+                  full_name: user.full_name,
+                  email: user.email,
+                  phone: user.phone,
+                  company_name: user.company_name,
+                  partner_id: user.partner_id,
+                  partner_status: user.partner_status,
+                  roles: user.roles.join(", "),
+                  created_at: user.created_at,
+                }))
+              }
+              variant="outline"
+            />
+            <Button variant="outline" onClick={downloadImportTemplate}>
+              <Download className="mr-2 h-4 w-4" />
+              Download template CSV
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importUsers(file);
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Import CSV/XLSX
+            </Button>
+          </>
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Users" value={String(users.length)} hint="Active profiles" />
-        <Metric
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatTile
+          label="Users"
+          value={String(users.length)}
+          hint="Active profiles"
+          icon={<Users className="h-4 w-4" />}
+        />
+        <StatTile
           label="Admins"
           value={String(users.filter((user) => user.roles.includes("super_admin")).length)}
           hint="Internal access"
+          icon={<ShieldCheck className="h-4 w-4" />}
+          tone="brand"
         />
-        <Metric
+        <StatTile
           label="Partner users"
           value={String(
             users.filter((user) => user.roles.some((role) => role.startsWith("partner"))).length,
           )}
           hint="External access"
+          icon={<Building2 className="h-4 w-4" />}
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader className="space-y-4 border-b">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-base">User directory</CardTitle>
-                <CardDescription>Search and switch between live access records.</CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <LookupCombobox
-                  fieldName={LOOKUP_FIELDS.userRole}
-                  label="Role"
-                  value={roleFilter === "all" ? "" : roleFilter}
-                  onValueChange={(value) => setRoleFilter(value || "all")}
-                  placeholder="All roles"
-                  clearLabel="All roles"
-                  allowClear
-                  options={[...ROLE_OPTIONS]}
-                  triggerClassName="w-44"
-                />
-              </div>
+            <div className="space-y-1">
+              <CardTitle>User directory</CardTitle>
+              <CardDescription>Search and switch between live access records.</CardDescription>
             </div>
+            <Toolbar>
+              <LookupCombobox
+                fieldName={LOOKUP_FIELDS.userRole}
+                label="Role"
+                value={roleFilter === "all" ? "" : roleFilter}
+                onValueChange={(value) => setRoleFilter(value || "all")}
+                placeholder="All roles"
+                clearLabel="All roles"
+                allowClear
+                options={[...ROLE_OPTIONS]}
+                triggerClassName="w-44"
+              />
+            </Toolbar>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
@@ -565,7 +590,11 @@ function AdminUsersPage() {
                 Loading users...
               </div>
             ) : filteredUsers.length === 0 ? (
-              <div className="p-8 text-sm text-muted-foreground">No users match this view.</div>
+              <EmptyState
+                icon={<Users className="h-5 w-5" />}
+                title="No users match this view."
+                description="Nothing matches the current role filter. Choose All roles to see every access record."
+              />
             ) : (
               <div className="divide-y">
                 {filteredUsers.map((user) => (
@@ -575,23 +604,27 @@ function AdminUsersPage() {
                       setSelectedId(user.id);
                       setEditOpen(true);
                     }}
-                    className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-muted/40 ${
-                      selectedUser?.id === user.id ? "bg-muted/40" : ""
+                    className={`flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-secondary/60 ${
+                      selectedUser?.id === user.id ? "bg-secondary/60" : ""
                     }`}
                   >
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate font-medium">{user.full_name}</div>
-                        <Badge variant="outline">{user.partner_status}</Badge>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-[13px] font-medium">{user.full_name}</div>
+                        <Badge tone={PARTNER_STATUS_TONES[user.partner_status] ?? "neutral"}>
+                          {user.partner_status}
+                        </Badge>
                       </div>
-                      <div className="mt-1 text-sm text-muted-foreground">{user.email}</div>
-                      <div className="mt-1 flex flex-wrap gap-2">
+                      <div className="mt-1 text-[13px] text-muted-foreground">{user.email}</div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {user.roles.map((role) => (
-                          <Badge key={role}>{role}</Badge>
+                          <Badge key={role} tone="brand">
+                            {role}
+                          </Badge>
                         ))}
                       </div>
                     </div>
-                    <div className="text-right text-sm text-muted-foreground">
+                    <div className="shrink-0 text-right text-[13px] text-muted-foreground">
                       <div>{user.company_name ?? "No company"}</div>
                       <div>{user.phone ?? "No phone"}</div>
                     </div>
@@ -602,19 +635,20 @@ function AdminUsersPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">Create user</CardTitle>
+            <CardHeader>
+              <CardTitle>Create user</CardTitle>
               <CardDescription>
                 Create partner admins or active partner users from the super-admin account.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4 pt-6">
+            <CardContent className="space-y-4">
               <ImportFeedback successMessage={importMessage} errors={importErrors} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Full name">
+              <FieldGrid columns={2}>
+                <Field label="Full name" htmlFor="new-user-full-name">
                   <Input
+                    id="new-user-full-name"
                     value={newUser.full_name}
                     onChange={(e) =>
                       setNewUser((current) => ({ ...current, full_name: e.target.value }))
@@ -622,8 +656,9 @@ function AdminUsersPage() {
                     placeholder="Asha Mehta"
                   />
                 </Field>
-                <Field label="Email">
+                <Field label="Email" htmlFor="new-user-email">
                   <Input
+                    id="new-user-email"
                     type="email"
                     value={newUser.email}
                     onChange={(e) =>
@@ -632,8 +667,9 @@ function AdminUsersPage() {
                     placeholder="partner@example.com"
                   />
                 </Field>
-                <Field label="Phone">
+                <Field label="Phone" htmlFor="new-user-phone">
                   <Input
+                    id="new-user-phone"
                     value={newUser.phone}
                     onChange={(e) =>
                       setNewUser((current) => ({ ...current, phone: e.target.value }))
@@ -641,8 +677,9 @@ function AdminUsersPage() {
                     placeholder="+91 98765 43210"
                   />
                 </Field>
-                <Field label="Company">
+                <Field label="Company" htmlFor="new-user-company">
                   <Input
+                    id="new-user-company"
                     value={newUser.company_name}
                     onChange={(e) =>
                       setNewUser((current) => ({ ...current, company_name: e.target.value }))
@@ -650,8 +687,9 @@ function AdminUsersPage() {
                     placeholder="Techilla"
                   />
                 </Field>
-                <Field label="Password" className="md:col-span-2">
+                <Field label="Password" htmlFor="new-user-password" className="sm:col-span-2">
                   <Input
+                    id="new-user-password"
                     type="password"
                     value={newUser.password}
                     onChange={(e) =>
@@ -660,7 +698,11 @@ function AdminUsersPage() {
                     placeholder="Set an initial password"
                   />
                 </Field>
-                <Field label="Role" className="md:col-span-2">
+                <Field
+                  label="Role"
+                  className="sm:col-span-2"
+                  hint={ROLE_KEY_LABELS[newUser.role] ?? newUser.role}
+                >
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.userRole}
                     label="Role"
@@ -671,11 +713,8 @@ function AdminUsersPage() {
                     options={[...ROLE_OPTIONS]}
                     allowCreate={false}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {ROLE_KEY_LABELS[newUser.role] ?? newUser.role}
-                  </p>
                 </Field>
-              </div>
+              </FieldGrid>
               <Button onClick={() => void createUser()} disabled={creating}>
                 {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Create user
@@ -698,38 +737,43 @@ function AdminUsersPage() {
 
           {selectedUser ? (
             <>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-md border bg-secondary/40 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Email
                   </div>
-                  <div className="mt-1 text-sm font-medium">{selectedUser.email}</div>
+                  <div className="mt-1 truncate text-[13px] font-medium">{selectedUser.email}</div>
                 </div>
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                <div className="rounded-md border bg-secondary/40 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Company
                   </div>
-                  <div className="mt-1 text-sm font-medium">
+                  <div className="mt-1 truncate text-[13px] font-medium">
                     {selectedUser.company_name ?? "Not set"}
                   </div>
                 </div>
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                <div className="rounded-md border bg-secondary/40 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Phone
                   </div>
-                  <div className="mt-1 text-sm font-medium">{selectedUser.phone ?? "Not set"}</div>
+                  <div className="mt-1 truncate text-[13px] font-medium">
+                    {selectedUser.phone ?? "Not set"}
+                  </div>
                 </div>
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                <div className="rounded-md border bg-secondary/40 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Created
                   </div>
-                  <div className="mt-1 text-sm font-medium">
+                  <div className="mt-1 truncate text-[13px] font-medium">
                     {new Date(selectedUser.created_at).toLocaleDateString()}
                   </div>
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Primary role">
+              <FieldGrid columns={2}>
+                <Field
+                  label="Primary role"
+                  hint={ROLE_KEY_LABELS[draftRole as RoleKey] ?? draftRole}
+                >
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.userRole}
                     label="Role"
@@ -737,9 +781,6 @@ function AdminUsersPage() {
                     onValueChange={setDraftRole}
                     options={[...ROLE_OPTIONS]}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {ROLE_KEY_LABELS[draftRole as RoleKey] ?? draftRole}
-                  </p>
                 </Field>
                 <Field label="Partner status">
                   <LookupCombobox
@@ -750,9 +791,9 @@ function AdminUsersPage() {
                     options={[...PARTNER_STATUS_OPTIONS]}
                   />
                 </Field>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Region access">
+              </FieldGrid>
+              <FieldGrid columns={3}>
+                <Field label="Region access" htmlFor="edit-region-access">
                   <Select
                     value={draftGeographyMode}
                     onValueChange={(value) => {
@@ -766,7 +807,7 @@ function AdminUsersPage() {
                       }
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="edit-region-access">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -777,7 +818,7 @@ function AdminUsersPage() {
                   </Select>
                 </Field>
                 {draftGeographyMode !== "global" ? (
-                  <Field label="Sales region">
+                  <Field label="Sales region" htmlFor="edit-sales-region">
                     <Select
                       value={draftGeographyRegion}
                       onValueChange={(value) => {
@@ -785,7 +826,7 @@ function AdminUsersPage() {
                         setDraftGeographyCountry("");
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger id="edit-sales-region">
                         <SelectValue placeholder="Choose a region" />
                       </SelectTrigger>
                       <SelectContent>
@@ -799,9 +840,9 @@ function AdminUsersPage() {
                   </Field>
                 ) : null}
                 {draftGeographyMode === "country" && draftGeographyRegion ? (
-                  <Field label="Country">
+                  <Field label="Country" htmlFor="edit-country">
                     <Select value={draftGeographyCountry} onValueChange={setDraftGeographyCountry}>
-                      <SelectTrigger>
+                      <SelectTrigger id="edit-country">
                         <SelectValue placeholder="Choose a country" />
                       </SelectTrigger>
                       <SelectContent>
@@ -816,7 +857,7 @@ function AdminUsersPage() {
                     </Select>
                   </Field>
                 ) : null}
-              </div>
+              </FieldGrid>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button
                   variant="secondary"
@@ -863,22 +904,5 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Field({
-  label,
-  children,
-  className,
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("space-y-2", className)}>
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }

@@ -4,6 +4,7 @@ import { ExternalLink, FileText, Loader2, RefreshCw, Search, Trash2, Upload } fr
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -329,32 +330,28 @@ function DealDocumentsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" />
-            Workspace
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Deal Documents</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Upload won-deal purchase orders and keep each partner's commercial records isolated.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {documents.length === 0 ? "No deal documents" : "Live docs"}
-          </Badge>
-          <Button variant="outline" onClick={refresh} disabled={loading || refreshing}>
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<FileText className="h-3.5 w-3.5" />}
+        title="Deal Documents"
+        description="Upload won-deal purchase orders and keep each partner's commercial records isolated."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {documents.length === 0 ? "No deal documents" : "Live docs"}
+            </Badge>
+            <Button variant="outline" onClick={refresh} disabled={loading || refreshing}>
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader className="space-y-4 border-b">
@@ -454,9 +451,11 @@ function DealDocumentsPage() {
               Loading deal documents...
             </div>
           ) : filteredDocuments.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-              No matching deal documents are available.
-            </div>
+            <EmptyState
+              icon={<FileText className="h-5 w-5" />}
+              title="No matching deal documents"
+              description="Try clearing the search or filters to see every document on your deals."
+            />
           ) : (
             <div className="divide-y">
               {filteredDocuments.map((doc) => (

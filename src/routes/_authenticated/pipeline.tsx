@@ -1,22 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, MoveLeft, RefreshCw, MoveRight, Search, Target } from "lucide-react";
+import {
+  DollarSign,
+  Loader2,
+  MoveLeft,
+  MoveRight,
+  Percent,
+  RefreshCw,
+  Search,
+  Target,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { LookupCombobox } from "@/components/lookup-combobox";
+import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Field, FormDialog } from "@/components/ui/form-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import {
@@ -383,70 +386,66 @@ function PipelinePage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Target className="h-3.5 w-3.5" />
-            Workspace
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Pipeline</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Visualize every deal by stage and push opportunities forward with a single action.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export visible queue"
-            filenameStem="livey-pipeline"
-            columns={PIPELINE_EXPORT_COLUMNS}
-            loadRows={async () =>
-              visibleDeals.map((deal) => ({
-                account_name: deal.account_name,
-                contact_name: deal.contact_name,
-                owner_name: deal.owner_name,
-                country: deal.country,
-                region: deal.region,
-                product: deal.product,
-                stage: deal.stage,
-                status: deal.status,
-                quantity: deal.quantity,
-                amount: deal.amount,
-                currency_code: deal.currency_code,
-                amount_usd: deal.amount_usd,
-                customer_budget: deal.customer_budget,
-                probability: deal.probability,
-                possible_close_date: deal.possible_close_date,
-                close_date: deal.close_date,
-                source: deal.source,
-                last_touch: deal.last_touch,
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<Target className="h-3.5 w-3.5" />}
+        title="Pipeline"
+        description="Visualize every deal by stage and push opportunities forward with a single action."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export visible queue"
+              filenameStem="livey-pipeline"
+              columns={PIPELINE_EXPORT_COLUMNS}
+              loadRows={async () =>
+                visibleDeals.map((deal) => ({
+                  account_name: deal.account_name,
+                  contact_name: deal.contact_name,
+                  owner_name: deal.owner_name,
+                  country: deal.country,
+                  region: deal.region,
+                  product: deal.product,
+                  stage: deal.stage,
+                  status: deal.status,
+                  quantity: deal.quantity,
+                  amount: deal.amount,
+                  currency_code: deal.currency_code,
+                  amount_usd: deal.amount_usd,
+                  customer_budget: deal.customer_budget,
+                  probability: deal.probability,
+                  possible_close_date: deal.possible_close_date,
+                  close_date: deal.close_date,
+                  source: deal.source,
+                  last_touch: deal.last_touch,
+                }))
+              }
+              variant="outline"
+            />
+          </>
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
-        <MetricCard
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatTile
           label="Pipeline value"
           value={
             pipelineMetric
@@ -464,38 +463,44 @@ function PipelinePage() {
                 : "Open (Sourced–Negotiation) at current DTP"
               : "Unable to load scoped pipeline"
           }
+          icon={<DollarSign className="h-4 w-4" />}
+          tone={pipelineMetric ? "brand" : "warning"}
         />
-        <MetricCard label="Deal count" value={String(totals.count)} hint="Visible opportunities" />
-        <MetricCard
+        <StatTile
+          label="Deal count"
+          value={String(totals.count)}
+          hint="Visible opportunities"
+          icon={<Target className="h-4 w-4" />}
+        />
+        <StatTile
           label="Avg. probability"
           value={`${totals.weighted}%`}
           hint="Across the visible queue"
+          icon={<Percent className="h-4 w-4" />}
         />
       </div>
 
       <Card>
-        <CardHeader className="space-y-4 border-b">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle className="text-base">Stage board</CardTitle>
-              <CardDescription>
-                Move records across the pipeline using the live Postgres records.
-              </CardDescription>
-            </div>
-            <div className="flex w-full flex-col gap-2 md:flex-row lg:w-auto lg:justify-end">
-              <LookupCombobox
-                fieldName={LOOKUP_FIELDS.dealStage}
-                label="Stage"
-                value={stageFilter === "all" ? "" : stageFilter}
-                onValueChange={(value) => setStageFilter((value as DealRecord["stage"]) || "all")}
-                placeholder="All stages"
-                clearLabel="All stages"
-                allowClear
-                options={DEAL_STAGE_ORDER.map((stage) => stage)}
-                triggerClassName="w-full md:w-44"
-              />
-            </div>
+        <CardHeader className="space-y-3 border-b">
+          <div>
+            <CardTitle>Stage board</CardTitle>
+            <CardDescription>
+              Move records across the pipeline using the live Postgres records.
+            </CardDescription>
           </div>
+          <Toolbar>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.dealStage}
+              label="Stage"
+              value={stageFilter === "all" ? "" : stageFilter}
+              onValueChange={(value) => setStageFilter((value as DealRecord["stage"]) || "all")}
+              placeholder="All stages"
+              clearLabel="All stages"
+              allowClear
+              options={DEAL_STAGE_ORDER.map((stage) => stage)}
+              triggerClassName="w-full sm:w-44"
+            />
+          </Toolbar>
         </CardHeader>
         <CardContent className="overflow-x-auto p-4">
           {loading ? (
@@ -503,91 +508,85 @@ function PipelinePage() {
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading pipeline...
             </div>
+          ) : visibleDeals.length === 0 ? (
+            <EmptyState
+              icon={<Target className="h-5 w-5" />}
+              title="No deals on the board"
+              description="No opportunities match the current stage filter and region scope."
+            />
           ) : (
-            <div className="grid min-w-[840px] gap-4 md:min-w-[920px] xl:grid-cols-7">
+            <div className="flex gap-3 pb-1">
               {grouped.map((column) => (
                 <div
                   key={column.stage}
-                  className="space-y-3 rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.95))] p-3 shadow-sm"
+                  className="flex w-[248px] shrink-0 flex-col gap-2 rounded-lg border bg-secondary/40 p-2"
                 >
-                  <div className="flex items-center justify-between gap-2 rounded-xl border bg-background/80 px-3 py-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
-                        Stage
-                      </div>
-                      <div className="text-sm font-semibold capitalize">{column.stage}</div>
-                    </div>
-                    <Badge variant="outline">{column.deals.length}</Badge>
+                  <div className="flex items-center justify-between gap-2 rounded-md bg-card px-2.5 py-1.5">
+                    <span className="truncate text-[13px] font-semibold capitalize">
+                      {column.stage}
+                    </span>
+                    <Badge variant="outline" data-numeric>
+                      {column.deals.length}
+                    </Badge>
                   </div>
-                  <div className="space-y-3">
-                    {column.deals.length === 0 ? (
-                      <div className="rounded-xl border border-dashed bg-background/70 p-4 text-xs text-muted-foreground">
-                        No deals in this stage.
-                      </div>
-                    ) : (
-                      column.deals.map((deal) => (
-                        <div
-                          key={deal.id}
-                          className="group relative rounded-xl border border-border/70 bg-background p-3 pb-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-1 focus-within:ring-ring"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium">
-                                {deal.account_name}
-                              </div>
-                            </div>
-                            <Badge className="rounded-full px-3 py-1">{deal.amount}</Badge>
+                  {column.deals.length === 0 ? (
+                    <p className="rounded-md border border-dashed px-2.5 py-4 text-center text-xs text-muted-foreground">
+                      No deals in this stage.
+                    </p>
+                  ) : (
+                    column.deals.map((deal) => (
+                      <div
+                        key={deal.id}
+                        className="rounded-md border bg-card p-2.5 shadow-card transition-colors focus-within:ring-1 focus-within:ring-ring hover:border-ring/40"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 truncate text-[13px] font-medium">
+                            {deal.account_name}
                           </div>
-                          <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
-                            <div className="grid gap-2">
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-                                {deal.owner_name}
-                              </div>
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-                                {deal.region}
-                              </div>
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-                                {deal.product}
-                              </div>
-                              <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-                                {formatDealProbability(deal.probability)}
-                              </div>
-                            </div>
-                            <div className="grid gap-2 pt-1">
-                              <Button
-                                className="w-full"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void moveDeal(deal)}
-                              >
-                                Move forward
-                                <MoveRight className="ml-2 h-4 w-4" />
-                              </Button>
-                              {getValidBackwardStages(deal.stage).length > 0 ? (
-                                <Button
-                                  className="w-full"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openBackward(deal)}
-                                >
-                                  <MoveLeft className="mr-2 h-4 w-4" />
-                                  Move backward
-                                </Button>
-                              ) : null}
-                              <Button
-                                className="w-full"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => openNote(deal)}
-                              >
-                                Notes
-                              </Button>
-                            </div>
-                          </div>
+                          <Badge variant="outline" className="shrink-0" data-numeric>
+                            {deal.amount}
+                          </Badge>
                         </div>
-                      ))
-                    )}
-                  </div>
+                        <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                          <div className="truncate">{deal.owner_name}</div>
+                          <div className="truncate">
+                            {deal.region} · {deal.product}
+                          </div>
+                          <div className="truncate">{formatDealProbability(deal.probability)}</div>
+                        </div>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          <Button
+                            className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void moveDeal(deal)}
+                          >
+                            Move forward
+                            <MoveRight />
+                          </Button>
+                          {getValidBackwardStages(deal.stage).length > 0 ? (
+                            <Button
+                              className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openBackward(deal)}
+                            >
+                              <MoveLeft />
+                              Move backward
+                            </Button>
+                          ) : null}
+                          <Button
+                            className="h-7 px-2 text-[11px]"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openNote(deal)}
+                          >
+                            Notes
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               ))}
             </div>
@@ -595,105 +594,70 @@ function PipelinePage() {
         </CardContent>
       </Card>
 
-      <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Deal notes</DialogTitle>
-            <DialogDescription>
-              Capture a stage update or next step without leaving the pipeline board.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid gap-2 text-sm">
-              <div className="font-medium">{noteDeal?.account_name ?? "Selected deal"}</div>
-              <div className="text-muted-foreground">
-                {noteDeal?.product ?? "Deal"} · {noteDeal?.stage ?? "stage"}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pipeline-note">Note</Label>
-              <Textarea
-                id="pipeline-note"
-                value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                placeholder="Add context, blockers, or next steps..."
-                rows={6}
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setNoteOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => void saveNote()}>Save note</Button>
-            </div>
+      <FormDialog
+        open={noteOpen}
+        onOpenChange={setNoteOpen}
+        title="Deal notes"
+        description="Capture a stage update or next step without leaving the pipeline board."
+        size="lg"
+        submitLabel="Save note"
+        onSubmit={() => void saveNote()}
+      >
+        <div className="space-y-0.5">
+          <div className="text-sm font-medium">{noteDeal?.account_name ?? "Selected deal"}</div>
+          <div className="text-[13px] text-muted-foreground">
+            {noteDeal?.product ?? "Deal"} · {noteDeal?.stage ?? "stage"}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+        <Field label="Note" htmlFor="pipeline-note">
+          <Textarea
+            id="pipeline-note"
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            placeholder="Add context, blockers, or next steps..."
+            rows={6}
+          />
+        </Field>
+      </FormDialog>
 
-      <Dialog open={backwardOpen} onOpenChange={setBackwardOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Move deal backward</DialogTitle>
-            <DialogDescription>
-              Destination stage and a reason are both required (product.md §9.10/§9.19).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid gap-2 text-sm">
-              <div className="font-medium">{backwardDeal?.account_name ?? "Selected deal"}</div>
-              <div className="text-muted-foreground">
-                Currently at <span className="capitalize">{backwardDeal?.stage ?? "stage"}</span>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pipeline-backward-stage">Destination stage</Label>
-              <LookupCombobox
-                fieldName={LOOKUP_FIELDS.dealStage}
-                label="Destination stage"
-                value={backwardTargetStage}
-                onValueChange={(value) => setBackwardTargetStage(value as DealStage)}
-                placeholder="Select a stage"
-                options={backwardDeal ? getValidBackwardStages(backwardDeal.stage) : []}
-                allowCreate={false}
-                triggerClassName="w-full"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pipeline-backward-reason">Reason (required)</Label>
-              <Textarea
-                id="pipeline-backward-reason"
-                value={backwardReason}
-                onChange={(e) => setBackwardReason(e.target.value)}
-                placeholder="e.g. Customer needs another demo before testing can start..."
-                rows={4}
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setBackwardOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => void confirmBackward()}
-                disabled={!backwardTargetStage || !backwardReason.trim()}
-              >
-                Confirm move backward
-              </Button>
-            </div>
+      <FormDialog
+        open={backwardOpen}
+        onOpenChange={setBackwardOpen}
+        title="Move deal backward"
+        description="Destination stage and a reason are both required (product.md §9.10/§9.19)."
+        size="lg"
+        submitLabel="Confirm move backward"
+        submitDisabled={!backwardTargetStage || !backwardReason.trim()}
+        onSubmit={() => void confirmBackward()}
+      >
+        <div className="space-y-0.5">
+          <div className="text-sm font-medium">{backwardDeal?.account_name ?? "Selected deal"}</div>
+          <div className="text-[13px] text-muted-foreground">
+            Currently at <span className="capitalize">{backwardDeal?.stage ?? "stage"}</span>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+        <Field label="Destination stage" htmlFor="pipeline-backward-stage">
+          <LookupCombobox
+            fieldName={LOOKUP_FIELDS.dealStage}
+            label="Destination stage"
+            value={backwardTargetStage}
+            onValueChange={(value) => setBackwardTargetStage(value as DealStage)}
+            placeholder="Select a stage"
+            options={backwardDeal ? getValidBackwardStages(backwardDeal.stage) : []}
+            allowCreate={false}
+            triggerClassName="w-full"
+          />
+        </Field>
+        <Field label="Reason (required)" htmlFor="pipeline-backward-reason">
+          <Textarea
+            id="pipeline-backward-reason"
+            value={backwardReason}
+            onChange={(e) => setBackwardReason(e.target.value)}
+            placeholder="e.g. Customer needs another demo before testing can start..."
+            rows={4}
+          />
+        </Field>
+      </FormDialog>
     </div>
-  );
-}
-
-function MetricCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <Card>
-      <CardContent className="space-y-1 p-5">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-        <div className="text-2xl font-semibold tracking-tight">{value}</div>
-        <div className="text-sm text-muted-foreground">{hint}</div>
-      </CardContent>
-    </Card>
   );
 }

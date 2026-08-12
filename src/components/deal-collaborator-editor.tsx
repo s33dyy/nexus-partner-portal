@@ -120,7 +120,7 @@ export function DealCollaboratorEditor({
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline">{orderedCollaborators.length}/4 collaborators</Badge>
-          <Badge variant={Math.round(totalSplit) === 100 ? "secondary" : "destructive"}>
+          <Badge tone={Math.round(totalSplit) === 100 ? "success" : "danger"}>
             {Math.round(totalSplit)}%
           </Badge>
         </div>

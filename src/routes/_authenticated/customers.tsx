@@ -1,9 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Loader2, Plus, RefreshCw, Search, Upload, Users } from "lucide-react";
+import {
+  Activity,
+  CircleCheck,
+  Download,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,9 +25,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldGrid } from "@/components/ui/form-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
@@ -38,6 +49,7 @@ import type { DropdownOption } from "@/lib/dropdown-sources";
 import { formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
+import { resolveStatusTone } from "@/lib/status-tone";
 import {
   type CustomerActivityRecord,
   type CustomerParticipantRecord,
@@ -659,93 +671,106 @@ function CustomersPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Users className="h-3.5 w-3.5" />
-            Workspace
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Customers</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Reserve accounts, track health, and keep customer ownership visible across the portal.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-customers"
-            columns={CUSTOMER_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredCustomers.map((customer) => ({
-                company_name: customer.company_name,
-                account_owner: customer.account_owner,
-                region: customer.region,
-                segment: customer.segment,
-                health_score: customer.health_score,
-                mrr: customer.mrr,
-                renewal_date: customer.renewal_date,
-                status: customer.status,
-                next_step: customer.next_step,
-                last_touch: customer.last_touch,
-              }))
-            }
-            variant="outline"
-          />
-          <Button variant="outline" onClick={downloadImportTemplate}>
-            <Download className="mr-2 h-4 w-4" />
-            Download template CSV
-          </Button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importCustomers(file);
-            }}
-          />
-          <Button
-            variant="outline"
-            onClick={() => importInputRef.current?.click()}
-            disabled={importing}
-          >
-            {importing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="mr-2 h-4 w-4" />
-            )}
-            Import CSV/XLSX
-          </Button>
-        </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={<Users className="h-3.5 w-3.5" />}
+        title="Customers"
+        description="Reserve accounts, track health, and keep customer ownership visible across the portal."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-customers"
+              columns={CUSTOMER_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredCustomers.map((customer) => ({
+                  company_name: customer.company_name,
+                  account_owner: customer.account_owner,
+                  region: customer.region,
+                  segment: customer.segment,
+                  health_score: customer.health_score,
+                  mrr: customer.mrr,
+                  renewal_date: customer.renewal_date,
+                  status: customer.status,
+                  next_step: customer.next_step,
+                  last_touch: customer.last_touch,
+                }))
+              }
+              variant="outline"
+            />
+            <Button variant="outline" onClick={downloadImportTemplate}>
+              <Download className="mr-2 h-4 w-4" />
+              Download template CSV
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importCustomers(file);
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Import CSV/XLSX
+            </Button>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatTile
+          label="Accounts"
+          value={String(stats.total)}
+          hint="Current account rows"
+          icon={<Users className="h-4 w-4" />}
+        />
+        <StatTile
+          label="Active"
+          value={String(stats.active)}
+          hint="Live accounts"
+          icon={<CircleCheck className="h-4 w-4" />}
+          tone="success"
+        />
+        <StatTile
+          label="Avg. health"
+          value={`${stats.avg}%`}
+          hint="Account health score"
+          icon={<Activity className="h-4 w-4" />}
+          tone="brand"
+        />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Accounts" value={String(stats.total)} hint="Current account rows" />
-        <Metric label="Active" value={String(stats.active)} hint="Live accounts" />
-        <Metric label="Avg. health" value={`${stats.avg}%`} hint="Account health score" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.95fr]">
         <Card>
           <CardHeader className="space-y-4 border-b">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -797,7 +822,7 @@ function CustomersPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="truncate font-medium">{customer.company_name}</div>
-                        <Badge variant="outline">{customer.status}</Badge>
+                        <Badge tone={resolveStatusTone(customer.status)}>{customer.status}</Badge>
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
                         {customer.account_owner} · {customer.segment} · {customer.region}
@@ -1381,14 +1406,5 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
         <div className="text-sm text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }

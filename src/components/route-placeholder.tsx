@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Lock, Sparkles } from "lucide-react";
 
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,22 +30,18 @@ export function RoutePlaceholderPage({
   ctaTo = "/dashboard",
 }: RoutePlaceholderProps) {
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5" />
-            {eyebrow}
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>
-        </div>
-        <Badge variant="secondary">MVP stub</Badge>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow={eyebrow}
+        icon={<Sparkles className="h-3.5 w-3.5" />}
+        title={title}
+        description={description}
+        actions={<Badge tone="neutral">MVP stub</Badge>}
+      />
 
       <Card className="border-dashed">
         <CardHeader>
-          <CardTitle className="text-base">What this page will cover</CardTitle>
+          <CardTitle>What this page will cover</CardTitle>
           <CardDescription>
             The nav is wired. This page is ready for the next round of product work.
           </CardDescription>
@@ -52,7 +49,7 @@ export function RoutePlaceholderPage({
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {bullets.map((bullet) => (
-              <div key={bullet} className="rounded-lg border bg-muted/30 p-4 text-sm">
+              <div key={bullet} className="rounded-md border bg-secondary/50 p-3 text-[13px]">
                 {bullet}
               </div>
             ))}
@@ -77,20 +74,22 @@ export function AccessDeniedPage({
   description = "This section is available to a more privileged workspace role.",
 }: AccessDeniedProps) {
   return (
-    <Card className="border-dashed">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-          You need <span className="font-medium text-foreground">{roleLabel}</span> access to view
-          this page.
-        </div>
-        <Button asChild variant="outline">
-          <Link to="/dashboard">Back to dashboard</Link>
-        </Button>
-      </CardContent>
+    <Card>
+      <EmptyState
+        icon={<Lock className="h-5 w-5" />}
+        title={title}
+        description={
+          <>
+            {description} You need <span className="font-medium text-foreground">{roleLabel}</span>{" "}
+            access to view this page.
+          </>
+        }
+        action={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/dashboard">Back to dashboard</Link>
+          </Button>
+        }
+      />
     </Card>
   );
 }

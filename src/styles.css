@@ -60,35 +60,56 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /*
+   * Elevation is deliberately near-flat. In a dense CRM the card border plus
+   * the canvas/surface contrast below already separate surfaces, so a diffuse
+   * drop shadow on every card just makes the page look soft and muddy. These
+   * read as a crisp hairline, not a float.
+   */
   --shadow-elevated:
-    0 1px 2px 0 color-mix(in oklab, var(--foreground) 6%, transparent),
-    0 8px 24px -12px color-mix(in oklab, var(--foreground) 12%, transparent);
-  --shadow-card:
-    0 1px 0 0 color-mix(in oklab, var(--foreground) 4%, transparent),
-    0 1px 3px 0 color-mix(in oklab, var(--foreground) 6%, transparent);
+    0 1px 2px 0 color-mix(in oklab, var(--foreground) 8%, transparent),
+    0 8px 24px -12px color-mix(in oklab, var(--foreground) 16%, transparent);
+  --shadow-card: 0 1px 2px 0 color-mix(in oklab, var(--foreground) 5%, transparent);
+
+  /* Soft tinted status fills — the pill backgrounds used by Badge's tone
+   * variants. Kept as tokens (not one-off Tailwind opacities) so a status
+   * pill looks identical on every screen. */
+  --tint-success: color-mix(in oklab, var(--success) 14%, var(--card));
+  --tint-warning: color-mix(in oklab, var(--warning) 20%, var(--card));
+  --tint-info: color-mix(in oklab, var(--info) 14%, var(--card));
+  --tint-danger: color-mix(in oklab, var(--destructive) 12%, var(--card));
+  --tint-brand: color-mix(in oklab, var(--primary) 12%, var(--card));
 }
 
 :root {
-  --radius: 0.625rem;
+  /* 8px base. Was 10px — squarer corners read as more precise and more
+   * "data tool", which is the whole visual argument of this app. */
+  --radius: 0.5rem;
 
-  /* neutral canvas */
-  --background: oklch(0.99 0.003 260);
-  --foreground: oklch(0.18 0.03 260);
+  /*
+   * Canvas vs surface. The canvas is a cool light grey and cards are pure
+   * white, so every card reads as a raised surface without needing a shadow
+   * to do that work. Previously the canvas was oklch(0.99) — near-white —
+   * against white cards, which made panels dissolve into the page and was
+   * the single biggest reason the UI read as unfinished.
+   */
+  --background: oklch(0.968 0.005 255);
+  --foreground: oklch(0.19 0.03 260);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.03 260);
+  --card-foreground: oklch(0.19 0.03 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.03 260);
+  --popover-foreground: oklch(0.19 0.03 260);
 
   /* deep indigo — enterprise brand */
   --primary: oklch(0.42 0.14 265);
   --primary-foreground: oklch(0.985 0.005 260);
 
-  --secondary: oklch(0.96 0.008 260);
-  --secondary-foreground: oklch(0.22 0.03 260);
+  --secondary: oklch(0.955 0.008 260);
+  --secondary-foreground: oklch(0.24 0.03 260);
 
-  --muted: oklch(0.965 0.006 260);
-  --muted-foreground: oklch(0.52 0.02 260);
+  --muted: oklch(0.955 0.006 260);
+  --muted-foreground: oklch(0.505 0.02 260);
 
   --accent: oklch(0.94 0.03 240);
   --accent-foreground: oklch(0.24 0.05 265);
@@ -96,15 +117,17 @@
   --destructive: oklch(0.58 0.22 27);
   --destructive-foreground: oklch(0.985 0.005 260);
 
-  --success: oklch(0.62 0.15 155);
+  --success: oklch(0.58 0.14 155);
   --success-foreground: oklch(0.99 0.005 155);
-  --warning: oklch(0.75 0.15 75);
+  --warning: oklch(0.7 0.15 70);
   --warning-foreground: oklch(0.2 0.05 75);
-  --info: oklch(0.62 0.15 240);
+  --info: oklch(0.58 0.15 240);
   --info-foreground: oklch(0.99 0.005 240);
 
-  --border: oklch(0.92 0.008 260);
-  --input: oklch(0.92 0.008 260);
+  /* A touch darker than the old 0.92 so hairlines stay visible now that the
+   * canvas behind them is grey rather than white. */
+  --border: oklch(0.905 0.008 260);
+  --input: oklch(0.885 0.009 260);
   --ring: oklch(0.55 0.13 265);
 
   --chart-1: oklch(0.55 0.18 265);
@@ -124,10 +147,12 @@
 }
 
 .dark {
-  --background: oklch(0.14 0.02 265);
+  /* Same canvas/surface logic inverted: the canvas sits BELOW the card
+   * lightness so cards still read as raised. */
+  --background: oklch(0.145 0.02 265);
   --foreground: oklch(0.96 0.008 260);
 
-  --card: oklch(0.18 0.025 265);
+  --card: oklch(0.19 0.025 265);
   --card-foreground: oklch(0.96 0.008 260);
   --popover: oklch(0.18 0.025 265);
   --popover-foreground: oklch(0.96 0.008 260);
@@ -190,4 +215,28 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+
+  /* Tabular figures everywhere a number is compared against another number.
+   * Proportional digits make a column of currency values visibly ragged. */
+  th,
+  td,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@utility tint-success {
+  background-color: var(--tint-success);
+}
+@utility tint-warning {
+  background-color: var(--tint-warning);
+}
+@utility tint-info {
+  background-color: var(--tint-info);
+}
+@utility tint-danger {
+  background-color: var(--tint-danger);
+}
+@utility tint-brand {
+  background-color: var(--tint-brand);
 }

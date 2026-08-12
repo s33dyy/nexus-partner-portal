@@ -2003,3 +2003,62 @@ CREATE TABLE IF NOT EXISTS coverage_exceptions (
 
 CREATE INDEX IF NOT EXISTS coverage_exceptions_deal_id_idx ON coverage_exceptions (deal_id);
 CREATE INDEX IF NOT EXISTS coverage_exceptions_status_idx ON coverage_exceptions (status);
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11: Proposed completion dates + reminder dispatch ledger.
+--
+-- "Proposed completion date" is the owner's own forecast of when a Task or
+-- Deal will actually be finished. It is deliberately NOT the same column as
+-- the existing hard dates: tasks.due_at is the deadline someone else set,
+-- and portal_deals.close_date is the committed close (with
+-- possible_close_date being the sales-side probable close used for pipeline
+-- weighting). Overloading either of those would have destroyed the ability
+-- to say "this was promised for the 5th and is now forecast for the 12th",
+-- which is the whole point of reminding on it.
+--
+-- Both are additive ALTERs, never inline CREATE TABLE columns, because
+-- db:migrate re-runs this entire file against the already-bootstrapped
+-- production database on every deploy and CREATE TABLE IF NOT EXISTS is a
+-- no-op there.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS proposed_completion_at TIMESTAMPTZ;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS proposed_completion_date DATE;
+
+CREATE INDEX IF NOT EXISTS tasks_proposed_completion_at_idx
+  ON tasks (proposed_completion_at)
+  WHERE proposed_completion_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS portal_deals_proposed_completion_date_idx
+  ON portal_deals (proposed_completion_date)
+  WHERE proposed_completion_date IS NOT NULL;
+
+-- Per-user reminder opt-out. Nothing in the app writes this yet except
+-- Settings; the reminder sweep reads it as a hard mute across every channel.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reminder_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Reminder idempotency ledger. The sweep is intentionally re-runnable (an
+-- in-process interval AND an external cron endpoint can both trigger it, and
+-- a Railway redeploy restarts the interval mid-day), so "have I already told
+-- this person about this?" cannot live in memory. One row per
+-- subject x recipient x offset x channel x target_date.
+--
+-- target_date is part of the uniqueness key on purpose: if an owner moves a
+-- proposed completion date, that is a genuinely new promise and the whole
+-- reminder ladder legitimately re-fires against the new date rather than
+-- being suppressed by the old date's rows.
+--
+-- Brand-new table, so plain CREATE TABLE IF NOT EXISTS is correct here.
+CREATE TABLE IF NOT EXISTS reminder_dispatches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject_type TEXT NOT NULL,                -- 'task' | 'deal'
+  subject_id UUID NOT NULL,
+  recipient_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  offset_key TEXT NOT NULL,                  -- see REMINDER_OFFSETS in domain/contracts/reminders.ts
+  channel TEXT NOT NULL,                     -- 'in_app' | 'whatsapp' | 'email'
+  target_date DATE NOT NULL,                 -- the proposed completion date this fired against
+  status TEXT NOT NULL DEFAULT 'sent',       -- sent | skipped | failed
+  detail TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS reminder_dispatches_dedupe_uidx
+  ON reminder_dispatches (subject_type, subject_id, recipient_user_id, offset_key, channel, target_date);
+CREATE INDEX IF NOT EXISTS reminder_dispatches_created_at_idx ON reminder_dispatches (created_at);

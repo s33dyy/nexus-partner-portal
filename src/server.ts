@@ -17,7 +17,13 @@ import {
   handleVoiceOutgoing,
   handleVoiceStatusCallback,
 } from "./server/twilio-voice.server";
+import { handleReminderJobRequest, startBackgroundJobs } from "./server/scheduler.server";
 import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
+
+// Module scope, not inside fetch(): the reminder interval should start once
+// when the server process boots, not be re-checked on every request. The
+// function is itself idempotent, so a hot-reloaded module in dev is harmless.
+startBackgroundJobs();
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -102,6 +108,9 @@ export default {
       }
       if (url.pathname === "/api/integrations/twilio/voice/status" && request.method === "POST") {
         return attachCorrelationHeader(await handleVoiceStatusCallback(request), correlationId);
+      }
+      if (url.pathname === "/api/jobs/reminders" && request.method === "POST") {
+        return attachCorrelationHeader(await handleReminderJobRequest(request), correlationId);
       }
 
       const handler = await getServerEntry();

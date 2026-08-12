@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AudioLines, Bell, LogOut, RefreshCcw, User } from "lucide-react";
+import { AudioLines, Bell, ChevronDown, LogOut, RefreshCcw, ShieldCheck, User } from "lucide-react";
 
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { SoftphonePanel } from "@/components/softphone-panel";
@@ -24,6 +25,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
 import { buildShellContextSummary } from "@/components/app-shell.utils";
+import { cn } from "@/lib/utils";
 
 const statusLabel: Record<string, string> = {
   pending_partner_registration: "Partner Registration Pending",
@@ -37,17 +39,14 @@ const statusLabel: Record<string, string> = {
   rejected: "Application Rejected",
 };
 
-const statusTone: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
-  pending_partner_registration: "outline",
-  submitted: "secondary",
-  under_review: "secondary",
-  need_more_info: "destructive",
-  partial_approval: "secondary",
-  pending_agreement: "secondary",
-  signed_pending_review: "secondary",
-  approved: "default",
-  rejected: "destructive",
-};
+function ContextRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="truncate font-medium capitalize">{value}</dd>
+    </div>
+  );
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { profile, user, roles, activeContext, assignment, signOut, refresh, can } = useAuth();
@@ -109,63 +108,83 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppSidebar />
       <SidebarInset>
         {isAgreementAttention && <AgreementPendingBanner />}
-        <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-start gap-3 border-b bg-background/80 px-3 py-2 backdrop-blur sm:items-center sm:px-4 sm:py-0">
+        {/*
+          The governed-context readout used to be a bordered panel holding
+          four badges and a wrapping description sentence, occupying most of
+          the top bar on every screen. It is diagnostic information a user
+          checks occasionally, not continuously — so it collapses to one chip
+          that states the role and turns amber when something actually needs
+          attention, with the full detail (scope, tenant, assignment status,
+          and the explanatory copy) one click away in a popover.
+        */}
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-card px-3 sm:px-4">
           <SidebarTrigger className="shrink-0" />
-          <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
-            <div
-              className="min-w-0 flex-1 rounded-lg border bg-muted/30 px-3 py-2"
-              aria-live="polite"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={activeContext ? "outline" : "secondary"} className="shrink-0">
-                  {contextSummary.state === "ready" ? "Active context" : contextSummary.title}
-                </Badge>
-                <Badge variant={activeContext ? "secondary" : "outline"} className="shrink-0">
-                  {contextSummary.statusLabel}
-                </Badge>
-                {activeContext?.workingScope ? (
-                  <Badge variant="outline" className="shrink-0">
-                    {contextSummary.scopeLabel}
-                  </Badge>
-                ) : null}
-                {contextSummary.tenantLabel ? (
-                  <Badge variant="outline" className="shrink-0">
-                    {contextSummary.tenantLabel}
-                  </Badge>
-                ) : null}
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-live="polite"
+                className={cn(
+                  "flex min-w-0 shrink items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary",
+                  contextSummary.state === "ready"
+                    ? "border-border text-muted-foreground"
+                    : "border-transparent tint-warning text-warning-foreground",
+                )}
+              >
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate capitalize">{contextLabel}</span>
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80 space-y-3">
+              <div>
+                <p className="text-sm font-semibold capitalize">{contextSummary.title}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {contextSummary.description}
+                </p>
               </div>
-              <p className="mt-1 truncate text-xs text-muted-foreground">
-                {contextSummary.description}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="shrink-0"
-              onClick={() => void refresh()}
-            >
-              <RefreshCcw className="mr-2 h-4 w-4" />
-              Refresh context
-            </Button>
-          </div>
-          <Badge variant={activeContext ? "outline" : "secondary"} className="shrink-0 md:hidden">
-            {contextLabel}
-          </Badge>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <dl className="space-y-1.5 text-xs">
+                <ContextRow label="Role" value={contextSummary.roleLabel} />
+                <ContextRow label="Scope" value={contextSummary.scopeLabel} />
+                <ContextRow label="Assignment" value={contextSummary.statusLabel} />
+                {contextSummary.tenantLabel ? (
+                  <ContextRow label="Tenant" value={contextSummary.tenantLabel} />
+                ) : null}
+              </dl>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void refresh()}
+              >
+                <RefreshCcw className="mr-2 h-3.5 w-3.5" />
+                Refresh context
+              </Button>
+            </PopoverContent>
+          </Popover>
+
+          <div className="ml-auto flex items-center gap-1.5">
             <RegionFilterSelect />
-            <Badge variant={statusTone[status]} className="hidden sm:inline-flex">
+            <Badge
+              tone={
+                status === "approved" ? "success" : status === "rejected" ? "danger" : "warning"
+              }
+              className="hidden lg:inline-flex"
+            >
               {statusLabel[status]}
             </Badge>
+            <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" />
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="gap-2"
+              className="gap-1.5 px-2"
               onClick={() => setDigestOpen(true)}
             >
               <AudioLines className="h-4 w-4" />
-              Briefing
+              <span className="hidden xl:inline">Briefing</span>
             </Button>
             <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
             {can("calls", "read") && <SoftphonePanel />}
@@ -216,7 +235,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </DropdownMenu>
           </div>
         </header>
-        <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
       </SidebarInset>
       <DailyDigestDialog
         open={digestOpen}

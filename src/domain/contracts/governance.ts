@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { newId } from "@/domain/contracts/ids";
 
 import { makePolicyDenial, type ActiveContextDTO } from "./commands";
 import {
@@ -435,7 +435,7 @@ export function issueActiveContextFromAssignment(input: {
 }): ActiveContextRecord {
   const issuedAt = input.issuedAt ?? new Date().toISOString();
   const expiresAt = input.expiresAt ?? new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
-  const contextId = input.contextId ?? randomUUID();
+  const contextId = input.contextId ?? newId();
 
   return {
     contextId,

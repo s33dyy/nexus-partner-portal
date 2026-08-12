@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, ShieldCheck, TrendingUp } from "lucide-react";
 
 import { supabase } from "@/integrations/local/client";
+import { requestSignupOtp, signUpVerified } from "@/integrations/local/signup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,7 +98,7 @@ function AuthPage() {
       </div>
 
       {/* Form panel */}
-      <div className="flex min-w-0 items-center justify-center bg-background p-6 md:p-10">
+      <div className="flex min-w-0 items-center justify-center bg-card p-6 md:p-10">
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden flex items-center gap-2">
             <div className="flex h-10 items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 ring-1 ring-border">
@@ -286,14 +287,25 @@ function SignInForm({ redirect }: { redirect?: string }) {
 const signUpSchema = z.object({
   full_name: z.string().trim().min(2, "Name is required").max(120),
   email: z.string().trim().email("Enter a valid email").max(255),
-  phone: z.string().trim().min(6, "Enter a valid phone").max(30),
+  // E.164, because the number is now verified by SMS and later used to send
+  // WhatsApp reminders — a local-format number can't be dialled by either.
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{6,14}$/, "Enter your phone in international format, e.g. +919876543210")
+    .max(20),
   company_name: z.string().trim().min(2, "Company name is required").max(160),
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 
+const OTP_LENGTH = 6;
+
 function SignUpForm() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<"details" | "verify">("details");
+  const [code, setCode] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -302,42 +314,146 @@ function SignUpForm() {
     password: "",
   });
 
-  const submit = async (e: React.FormEvent) => {
+  // Counts down the resend button. Purely cosmetic pacing — the real limit is
+  // enforced server-side (3 sends per number per 15 minutes) and by Twilio.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
+  const createAccount = async (verificationCode: string | null) => {
+    await signUpVerified({
+      full_name: form.full_name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+      company_name: form.company_name.trim(),
+      password: form.password,
+      code: verificationCode,
+    });
+    toast.success("Partner admin account created — continuing to onboarding.");
+    navigate({ to: "/partner/onboarding", replace: true });
+  };
+
+  const submitDetails = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = signUpSchema.safeParse(form);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0].message);
       return;
     }
+
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/partner/onboarding`,
-        data: {
-          full_name: parsed.data.full_name,
-          phone: parsed.data.phone,
-          company_name: parsed.data.company_name,
-        },
-      },
-    });
-    setLoading(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const result = await requestSignupOtp({
+        email: parsed.data.email,
+        phoneE164: parsed.data.phone,
+      });
+      if (!result.required) {
+        // Twilio Verify isn't configured in this environment, so there is no
+        // code to wait for — the account is created in one step instead of
+        // blocking registration behind an OTP that can never arrive.
+        await createAccount(null);
+        return;
+      }
+      setStep("verify");
+      setCode("");
+      setResendCooldown(30);
+      toast.success(`We sent a ${OTP_LENGTH}-digit code to ${parsed.data.phone}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send the verification code");
+    } finally {
+      setLoading(false);
     }
-    toast.success("Partner admin account created — continuing to onboarding.");
-    navigate({ to: "/partner/onboarding", replace: true });
   };
 
+  const submitCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (code.trim().length < 4) {
+      toast.error("Enter the code we sent to your phone");
+      return;
+    }
+    setLoading(true);
+    try {
+      await createAccount(code.trim());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't verify that code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resend = async () => {
+    if (resendCooldown > 0) return;
+    setLoading(true);
+    try {
+      await requestSignupOtp({ email: form.email.trim(), phoneE164: form.phone.trim() });
+      setResendCooldown(30);
+      toast.success("New code sent");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't resend the code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === "verify") {
+    return (
+      <form onSubmit={submitCode} className="space-y-4">
+        <div className="space-y-1.5">
+          <h2 className="text-2xl font-semibold tracking-tight">Verify your phone</h2>
+          <p className="text-sm text-muted-foreground">
+            We sent a {OTP_LENGTH}-digit code to <span className="font-medium">{form.phone}</span>.
+            Enter it to finish creating your account.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="signup-otp">Verification code</Label>
+          <Input
+            id="signup-otp"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={8}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            placeholder="123456"
+            autoFocus
+            required
+          />
+        </div>
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Verify and create account
+        </Button>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <button
+            type="button"
+            className="font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+            onClick={() => void resend()}
+            disabled={loading || resendCooldown > 0}
+          >
+            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+          </button>
+          <button
+            type="button"
+            className="font-medium text-primary hover:underline"
+            onClick={() => setStep("details")}
+            disabled={loading}
+          >
+            Change details
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submitDetails} className="space-y-4">
       <div className="space-y-1.5">
         <h2 className="text-2xl font-semibold tracking-tight">Register a partner admin account</h2>
         <p className="text-sm text-muted-foreground">
-          Step 1 of 2. Partner admins complete company verification in the onboarding form after
-          sign-in.
+          Step 1 of 2. We'll verify your phone by SMS, then partner admins complete company
+          verification in the onboarding form.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -365,10 +481,15 @@ function SignUpForm() {
           <Input
             id="phone"
             type="tel"
+            autoComplete="tel"
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            placeholder="+919876543210"
             required
           />
+          <p className="text-xs text-muted-foreground">
+            Include your country code — we'll text a code here.
+          </p>
         </div>
         <div className="col-span-2 space-y-2">
           <Label htmlFor="company_name">Company name</Label>
@@ -396,7 +517,7 @@ function SignUpForm() {
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-        Create account
+        Send verification code
       </Button>
       <p className="text-xs text-muted-foreground text-center">
         By registering, you agree to LIVEY's Partner Terms of Service.

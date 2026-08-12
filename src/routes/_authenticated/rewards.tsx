@@ -13,7 +13,9 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -273,68 +275,63 @@ function RewardsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Gift className="h-3.5 w-3.5" />
-            Rewards
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Rewards store</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Earn points from successful deals, track your tier, and redeem rewards from the LIVEY
-            catalog.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          {hasRole("super_admin") && (
-            <Button asChild variant="outline" size="sm">
-              <Link to="/admin/rewards">
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                Manage store
-              </Link>
-            </Button>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setRefreshing(true);
-                void load();
-              }}
-              disabled={loading || refreshing}
-            >
-              {loading || refreshing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
-              )}
-              Refresh
-            </Button>
-            <CsvExportButton
-              label="Export store CSV"
-              filenameStem="livey-rewards-catalog"
-              columns={REWARD_CATALOG_EXPORT_COLUMNS}
-              loadRows={async () =>
-                filteredCatalog.map((item) => ({
-                  title: item.title,
-                  description: item.description,
-                  category: item.category,
-                  points_cost: item.points_cost,
-                  stock: item.stock,
-                  availability: item.availability,
-                }))
-              }
-              variant="outline"
-            />
-          </div>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Rewards"
+        icon={<Gift className="h-3.5 w-3.5" />}
+        title="Rewards store"
+        description="Earn points from successful deals, track your tier, and redeem rewards from the LIVEY catalog."
+        actions={
+          <>
+            <Badge variant="secondary" className="gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            {hasRole("super_admin") && (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/admin/rewards">
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  Manage store
+                </Link>
+              </Button>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRefreshing(true);
+                  void load();
+                }}
+                disabled={loading || refreshing}
+              >
+                {loading || refreshing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Refresh
+              </Button>
+              <CsvExportButton
+                label="Export store CSV"
+                filenameStem="livey-rewards-catalog"
+                columns={REWARD_CATALOG_EXPORT_COLUMNS}
+                loadRows={async () =>
+                  filteredCatalog.map((item) => ({
+                    title: item.title,
+                    description: item.description,
+                    category: item.category,
+                    points_cost: item.points_cost,
+                    stock: item.stock,
+                    availability: item.availability,
+                  }))
+                }
+                variant="outline"
+              />
+            </div>
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {isAdminView ? (
@@ -572,7 +569,7 @@ function RewardsPage() {
                           {formatDateTimeLabel(event.created_at)}
                         </div>
                       </div>
-                      <Badge variant={event.points_delta >= 0 ? "default" : "secondary"}>
+                      <Badge tone={event.points_delta >= 0 ? "success" : "danger"}>
                         {event.points_delta >= 0 ? "+" : ""}
                         {event.points_delta}
                       </Badge>
@@ -612,9 +609,11 @@ function RewardsPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {redemptions.length === 0 ? (
-                  <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                    No redemption requests yet.
-                  </div>
+                  <EmptyState
+                    icon={<Gift className="h-5 w-5" />}
+                    title="No redemption requests yet"
+                    description="Redeem a reward from the store and it will show up here."
+                  />
                 ) : (
                   redemptions.slice(0, 4).map((redemption) => (
                     <div key={redemption.id} className="rounded-lg border p-4">
@@ -764,9 +763,7 @@ function RewardCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="secondary">{item.category}</Badge>
-          <Badge variant={item.availability === "available" ? "default" : "outline"}>
-            {item.availability}
-          </Badge>
+          <Badge tone={resolveStatusTone(item.availability)}>{item.availability}</Badge>
         </div>
         <div className="text-xs text-muted-foreground">
           {item.stock > 0 ? `${item.stock} available` : "Out of stock"}

@@ -17,7 +17,9 @@ import {
 } from "lucide-react";
 
 import { CsvExportButton } from "@/components/csv-export-button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState, PageHeader, Toolbar } from "@/components/page-header";
+import { AccessDeniedPage } from "@/components/route-placeholder";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -155,6 +157,43 @@ function inferAgreementRequestStatus(partner: Partner | null): string | null {
   }
 
   return "unknown";
+}
+
+type StatusTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger";
+
+/**
+ * Lifecycle status → semantic tone. The old map hand-picked a different raw
+ * Tailwind hue per state (blue/amber/orange/violet/sky/emerald/red), which
+ * read as decoration rather than meaning. Grouped by what the reviewer has to
+ * do: something is waiting on someone -> warning, the application has simply
+ * arrived or cleared a gate -> info, terminal good/bad -> success/danger.
+ */
+const PARTNER_STATUS_TONES: Record<string, StatusTone> = {
+  submitted: "info",
+  under_review: "warning",
+  partial_approval: "warning",
+  need_more_info: "warning",
+  pending_agreement: "warning",
+  signed_pending_review: "info",
+  approved: "success",
+  rejected: "danger",
+  pending_partner_registration: "neutral",
+};
+
+function partnerStatusTone(status: string | null | undefined): StatusTone {
+  if (!status) return "neutral";
+  return PARTNER_STATUS_TONES[status] ?? "neutral";
+}
+
+const AGREEMENT_REQUEST_TONES: Record<string, StatusTone> = {
+  pending: "warning",
+  completed: "success",
+  unknown: "neutral",
+};
+
+function agreementRequestTone(status: string | null): StatusTone {
+  if (!status) return "neutral";
+  return AGREEMENT_REQUEST_TONES[status] ?? "neutral";
 }
 
 function formatAgreementRequestStatus(status: string | null): string {
@@ -503,13 +542,7 @@ function AdminPartners() {
   };
 
   if (!hasRole("super_admin")) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center text-sm text-muted-foreground">
-          You need Super Admin access to view this page.
-        </CardContent>
-      </Card>
-    );
+    return <AccessDeniedPage title="Partner approvals" roleLabel="Super Admin" />;
   }
 
   const filtered = partners.filter(
@@ -528,18 +561,13 @@ function AdminPartners() {
     agreementRequestStatus ?? inferAgreementRequestStatus(selected);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" /> Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Partner approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Review incoming partner registrations, verify documents, and assign tiers.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Partner approvals"
+        description="Review incoming partner registrations, verify documents, and assign tiers."
+        actions={
           <CsvExportButton
             label="Export CSV"
             filenameStem="livey-partner-applications"
@@ -568,22 +596,24 @@ function AdminPartners() {
             }
             variant="outline"
           />
-        </div>
-      </div>
+        }
+      />
 
       <Card>
-        <CardHeader className="flex flex-col gap-3 border-b sm:flex-row sm:items-center sm:justify-between">
-          <LookupCombobox
-            fieldName={LOOKUP_FIELDS.partnerStatus}
-            label="Status"
-            value={status === "all" ? "" : status}
-            onValueChange={(value) => setStatus((value || "all") as typeof status)}
-            placeholder="All statuses"
-            clearLabel="All statuses"
-            allowClear
-            options={STATUS_FILTERS.filter((s) => s !== "all")}
-            triggerClassName="w-48"
-          />
+        <CardHeader className="border-b">
+          <Toolbar>
+            <LookupCombobox
+              fieldName={LOOKUP_FIELDS.partnerStatus}
+              label="Status"
+              value={status === "all" ? "" : status}
+              onValueChange={(value) => setStatus((value || "all") as typeof status)}
+              placeholder="All statuses"
+              clearLabel="All statuses"
+              allowClear
+              options={STATUS_FILTERS.filter((s) => s !== "all")}
+              triggerClassName="w-48"
+            />
+          </Toolbar>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
@@ -591,30 +621,32 @@ function AdminPartners() {
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No partner applications in this view.
-            </div>
+            <EmptyState
+              icon={<Building2 className="h-5 w-5" />}
+              title="No partner applications in this view."
+              description="Switch the status filter to see applications sitting at another stage."
+            />
           ) : (
             <div className="divide-y">
               {filtered.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => void openPartner(p)}
-                  className="flex w-full flex-col gap-3 px-6 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40"
+                  className="flex w-full flex-col gap-2 px-5 py-3 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <div className="tint-brand flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-primary">
                       <Building2 className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{p.company_name}</div>
+                      <div className="truncate text-[13px] font-medium">{p.company_name}</div>
                       <div className="truncate text-xs text-muted-foreground">
                         {p.state || "—"} · {p.business_type || "—"} · GST {p.gst_number || "—"}
                       </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <Badge variant="outline" className="capitalize">
+                    <Badge tone="neutral" className="capitalize">
                       {p.tier}
                     </Badge>
                     <StatusBadge status={p.status} />
@@ -652,13 +684,13 @@ function AdminPartners() {
                 </SheetTitle>
                 <SheetDescription className="flex items-center gap-2">
                   <StatusBadge status={selected.status} />
-                  <Badge variant="outline" className="capitalize">
+                  <Badge tone="neutral" className="capitalize">
                     Tier · {selected.tier}
                   </Badge>
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 space-y-6">
+              <div className="mt-5 space-y-5">
                 <Section title="Business Information">
                   <KV k="Legal name" v={selected.legal_name} />
                   <KV k="GST" v={selected.gst_number} />
@@ -692,12 +724,16 @@ function AdminPartners() {
                 </Section>
 
                 <div>
-                  <div className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Documents
                   </div>
                   {docs.length === 0 ? (
-                    <div className="rounded-md border p-4 text-xs text-muted-foreground">
-                      No documents uploaded.
+                    <div className="rounded-md border">
+                      <EmptyState
+                        className="gap-1 px-4 py-8"
+                        icon={<FileText className="h-5 w-5" />}
+                        title="No documents uploaded."
+                      />
                     </div>
                   ) : (
                     <ul className="space-y-2">
@@ -730,7 +766,7 @@ function AdminPartners() {
                 </div>
 
                 <div>
-                  <div className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Review notes
                   </div>
                   <Textarea
@@ -748,7 +784,10 @@ function AdminPartners() {
                             <MessageSquare className="h-3 w-3" />
                             {new Date(n.created_at).toLocaleString()}
                             {n.status_change && (
-                              <Badge variant="outline" className="capitalize">
+                              <Badge
+                                tone={partnerStatusTone(n.status_change)}
+                                className="capitalize"
+                              >
                                 {n.status_change.replace("_", " ")}
                               </Badge>
                             )}
@@ -815,10 +854,13 @@ function AdminPartners() {
                     <Separator />
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                           Agreement
                         </div>
-                        <Badge variant="outline" className="capitalize">
+                        <Badge
+                          tone={agreementRequestTone(currentAgreementRequestStatus)}
+                          className="capitalize"
+                        >
                           {formatAgreementRequestStatus(currentAgreementRequestStatus)}
                         </Badge>
                       </div>
@@ -848,7 +890,7 @@ function AdminPartners() {
 
                       {selected.agreement_envelope_id && (
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="secondary">
+                          <Badge variant="outline">
                             Request ID {selected.agreement_envelope_id.slice(0, 8)}…
                           </Badge>
                           {selected.agreement_sent_at && (
@@ -857,10 +899,7 @@ function AdminPartners() {
                             </Badge>
                           )}
                           {selected.agreement_signed_at && (
-                            <Badge
-                              variant="outline"
-                              className="border-emerald-500/20 text-emerald-700"
-                            >
+                            <Badge tone="success">
                               Signed{" "}
                               {new Date(selected.agreement_signed_at).toLocaleString("en-IN")}
                             </Badge>
@@ -925,7 +964,7 @@ function AdminPartners() {
                       )}
 
                       {selected.status === "pending_agreement" && (
-                        <div className="space-y-2 rounded-md border bg-primary/5 p-3">
+                        <div className="tint-brand space-y-2 rounded-md border p-3">
                           <div className="flex items-center gap-2 text-sm text-primary">
                             <FileSignature className="h-4 w-4 shrink-0" />
                             Agreement prepared via{" "}
@@ -952,8 +991,8 @@ function AdminPartners() {
                       )}
 
                       {selected.status === "signed_pending_review" && (
-                        <div className="space-y-2 rounded-md border bg-emerald-500/5 p-3">
-                          <div className="flex items-center gap-2 text-sm text-emerald-700">
+                        <div className="tint-success space-y-2 rounded-md border p-3">
+                          <div className="flex items-center gap-2 text-sm text-success">
                             <CheckCircle2 className="h-4 w-4 shrink-0" />
                             Agreement signed and awaiting super admin review.
                           </div>
@@ -1010,11 +1049,13 @@ function AdminPartners() {
           {credentialPreview ? (
             <div className="space-y-4">
               <div className="rounded-lg border bg-muted/20 p-4 text-sm">
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">Email</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Email
+                </div>
                 <div className="mt-1 font-medium">{credentialPreview.email}</div>
               </div>
               <div className="rounded-lg border bg-muted/20 p-4 text-sm">
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Temporary password
                 </div>
                 <div className="mt-1 font-medium">{credentialPreview.temporaryPassword}</div>
@@ -1031,33 +1072,19 @@ function AdminPartners() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    submitted: "bg-blue-500/10 text-blue-600 border-blue-500/20",
-    under_review: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-    partial_approval: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-    need_more_info: "bg-orange-500/10 text-orange-600 border-orange-500/20",
-    pending_agreement: "bg-violet-500/10 text-violet-600 border-violet-500/20",
-    signed_pending_review: "bg-sky-500/10 text-sky-600 border-sky-500/20",
-    approved: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-    rejected: "bg-red-500/10 text-red-600 border-red-500/20",
-    pending_partner_registration: "bg-muted text-muted-foreground",
-  };
   return (
-    <span
-      className={
-        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize " +
-        (map[status] ?? "border-border text-muted-foreground")
-      }
-    >
+    <Badge tone={partnerStatusTone(status)} className="capitalize">
       {status.replace(/_/g, " ")}
-    </span>
+    </Badge>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">{title}</div>
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </div>
       <div className="grid gap-3 rounded-md border bg-muted/20 p-4 sm:grid-cols-2">{children}</div>
     </div>
   );

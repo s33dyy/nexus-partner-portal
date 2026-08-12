@@ -5,7 +5,17 @@ import { submitDealForRegistration } from "@/integrations/local/deal-commands";
 import { toast } from "sonner";
 import { FileCheck2, Loader2 } from "lucide-react";
 
-export function DealRegistrationBadge({ dealId, status, commercialApproved, onUpdated }: { dealId: string, status: string, commercialApproved: boolean, onUpdated: () => void }) {
+export function DealRegistrationBadge({
+  dealId,
+  status,
+  commercialApproved,
+  onUpdated,
+}: {
+  dealId: string;
+  status: string;
+  commercialApproved: boolean;
+  onUpdated: () => void;
+}) {
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -15,17 +25,17 @@ export function DealRegistrationBadge({ dealId, status, commercialApproved, onUp
       if (!res.ok) throw new Error(res.failure.message);
       toast.success("Deal submitted for registration");
       onUpdated();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit for registration");
     } finally {
       setLoading(false);
     }
   };
 
-  const getBadgeVariant = () => {
-    if (commercialApproved) return "default";
-    if (status === "submitted") return "secondary";
-    return "outline";
+  const getBadgeTone = () => {
+    if (commercialApproved) return "success" as const;
+    if (status === "submitted") return "info" as const;
+    return "neutral" as const;
   };
 
   const getLabel = () => {
@@ -36,11 +46,15 @@ export function DealRegistrationBadge({ dealId, status, commercialApproved, onUp
 
   return (
     <div className="flex items-center gap-3">
-      <Badge variant={getBadgeVariant() as any}>{getLabel()}</Badge>
-      
+      <Badge tone={getBadgeTone()}>{getLabel()}</Badge>
+
       {!commercialApproved && status !== "submitted" && (
         <Button variant="outline" size="sm" onClick={handleSubmit} disabled={loading}>
-          {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileCheck2 className="w-4 h-4 mr-2" />}
+          {loading ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <FileCheck2 className="w-4 h-4 mr-2" />
+          )}
           Submit for Registration
         </Button>
       )}

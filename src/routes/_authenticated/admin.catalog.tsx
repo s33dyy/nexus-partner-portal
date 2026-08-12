@@ -5,7 +5,9 @@ import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -334,59 +336,55 @@ function AdminCatalogPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Product Catalog</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Define products and combos that shape the portal, all from one shared catalog store.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-          <CsvExportButton
-            label="Export CSV"
-            filenameStem="livey-catalog"
-            columns={CATALOG_EXPORT_COLUMNS}
-            loadRows={async () =>
-              filteredItems.map((item) => ({
-                sku: item.sku,
-                product_name: item.product_name,
-                category: item.category,
-                partner_tier: item.partner_tier,
-                list_price: item.list_price,
-                margin: item.margin,
-                stock: item.stock,
-                availability: item.availability,
-                benefits: item.benefits,
-                catalog_kind: normalizeCatalogKind(item.catalog_kind),
-              }))
-            }
-            variant="outline"
-          />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Product Catalog"
+        description="Define products and combos that shape the portal, all from one shared catalog store."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <CsvExportButton
+              label="Export CSV"
+              filenameStem="livey-catalog"
+              columns={CATALOG_EXPORT_COLUMNS}
+              loadRows={async () =>
+                filteredItems.map((item) => ({
+                  sku: item.sku,
+                  product_name: item.product_name,
+                  category: item.category,
+                  partner_tier: item.partner_tier,
+                  list_price: item.list_price,
+                  margin: item.margin,
+                  stock: item.stock,
+                  availability: item.availability,
+                  benefits: item.benefits,
+                  catalog_kind: normalizeCatalogKind(item.catalog_kind),
+                }))
+              }
+              variant="outline"
+            />
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric
@@ -496,7 +494,9 @@ function AdminCatalogPage() {
                         </Badge>
                         <Badge variant="outline">{item.partner_tier}</Badge>
                         {item.product_status ? (
-                          <Badge variant="outline">{item.product_status}</Badge>
+                          <Badge tone={resolveStatusTone(item.product_status)}>
+                            {item.product_status}
+                          </Badge>
                         ) : null}
                         {item.price_book_code ? (
                           <Badge variant="outline">

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
+  Gift,
   Loader2,
   Plus,
   RefreshCw,
@@ -15,7 +16,9 @@ import { toast } from "sonner";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -530,40 +533,35 @@ function AdminRewardsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Administration
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Rewards manager</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Super admins can manage the reward catalog and approve redemption requests from one
-            screen.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {source === "database" ? "Live Postgres data" : "Empty state"}
-          </Badge>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Administration"
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="Rewards manager"
+        description="Super admins can manage the reward catalog and approve redemption requests from one screen."
+        actions={
+          <>
+            <Badge variant="secondary">
+              {source === "database" ? "Live Postgres data" : "Empty state"}
+            </Badge>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric label="Catalog items" value={String(catalog.length)} hint="Published rewards" />
@@ -681,7 +679,9 @@ function AdminRewardsPage() {
                             {item.category} · {item.points_cost} points
                           </div>
                         </div>
-                        <Badge variant="outline">{item.availability}</Badge>
+                        <Badge tone={resolveStatusTone(item.availability)}>
+                          {item.availability}
+                        </Badge>
                       </div>
                     </button>
                   ))
@@ -691,7 +691,7 @@ function AdminRewardsPage() {
 
             <div className="space-y-4">
               {importMessage ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                <div className="tint-success rounded-md border border-success/30 px-3 py-2 text-[13px] text-success">
                   {importMessage}
                 </div>
               ) : null}
@@ -1222,9 +1222,11 @@ function AdminRewardsPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {filteredRedemptions.length === 0 ? (
-              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No redemption requests found.
-              </div>
+              <EmptyState
+                icon={<Gift className="h-5 w-5" />}
+                title="No redemption requests"
+                description="Requests appear here as partners redeem rewards from the store."
+              />
             ) : (
               filteredRedemptions.map((redemption) => {
                 const reward = catalog.find((item) => item.id === redemption.reward_id) ?? null;
@@ -1240,16 +1242,7 @@ function AdminRewardsPage() {
                           {formatDateTimeLabel(redemption.created_at)}
                         </div>
                       </div>
-                      <Badge
-                        variant={
-                          redemption.status === "processing"
-                            ? "default"
-                            : redemption.status === "points_reserved" ||
-                                redemption.status === "pending_review"
-                              ? "secondary"
-                              : "outline"
-                        }
-                      >
+                      <Badge tone={resolveStatusTone(redemption.status)}>
                         {redemption.status.replace(/_/g, " ")}
                       </Badge>
                     </div>

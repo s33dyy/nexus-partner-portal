@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  BellRing,
   Database,
   IdCard,
   KeyRound,
   Layers3,
   Link2,
+  Loader2,
   MessageCircle,
   ShieldCheck,
   User as UserIcon,
@@ -13,7 +15,9 @@ import {
 
 import { SettingsExportCard } from "@/components/settings-export-card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -122,6 +126,7 @@ function SettingsPage() {
   const [whatsappPhoneDraft, setWhatsappPhoneDraft] = useState("");
   const [whatsappCodeDraft, setWhatsappCodeDraft] = useState("");
   const [whatsappCodeSent, setWhatsappCodeSent] = useState(false);
+  const [savingReminderPref, setSavingReminderPref] = useState(false);
   const [sendingWhatsappCode, setSendingWhatsappCode] = useState(false);
   const [verifyingWhatsappCode, setVerifyingWhatsappCode] = useState(false);
   const [disconnectingWhatsapp, setDisconnectingWhatsapp] = useState(false);
@@ -215,6 +220,29 @@ function SettingsPage() {
       toast.error(error instanceof Error ? error.message : "Failed to verify code");
     } finally {
       setVerifyingWhatsappCode(false);
+    }
+  };
+
+  // profiles is a self-service table in table-policy.server.ts (a user may
+  // update their own row), so this needs no dedicated command — unlike the
+  // proposed-completion dates themselves, a notification preference carries
+  // no audit obligation.
+  const toggleReminderOptOut = async () => {
+    if (!profile?.id) return;
+    const next = !profile.reminder_opt_out;
+    setSavingReminderPref(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ reminder_opt_out: next })
+        .eq("id", profile.id);
+      if (error) throw error;
+      toast.success(next ? "Reminders turned off" : "Reminders turned on");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update your reminder setting");
+    } finally {
+      setSavingReminderPref(false);
     }
   };
 
@@ -342,26 +370,20 @@ function SettingsPage() {
   }, [scope, visibleDatasets]);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <IdCard className="h-3.5 w-3.5" />
-            Settings
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Your account</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Manage your profile, security, connected accounts, and data exports — all scoped to what
-            your role can see.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{roleLabel}</Badge>
-          {profile?.company_name ? <Badge variant="outline">{profile.company_name}</Badge> : null}
-          <Badge variant="outline">{visibleDatasets.length} exportable datasets</Badge>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Settings"
+        icon={<IdCard className="h-3.5 w-3.5" />}
+        title="Your account"
+        description="Manage your profile, security, connected accounts, and data exports — all scoped to what your role can see."
+        actions={
+          <>
+            <Badge variant="secondary">{roleLabel}</Badge>
+            {profile?.company_name ? <Badge variant="outline">{profile.company_name}</Badge> : null}
+            <Badge variant="outline">{visibleDatasets.length} exportable datasets</Badge>
+          </>
+        }
+      />
 
       <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
         <UserIcon className="h-3.5 w-3.5" />
@@ -512,7 +534,7 @@ function SettingsPage() {
               <Button onClick={() => void submitPasswordChange()} disabled={updatingPassword}>
                 {updatingPassword ? "Updating password..." : "Update password"}
               </Button>
-              <Badge variant={profile?.must_reset_password ? "destructive" : "secondary"}>
+              <Badge tone={profile?.must_reset_password ? "danger" : "success"}>
                 {profile?.must_reset_password ? "Reset required" : "Password active"}
               </Badge>
             </div>
@@ -670,6 +692,41 @@ function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 shadow-sm">
+        <CardHeader className="border-b">
+          <div className="flex items-center gap-2">
+            <BellRing className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Reminders</CardTitle>
+          </div>
+          <CardDescription>
+            Reminders about proposed completion dates on your tasks and deals — 3 days out, 1 day
+            out, on the day, and if the date slips.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4 rounded-xl border bg-muted/20 p-4">
+            <div className="min-w-0">
+              <div className="font-medium">
+                {profile?.reminder_opt_out ? "Reminders are off" : "Reminders are on"}
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {profile?.reminder_opt_out
+                  ? "You won't receive reminders on any channel."
+                  : "Sent as in-app notifications, plus WhatsApp if your number is verified and email if a sender is configured."}
+              </p>
+            </div>
+            <Button
+              variant={profile?.reminder_opt_out ? "default" : "outline"}
+              disabled={savingReminderPref}
+              onClick={() => void toggleReminderOptOut()}
+            >
+              {savingReminderPref && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {profile?.reminder_opt_out ? "Turn on" : "Turn off"}
+            </Button>
           </div>
         </CardContent>
       </Card>

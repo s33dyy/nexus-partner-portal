@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -453,18 +454,12 @@ function OnboardingPage() {
   const validDocs = useMemo(() => docs.filter(isDocRow), [docs]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-          Partner registration · Step {stepIdx + 1} of {STEPS.length}
-        </div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-          Complete your partner profile
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Share your business details so LIVEY can verify and assign your partner tier.
-        </p>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-5">
+      <PageHeader
+        eyebrow={`Partner registration · Step ${stepIdx + 1} of ${STEPS.length}`}
+        title="Complete your partner profile"
+        description="Share your business details so LIVEY can verify and assign your partner tier."
+      />
 
       {readOnly && (
         <Alert>

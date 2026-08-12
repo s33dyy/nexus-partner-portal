@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 
 process.env.DATABASE_URL ??= "postgres://localhost/test";
+// The digest now has a morning and an evening mode, so every test has to
+// state which one it is exercising — otherwise the suite's result depends on
+// what time of day it happens to run. APP_TIMEZONE is pinned for the same
+// reason: the mode, the greeting, and the "is this today?" windows are all
+// resolved in the business timezone.
+process.env.APP_TIMEZONE = "UTC";
+const MORNING = new Date("2026-08-11T09:00:00.000Z");
+const EVENING = new Date("2026-08-11T18:30:00.000Z");
 
 type RolePermissionRow = {
   feature_key: string;
@@ -98,6 +106,9 @@ const FULL_ACCESS_PERMISSIONS: RolePermissionRow[] = [
   "audit",
   "news",
   "assistant",
+  // Matches the real super_admin row in db/schema.sql — the evening briefing
+  // reads call_logs, which is gated on this capability.
+  "calls",
 ].map((feature_key) => ({
   feature_key,
   can_create: true,
@@ -161,6 +172,7 @@ function installFakePool(input: {
   learningEnrollmentRows?: Array<Record<string, unknown>>;
   notificationRows?: Array<Record<string, unknown>>;
   dealRows?: Array<Record<string, unknown>>;
+  callLogRows?: Array<Record<string, unknown>>;
   pricingRows?: Array<Record<string, unknown>>;
 }) {
   const hasSession = input.hasSession ?? true;
@@ -253,6 +265,10 @@ function installFakePool(input: {
         const rows = input.dealRows ?? [];
         return { rows, rowCount: rows.length } as never;
       }
+      if (text.includes('FROM "call_logs"')) {
+        const rows = input.callLogRows ?? [];
+        return { rows, rowCount: rows.length } as never;
+      }
       if (text.includes("FROM portal_deal_collaborators")) {
         return { rows: [], rowCount: 0 } as never;
       }
@@ -276,7 +292,7 @@ test("getUserDigest returns available:false when there is no session", async () 
   const harness = await installFakePool({ hasSession: false })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
     expect(digest.available).toBe(false);
     expect(digest.news).toEqual([]);
     expect(digest.tasks).toEqual([]);
@@ -289,7 +305,7 @@ test("getUserDigest returns available:false when there is no active governed con
   const harness = await installFakePool({ hasActiveContext: false })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
     expect(digest.available).toBe(false);
   } finally {
     harness.restore();
@@ -305,7 +321,7 @@ test("getUserDigest returns available:false when the role lacks assistant/read",
   })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
     expect(digest.available).toBe(false);
   } finally {
     harness.restore();
@@ -345,7 +361,7 @@ test("getUserDigest gates each section independently by its own feature capabili
   })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
 
     expect(digest.available).toBe(true);
     // news/read=false and tickets/read=false for restricted_distributor —
@@ -395,7 +411,7 @@ test("getUserDigest excludes done/canceled tasks and tasks not due soon, keeps o
   })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
 
     const ids = digest.tasks.map((t) => t.id).sort();
     expect(ids).toEqual(["task-open-soon", "task-overdue"]);
@@ -460,7 +476,7 @@ test("getUserDigest narrative covers every populated section and skips the fabri
   })();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
 
     expect(digest.available).toBe(true);
     expect(digest.pipeline).toEqual({ openDealCount: 1, pipelineValueUsd: 1500 });
@@ -501,7 +517,7 @@ test("getUserDigest narrative is a plain fallback sentence when every section is
   const harness = await installFakePool({})();
   try {
     const { getUserDigest } = await import("@/server/digest.server");
-    const digest = await getUserDigest("any-token");
+    const digest = await getUserDigest("any-token", { now: MORNING });
 
     expect(digest.available).toBe(true);
     expect(digest.narrative).toContain("Nothing urgent needs your attention right now.");
@@ -512,6 +528,276 @@ test("getUserDigest narrative is a plain fallback sentence when every section is
     expect(digest.narrative).toContain(
       "Is there anything I can help you with — deals, tasks, tickets, or learning?",
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+// ---- Evening briefing -----------------------------------------------------
+
+test("getUserDigest switches to evening mode at the cutoff hour, not before", async () => {
+  const harness = await installFakePool({})();
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+
+    // 16:59 is still the forward-looking morning digest.
+    const beforeCutoff = await getUserDigest("any-token", {
+      now: new Date("2026-08-11T16:59:00.000Z"),
+    });
+    expect(beforeCutoff.mode).toBe("morning");
+
+    // 17:00 flips it.
+    const atCutoff = await getUserDigest("any-token", {
+      now: new Date("2026-08-11T17:00:00.000Z"),
+    });
+    expect(atCutoff.mode).toBe("evening");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("evening briefing reports what was completed today across tasks, deals, tickets, and calls", async () => {
+  const todayMorning = "2026-08-11T08:15:00.000Z";
+  const yesterday = "2026-08-10T08:15:00.000Z";
+
+  const harness = await installFakePool({
+    taskRows: [
+      {
+        id: "task-done-today",
+        title: "Ship Q3 pricing sheet",
+        status: "completed",
+        priority: "high",
+        completed_at: todayMorning,
+      },
+      {
+        id: "task-done-yesterday",
+        title: "Old news",
+        status: "completed",
+        priority: "low",
+        completed_at: yesterday,
+      },
+      {
+        id: "task-cancelled-today",
+        title: "Abandoned idea",
+        status: "cancelled",
+        priority: "low",
+        cancelled_at: todayMorning,
+      },
+    ],
+    dealRows: [
+      {
+        id: "deal-won",
+        account_name: "Northstar Cloud Suite",
+        stage: "won",
+        status: "closed",
+        amount: "$1,500",
+        currency_code: "USD",
+        created_at: yesterday,
+        updated_at: todayMorning,
+      },
+      {
+        id: "deal-untouched",
+        account_name: "Dormant Corp",
+        stage: "negotiation",
+        status: "open",
+        amount: "$900",
+        currency_code: "USD",
+        created_at: yesterday,
+        updated_at: yesterday,
+      },
+    ],
+    ticketRows: [
+      {
+        id: "ticket-closed",
+        subject: "Login loop",
+        status: "closed",
+        priority: "high",
+        updated_at: todayMorning,
+      },
+    ],
+    callLogRows: [
+      {
+        id: "call-1",
+        direction: "outbound",
+        to_number: "+14155552671",
+        from_number: "+14155550000",
+        duration_seconds: 420,
+        started_at: todayMorning,
+      },
+    ],
+  })();
+
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const digest = await getUserDigest("any-token", { now: EVENING });
+
+    expect(digest.mode).toBe("evening");
+    const labels = digest.completedToday.map((entry) => entry.label);
+
+    expect(labels).toContain('Completed "Ship Q3 pricing sheet"');
+    expect(labels).toContain('Cancelled "Abandoned idea"');
+    expect(labels).toContain('Closed "Northstar Cloud Suite" as won');
+    expect(labels).toContain('Closed ticket "Login loop"');
+    expect(labels).toContain("Made a call with +14155552671 (7 min)");
+
+    // Yesterday's work must not leak into today's briefing.
+    expect(labels.join(" ")).not.toContain("Old news");
+    expect(labels.join(" ")).not.toContain("Dormant Corp");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("evening briefing lists what lands tomorrow, from proposed completion dates and hard dates", async () => {
+  const harness = await installFakePool({
+    taskRows: [
+      {
+        id: "task-tomorrow",
+        title: "Call Acme",
+        status: "to_do",
+        priority: "high",
+        proposed_completion_at: "2026-08-12T00:00:00.000Z",
+      },
+      {
+        id: "task-day-after",
+        title: "Not yet",
+        status: "to_do",
+        priority: "low",
+        proposed_completion_at: "2026-08-13T00:00:00.000Z",
+      },
+      {
+        // Closed work never appears in tomorrow's plan even if its date is
+        // tomorrow.
+        id: "task-done",
+        title: "Already handled",
+        status: "completed",
+        priority: "low",
+        proposed_completion_at: "2026-08-12T00:00:00.000Z",
+      },
+    ],
+    dealRows: [
+      {
+        id: "deal-tomorrow",
+        account_name: "Harbor Logistics",
+        stage: "negotiation",
+        status: "open",
+        amount: "$4,000",
+        currency_code: "USD",
+        proposed_completion_date: "2026-08-12",
+        created_at: "2026-08-01T00:00:00.000Z",
+        updated_at: "2026-08-01T00:00:00.000Z",
+      },
+    ],
+  })();
+
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const digest = await getUserDigest("any-token", { now: EVENING });
+
+    const ids = digest.tomorrow.map((entry) => entry.id).sort();
+    expect(ids).toEqual(["deal-tomorrow", "task-tomorrow"]);
+    expect(digest.tomorrow.every((entry) => entry.reason === "proposed_completion")).toBe(true);
+    expect(digest.narrative).toContain("2 items land tomorrow");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("evening briefing answers an empty day with sarcasm, stably within the day", async () => {
+  const harness = await installFakePool({})();
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const { SARCASTIC_EMPTY_LINES } = await import("@/domain/contracts/digest");
+
+    const first = await getUserDigest("any-token", { now: EVENING });
+    const second = await getUserDigest("any-token", {
+      now: new Date("2026-08-11T21:45:00.000Z"),
+    });
+
+    expect(first.completedToday).toEqual([]);
+    const line = SARCASTIC_EMPTY_LINES.find((candidate) => first.narrative.includes(candidate));
+    expect(line).toBeDefined();
+
+    // Reopening the dialog later the same evening must not re-roll the joke.
+    expect(second.narrative).toContain(line as string);
+    expect(first.narrative).toContain("Nothing is scheduled to land tomorrow.");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("morning digest carries no evening sections, so the dialog never renders a stale day", async () => {
+  const harness = await installFakePool({
+    taskRows: [
+      {
+        id: "task-done-today",
+        title: "Done thing",
+        status: "completed",
+        priority: "low",
+        completed_at: "2026-08-11T08:00:00.000Z",
+      },
+    ],
+  })();
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const digest = await getUserDigest("any-token", { now: MORNING });
+
+    expect(digest.mode).toBe("morning");
+    expect(digest.completedToday).toEqual([]);
+    expect(digest.tomorrow).toEqual([]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("tasks due soon excludes real completed/cancelled statuses, not just the legacy spellings", async () => {
+  const soon = new Date(MORNING.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const harness = await installFakePool({
+    taskRows: [
+      { id: "open", title: "Live work", status: "to_do", priority: "high", due_at: soon },
+      {
+        id: "completed",
+        title: "Finished",
+        status: "completed",
+        priority: "high",
+        due_at: soon,
+      },
+      {
+        id: "cancelled",
+        title: "Dropped",
+        status: "cancelled",
+        priority: "high",
+        due_at: soon,
+      },
+    ],
+  })();
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const digest = await getUserDigest("any-token", { now: MORNING });
+    expect(digest.tasks.map((task) => task.id)).toEqual(["open"]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a task with only a proposed completion date still counts as due soon", async () => {
+  const soon = new Date(MORNING.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const harness = await installFakePool({
+    taskRows: [
+      {
+        id: "proposed-only",
+        title: "Forecast work",
+        status: "to_do",
+        priority: "medium",
+        due_at: null,
+        proposed_completion_at: soon,
+      },
+    ],
+  })();
+  try {
+    const { getUserDigest } = await import("@/server/digest.server");
+    const digest = await getUserDigest("any-token", { now: MORNING });
+    expect(digest.tasks.map((task) => task.id)).toEqual(["proposed-only"]);
   } finally {
     harness.restore();
   }

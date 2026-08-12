@@ -26,6 +26,7 @@ export type Profile = {
   google_linked_at: string | null;
   whatsapp_phone_e164: string | null;
   whatsapp_verified_at: string | null;
+  reminder_opt_out: boolean;
   call_ready: boolean;
 };
 

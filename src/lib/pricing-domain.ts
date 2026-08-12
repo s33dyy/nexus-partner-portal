@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { newId } from "@/domain/contracts/ids";
 
 import { parseMoneyInput, moneyToMinorUnits, type MoneyDTO } from "@/domain/contracts/money";
 import { CURRENCY_CODES, type CurrencyCode } from "@/domain/contracts/taxonomy";
@@ -327,7 +327,7 @@ function buildVersionedRecordBase<T extends PricingRecordType>(input: {
   const archived = input.archived_at ?? (status === "archived" ? now : null);
 
   return {
-    id: input.id ?? randomUUID(),
+    id: input.id ?? newId(),
     record_type: input.record_type,
     version,
     status,

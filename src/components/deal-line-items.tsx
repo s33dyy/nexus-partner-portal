@@ -374,7 +374,7 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="text-red-500"
+                            className="text-destructive hover:text-destructive"
                             onClick={() => void handleRemove(item.id)}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -411,12 +411,12 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={
+                      tone={
                         request.status === "approved"
-                          ? "default"
+                          ? "success"
                           : request.status === "rejected"
-                            ? "destructive"
-                            : "secondary"
+                            ? "danger"
+                            : "warning"
                       }
                     >
                       {request.status}

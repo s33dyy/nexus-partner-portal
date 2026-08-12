@@ -18,6 +18,7 @@ import {
   type PolicyDecision,
   countryNodeId,
 } from "@/domain/contracts/governance";
+import { toCalendarDate } from "@/domain/contracts/reminders";
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { SALES_REGIONS, resolveCountryForText } from "@/domain/contracts/world-geography";
 import {
@@ -73,6 +74,7 @@ export type DealSnapshot = {
   version: number;
   account_name: string;
   commercial_approved: boolean;
+  proposed_completion_date: string | null;
 };
 
 /** §8.7/§8.8: "Distributor assignment grants no record visibility until a
@@ -181,7 +183,7 @@ export async function loadDealForUpdate(
 ): Promise<DealSnapshot | null> {
   const { rows } = await tx.query(
     `SELECT id, stage, status, partner_id, customer_id, version, account_name
-            , country, region, commercial_approved
+            , country, region, commercial_approved, proposed_completion_date
      FROM portal_deals WHERE id = $1 FOR UPDATE`,
     [dealId],
   );
@@ -197,6 +199,7 @@ export async function loadDealForUpdate(
         version: number;
         account_name: string;
         commercial_approved: boolean;
+        proposed_completion_date: Date | string | null;
       }
     | undefined;
   if (!row) return null;
@@ -211,6 +214,7 @@ export async function loadDealForUpdate(
     version: Number(row.version),
     account_name: row.account_name,
     commercial_approved: row.commercial_approved,
+    proposed_completion_date: toCalendarDate(row.proposed_completion_date),
   };
 }
 
@@ -715,6 +719,10 @@ export type CreateDealInput = {
   amountUsd?: number | null;
   customerBudget?: string | null;
   possibleCloseDate?: string | null;
+  // The owner's forecast of when this deal actually completes. Distinct from
+  // closeDate (the committed close) and possibleCloseDate (the probable
+  // close used for pipeline weighting) — this is the one reminders fire off.
+  proposedCompletionDate?: string | null;
   closeDate?: string | null;
   source: string;
   notes?: string | null;
@@ -808,12 +816,12 @@ export async function createDeal(input: {
          id, account_name, contact_name, owner_name, country, region, product,
          stage, status, quantity, amount, currency_code, amount_value, amount_usd,
          fx_rate, fx_provider, customer_budget, probability, possible_close_date,
-         close_date, source, last_touch, notes, is_hidden_to_team,
+         proposed_completion_date, close_date, source, last_touch, notes, is_hidden_to_team,
          reward_rate_percent, commercial_approved, is_seed, user_id, partner_id, customer_id,
          poc_profile_id, version
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,FALSE,$27,$28,$29,$30,1
+         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,FALSE,$28,$29,$30,$31,1
        )`,
       [
         dealId,
@@ -835,6 +843,7 @@ export async function createDeal(input: {
         data.customerBudget?.trim() || null,
         0,
         data.possibleCloseDate || null,
+        toCalendarDate(data.proposedCompletionDate ?? null),
         closeDate,
         source,
         `Created via ${source}`.slice(0, 200),
@@ -1140,6 +1149,108 @@ export async function reviewDealRegistration(input: {
       subjectId: deal.id,
       newVersion,
       nextAuthorisedActions: [],
+      correlationId,
+    };
+  });
+}
+
+// Same rationale as setTaskProposedCompletion: the proposed completion date
+// is a promise the reminder sweep acts on, so every change to it lands
+// through a named command with lock/version/policy/evidence rather than a
+// generic column write.
+export async function setDealProposedCompletion(input: {
+  actor: DealCommandActor;
+  dealId: string;
+  expectedVersion: number;
+  proposedCompletionDate: string | null;
+  reason?: string | null;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  const reason = input.reason?.trim() || null;
+
+  let normalized: string | null = null;
+  if (input.proposedCompletionDate) {
+    normalized = toCalendarDate(input.proposedCompletionDate);
+    if (!normalized) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          "Enter a valid proposed completion date",
+          "proposedCompletionDate",
+        ),
+        correlationId,
+      };
+    }
+  }
+
+  return withTransaction(async (tx) => {
+    const deal = await loadDealForUpdate(tx, input.dealId);
+    if (!deal) {
+      return {
+        ok: false,
+        failure: makePolicyDenial(null, "Deal is not accessible"),
+        correlationId,
+      };
+    }
+
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (deal.version !== input.expectedVersion) {
+      return {
+        ok: false,
+        failure: makeConcurrencyError(deal.id, input.expectedVersion, deal.version),
+        correlationId,
+      };
+    }
+
+    if (deal.stage === "won" || deal.stage === "lost") {
+      return {
+        ok: false,
+        failure: validationFailure(
+          `A ${deal.stage} deal has no proposed completion date to set`,
+          "proposedCompletionDate",
+        ),
+        correlationId,
+      };
+    }
+
+    const newVersion = deal.version + 1;
+    await tx.query(
+      `UPDATE portal_deals
+       SET proposed_completion_date = $2, version = $3, updated_at = now()
+       WHERE id = $1`,
+      [deal.id, normalized, newVersion],
+    );
+
+    await recordTransitionAndOutbox({
+      tx,
+      actor: input.actor,
+      correlationId,
+      commandName: "deal.set_proposed_completion",
+      eventName: "deal.proposed_completion_changed",
+      deal,
+      // Stage and status are genuinely unchanged; deal_transitions is the
+      // Deal's evidence log, so the row carries the same stage/status on
+      // both sides and is distinguished by command_name.
+      toStage: deal.stage,
+      toStatus: deal.status,
+      reason,
+      payload: {
+        fromProposedCompletionDate: deal.proposed_completion_date,
+        toProposedCompletionDate: normalized,
+        reason,
+      },
+    });
+
+    return {
+      ok: true,
+      commandName: "deal.set_proposed_completion",
+      subjectId: deal.id,
+      newVersion,
+      nextAuthorisedActions: nextAuthorisedActions(deal.stage),
       correlationId,
     };
   });

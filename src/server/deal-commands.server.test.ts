@@ -1137,7 +1137,9 @@ test("createDeal forces a partner-scoped actor's own partner onto the new deal",
     });
     expect(result.ok).toBe(true);
     const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
-    expect(dealInsert?.params[27]).toBe("partner-own");
+    // Index shifted by one when proposed_completion_date was inserted into the
+    // column list ahead of close_date.
+    expect(dealInsert?.params[28]).toBe("partner-own");
   } finally {
     harness.restore();
   }

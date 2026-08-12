@@ -69,6 +69,7 @@ type TaskSnapshot = {
   title: string;
   assigneeId: string | null;
   creatorId: string | null;
+  proposedCompletionAt: string | null;
 };
 
 function authorizeTaskActor(
@@ -150,7 +151,8 @@ function validationFailure(message: string, field = "status"): CommandFailureCon
 
 async function loadTaskForUpdate(tx: PoolClient, taskId: string): Promise<TaskSnapshot | null> {
   const { rows } = await tx.query(
-    `SELECT id, status, partner_id, version, title, assignee_id, creator_id FROM tasks WHERE id = $1 FOR UPDATE`,
+    `SELECT id, status, partner_id, version, title, assignee_id, creator_id, proposed_completion_at
+     FROM tasks WHERE id = $1 FOR UPDATE`,
     [taskId],
   );
   const row = rows[0] as
@@ -162,6 +164,7 @@ async function loadTaskForUpdate(tx: PoolClient, taskId: string): Promise<TaskSn
         title: string;
         assignee_id: string | null;
         creator_id: string | null;
+        proposed_completion_at: Date | string | null;
       }
     | undefined;
   if (!row) return null;
@@ -173,7 +176,14 @@ async function loadTaskForUpdate(tx: PoolClient, taskId: string): Promise<TaskSn
     title: row.title,
     assigneeId: row.assignee_id ?? null,
     creatorId: row.creator_id ?? null,
+    proposedCompletionAt: toIsoOrNull(row.proposed_completion_at),
   };
+}
+
+function toIsoOrNull(value: Date | string | null): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 async function recordTaskEvent(input: {
@@ -250,6 +260,10 @@ export type CreateTaskInput = {
   relatedId?: string | null;
   assigneeId?: string | null;
   dueAt?: string | null;
+  // The owner's own forecast of when this actually lands, distinct from
+  // dueAt (the deadline someone else set). Reminders fire off this, not
+  // dueAt — see domain/contracts/reminders.ts.
+  proposedCompletionAt?: string | null;
   partnerId?: string | null;
 };
 
@@ -296,8 +310,8 @@ export async function createTask(input: {
     await tx.query(
       `INSERT INTO tasks (
          id, title, description, status, priority, related_type, related_id,
-         assignee_id, creator_id, partner_id, due_at, version
-       ) VALUES ($1,$2,$3,'to_do',$4,$5,$6,$7,$8,$9,$10,1)`,
+         assignee_id, creator_id, partner_id, due_at, proposed_completion_at, version
+       ) VALUES ($1,$2,$3,'to_do',$4,$5,$6,$7,$8,$9,$10,$11,1)`,
       [
         taskId,
         title,
@@ -309,6 +323,7 @@ export async function createTask(input: {
         input.actor.userId,
         partnerId,
         input.data.dueAt ?? null,
+        input.data.proposedCompletionAt ?? null,
       ],
     );
 
@@ -322,7 +337,11 @@ export async function createTask(input: {
       fromStatus: "(created)",
       toStatus: "to_do",
       reason: null,
-      payload: { title, relatedType: input.data.relatedType ?? null },
+      payload: {
+        title,
+        relatedType: input.data.relatedType ?? null,
+        proposedCompletionAt: input.data.proposedCompletionAt ?? null,
+      },
     });
 
     return {
@@ -433,6 +452,118 @@ export async function transitionTask(input: {
       nextAuthorisedActions: (ALLOWED_TRANSITIONS[input.toStatus] ?? []).map(
         (status) => `task.transition:${status}`,
       ),
+      correlationId,
+    };
+  });
+}
+
+// A proposed completion date is a promise, and moving it is the single most
+// interesting thing that happens to one — "this slipped three times" is only
+// visible if each slip is recorded. So this is a named command with the same
+// lock/version/policy/evidence path as transitionTask, not a generic column
+// update (table-policy.server.ts blocks the generic path for this column for
+// exactly that reason).
+export async function setTaskProposedCompletion(input: {
+  actor: TaskCommandActor;
+  taskId: string;
+  expectedVersion: number;
+  proposedCompletionAt: string | null;
+  reason?: string | null;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  const reason = input.reason?.trim() || null;
+
+  let normalized: string | null = null;
+  if (input.proposedCompletionAt) {
+    const parsed = new Date(input.proposedCompletionAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          "Enter a valid proposed completion date",
+          "proposedCompletionAt",
+        ),
+        correlationId,
+      };
+    }
+    normalized = parsed.toISOString();
+  }
+
+  return withTransaction(async (tx) => {
+    const task = await loadTaskForUpdate(tx, input.taskId);
+    if (!task) {
+      return {
+        ok: false,
+        failure: makePolicyDenial(null, "Task is not accessible"),
+        correlationId,
+      };
+    }
+
+    const policy = authorizeTaskActor(input.actor, {
+      partnerId: task.partnerId,
+      assigneeId: task.assigneeId,
+      creatorId: task.creatorId,
+    });
+    if (!policy.allowed) {
+      return { ok: false, failure: policy.denial, correlationId };
+    }
+
+    if (task.version !== input.expectedVersion) {
+      return {
+        ok: false,
+        failure: makeConcurrencyError(task.id, input.expectedVersion, task.version),
+        correlationId,
+      };
+    }
+
+    // Closed work has nothing left to forecast, and letting a date land on a
+    // completed task would make the reminder sweep chase records nobody is
+    // working on.
+    if (task.status === "completed" || task.status === "cancelled") {
+      return {
+        ok: false,
+        failure: validationFailure(
+          `A ${task.status} task has no proposed completion date to set`,
+          "proposedCompletionAt",
+        ),
+        correlationId,
+      };
+    }
+
+    const newVersion = task.version + 1;
+    await tx.query(
+      `UPDATE tasks
+       SET proposed_completion_at = $2, version = $3, updated_at = now()
+       WHERE id = $1`,
+      [task.id, normalized, newVersion],
+    );
+
+    await recordTaskEvent({
+      tx,
+      actor: input.actor,
+      correlationId,
+      commandName: "task.set_proposed_completion",
+      eventName: "task.proposed_completion_changed",
+      taskId: task.id,
+      // Status is genuinely unchanged here; task_transitions is the Task's
+      // one evidence log, so the row carries the same status on both sides
+      // and is distinguished by command_name.
+      fromStatus: task.status,
+      toStatus: task.status,
+      reason,
+      payload: {
+        fromProposedCompletionAt: task.proposedCompletionAt,
+        toProposedCompletionAt: normalized,
+        reason,
+      },
+    });
+
+    return {
+      ok: true,
+      commandName: "task.set_proposed_completion",
+      subjectId: task.id,
+      newVersion,
+      nextAuthorisedActions: ["task.transition", "task.set_proposed_completion"],
       correlationId,
     };
   });

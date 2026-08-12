@@ -3,8 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, Phone, PhoneIncoming, PhoneOutgoing, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState, PageHeader } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
+import { resolveStatusTone } from "@/lib/status-tone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CsvExportButton } from "@/components/csv-export-button";
@@ -43,15 +45,17 @@ const CALL_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "created_at", header: "Created At" },
 ];
 
-const STATUS_TONE: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
-  queued: "outline",
-  ringing: "secondary",
-  "in-progress": "default",
-  completed: "secondary",
-  busy: "destructive",
-  failed: "destructive",
-  "no-answer": "outline",
-  canceled: "outline",
+type BadgeTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger";
+
+const STATUS_TONE: Record<string, BadgeTone> = {
+  queued: "neutral",
+  ringing: "info",
+  "in-progress": "brand",
+  completed: "success",
+  busy: "danger",
+  failed: "danger",
+  "no-answer": "warning",
+  canceled: "neutral",
 };
 
 function formatDuration(seconds: number | null): string {
@@ -94,46 +98,42 @@ function CallsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-            <Phone className="h-3.5 w-3.5" />
-            Call Center
-          </div>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Calls</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Inbound and outbound call history from the LIVEY softphone.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">{hasRole("super_admin") ? "All calls" : "Your calls"}</Badge>
-          <CsvExportButton
-            filenameStem="livey-calls"
-            columns={CALL_EXPORT_COLUMNS}
-            loadRows={async () => calls}
-          />
-          <Button
-            variant="outline"
-            onClick={() => {
-              setRefreshing(true);
-              void load();
-            }}
-            disabled={loading || refreshing}
-          >
-            {loading || refreshing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Call Center"
+        icon={<Phone className="h-3.5 w-3.5" />}
+        title="Calls"
+        description="Inbound and outbound call history from the LIVEY softphone."
+        actions={
+          <>
+            <Badge tone="neutral">{hasRole("super_admin") ? "All calls" : "Your calls"}</Badge>
+            <CsvExportButton
+              filenameStem="livey-calls"
+              columns={CALL_EXPORT_COLUMNS}
+              loadRows={async () => calls}
+            />
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRefreshing(true);
+                void load();
+              }}
+              disabled={loading || refreshing}
+            >
+              {loading || refreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="text-base">Call history</CardTitle>
+          <CardTitle>Call history</CardTitle>
           <CardDescription>Most recent 200 calls, newest first.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -143,7 +143,11 @@ function CallsPage() {
               Loading calls...
             </div>
           ) : calls.length === 0 ? (
-            <div className="p-6 text-sm text-muted-foreground">No calls logged yet.</div>
+            <EmptyState
+              icon={<Phone className="h-5 w-5" />}
+              title="No calls logged yet"
+              description="Inbound and outbound calls placed through the LIVEY softphone will appear here."
+            />
           ) : (
             <div className="divide-y">
               {calls.map((call) => (
@@ -168,8 +172,10 @@ function CallsPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {call.disposition && <Badge variant="outline">{call.disposition}</Badge>}
-                    <Badge variant={STATUS_TONE[call.status] ?? "outline"}>{call.status}</Badge>
+                    {call.disposition && (
+                      <Badge tone={resolveStatusTone(call.disposition)}>{call.disposition}</Badge>
+                    )}
+                    <Badge tone={STATUS_TONE[call.status] ?? "neutral"}>{call.status}</Badge>
                   </div>
                 </div>
               ))}
