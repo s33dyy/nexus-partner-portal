@@ -4,6 +4,7 @@ import { CalendarClock, CheckSquare, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState, PageHeader } from "@/components/page-header";
+import { RecordList, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -456,29 +457,19 @@ function TasksPage() {
               }
             />
           ) : (
-            <div className="divide-y">
+            <RecordList className="p-3">
               {visibleTasks.map((task) => (
-                <div
+                <RecordRow
                   key={task.id}
-                  className="flex flex-wrap items-start justify-between gap-3 px-5 py-4"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{task.title}</span>
+                  tone={STATUS_TONE[task.status]}
+                  title={task.title}
+                  subtitle={task.description || undefined}
+                  meta={
+                    <>
                       <Badge tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
                       <Badge tone={PRIORITY_TONE[task.priority] ?? "neutral"}>
                         {task.priority}
                       </Badge>
-                    </div>
-                    {task.description && (
-                      <p className="mt-1 text-sm text-muted-foreground">{task.description}</p>
-                    )}
-                    {task.blocked_reason && (
-                      <p className="mt-1 text-xs text-destructive">
-                        Blocked: {task.blocked_reason}
-                      </p>
-                    )}
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span>
                         {task.due_at ? `Due ${formatDateTimeLabel(task.due_at)}` : "No due date"}
                       </span>
@@ -497,18 +488,23 @@ function TasksPage() {
                           ? `Proposed ${formatDateLabel(task.proposed_completion_at)}`
                           : "Set proposed completion"}
                       </button>
+                      {task.blocked_reason ? (
+                        <span className="text-destructive">Blocked: {task.blocked_reason}</span>
+                      ) : null}
+                    </>
+                  }
+                  trailing={
+                    <div className="flex flex-wrap gap-2">
+                      {busyTaskId === task.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        actionsFor(task)
+                      )}
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {busyTaskId === task.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      actionsFor(task)
-                    )}
-                  </div>
-                </div>
+                  }
+                />
               ))}
-            </div>
+            </RecordList>
           )}
         </CardContent>
       </Card>
