@@ -151,23 +151,40 @@ docker compose exec db psql -U postgres -d livey_partner_portal
 
 `railway.json` sets `"builder": "RAILPACK"`, which means **Railway does not use the
 Dockerfile at all** — `docker/entrypoint.sh` and its `ENTRYPOINT` are only used by
-`docker compose` locally. Migrations on Railway therefore have to be part of the
-`startCommand`:
+`docker compose` locally. Migrations on Railway run as a **pre-deploy step**:
 
 ```
-"startCommand": "bun run db:migrate && HOST=:: bun .output/server/index.mjs"
+"deploy": {
+  "healthcheckPath": "/",
+  "preDeployCommand": "bun run db:migrate"
+}
 ```
 
-Two traps this has already fallen into once each:
+`preDeployCommand` runs after the build and before the new version takes traffic.
+A failure there is reported as a failed migration, which is what you want.
 
-1. **Removing the `startCommand` and expecting the Dockerfile's ENTRYPOINT to take
+### Do NOT chain migrations into `startCommand`
+
+This was tried and it broke every deploy. `"bun run db:migrate && …start…"` couples
+two unrelated failure modes: if the migration exits non-zero for any reason the
+`&&` short-circuits, the server never starts, and Railway reports a **five-minute
+healthcheck timeout** with no indication the real cause was a migration.
+
+The specific trigger was `scripts/apply-migrations.ts`'s watchdog, which was set to
+10 seconds. It exists to kill a held-open Railway TLS socket *after* migrations
+finish — it was never meant to bound the migration itself, and `db/schema.sql` is
+~2,000 lines, which against a cold remote Postgres takes longer than 10s. It is now
+120s, and migrations no longer gate server start regardless.
+
+### Other traps, each hit once already
+
+1. **Removing the migration step and expecting the Dockerfile's ENTRYPOINT to take
    over.** It won't, while the builder is Railpack. Migrations then silently stop
    running, which stays invisible until the next schema change and then breaks the
    app — the generated SQL in `TABLE_COLUMNS` selects columns the deployed database
    doesn't have, including on `profiles`, which is read on every login.
-2. **Invoking `node` in the start command.** Use `bun` directly; the runtime image
-   does not reliably ship a `node` binary.
+2. **Invoking `node` in a Railway command.** Prefer `bun`. (Railpack does provision
+   node, but the Docker runtime image does not.)
 
-If you ever switch `builder` to `DOCKERFILE`, drop the `startCommand` — the
-ENTRYPOINT already does both steps, and having both would run migrations twice
-(harmless, since `db/schema.sql` is idempotent, but pointless).
+If you ever switch `builder` to `DOCKERFILE`, drop `preDeployCommand` — the
+ENTRYPOINT already runs migrations before starting the server.

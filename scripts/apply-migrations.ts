@@ -13,14 +13,26 @@ export async function applyMigrations() {
   }
 }
 
+// A held-open socket (observed on Railway's internal TLS Postgres connection)
+// can keep the event loop alive even after pool.end() resolves and we call
+// process.exit() below, so this forces termination as a last resort.
+//
+// It is NOT a bound on how long a migration may take, and 10s (its original
+// value) was far too short to be one: db/schema.sql is ~2,000 lines and
+// applying it against a cold remote Postgres routinely runs longer than that.
+// Chained into railway.json's startCommand, the 10s exit(1) short-circuited
+// the `&&`, the server never started, and every deploy died on a five-minute
+// healthcheck timeout that gave no hint the cause was a migration. Two
+// minutes distinguishes "genuinely hung" from "slow", which is all this is for.
+const WATCHDOG_MS = 120_000;
+
 if (import.meta.main) {
-  // A held-open socket (observed on Railway's internal TLS Postgres connection)
-  // can keep the event loop alive even after pool.end() resolves and we call
-  // process.exit() below, so force termination as a last resort.
   const watchdog = setTimeout(() => {
-    console.error("[apply-migrations] watchdog: forcing exit after timeout");
+    console.error(
+      `[apply-migrations] watchdog: no completion after ${WATCHDOG_MS / 1000}s — forcing exit`,
+    );
     process.exit(1);
-  }, 10_000);
+  }, WATCHDOG_MS);
 
   applyMigrations()
     .then(() => {
