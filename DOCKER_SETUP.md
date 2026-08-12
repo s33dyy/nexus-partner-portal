@@ -146,3 +146,28 @@ docker compose exec db psql -U postgres -d livey_partner_portal
 - **Port already in use (`3000` or `5432`)** — something else on the host is bound to that port. Either stop it, or change the left-hand side of the `ports:` mapping in `docker-compose.yml` (e.g. `"5433:5432"`).
 - **`app` can't reach Postgres / SSL errors** — don't edit `DATABASE_URL` inside `docker-compose.yml`'s `environment:` block; it's intentionally pinned to the in-network hostname `db` with `PGSSLMODE=disable`, since this local Postgres doesn't speak TLS and `db` isn't on the app's localhost SSL allow-list ([`scripts/db.ts`](scripts/db.ts), [`src/server/postgres.server.ts`](src/server/postgres.server.ts)).
 - **Login works but data looks empty** — you started the stack but never ran the seed step (step 3) — migrations create empty tables, they don't populate them.
+
+## Railway: how migrations actually run (read before changing `railway.json`)
+
+`railway.json` sets `"builder": "RAILPACK"`, which means **Railway does not use the
+Dockerfile at all** — `docker/entrypoint.sh` and its `ENTRYPOINT` are only used by
+`docker compose` locally. Migrations on Railway therefore have to be part of the
+`startCommand`:
+
+```
+"startCommand": "bun run db:migrate && HOST=:: bun .output/server/index.mjs"
+```
+
+Two traps this has already fallen into once each:
+
+1. **Removing the `startCommand` and expecting the Dockerfile's ENTRYPOINT to take
+   over.** It won't, while the builder is Railpack. Migrations then silently stop
+   running, which stays invisible until the next schema change and then breaks the
+   app — the generated SQL in `TABLE_COLUMNS` selects columns the deployed database
+   doesn't have, including on `profiles`, which is read on every login.
+2. **Invoking `node` in the start command.** Use `bun` directly; the runtime image
+   does not reliably ship a `node` binary.
+
+If you ever switch `builder` to `DOCKERFILE`, drop the `startCommand` — the
+ENTRYPOINT already does both steps, and having both would run migrations twice
+(harmless, since `db/schema.sql` is idempotent, but pointless).

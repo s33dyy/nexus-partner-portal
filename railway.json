@@ -5,6 +5,7 @@
     "buildCommand": "bun run build"
   },
   "deploy": {
-    "healthcheckPath": "/"
+    "healthcheckPath": "/",
+    "startCommand": "bun run db:migrate && HOST=:: bun .output/server/index.mjs"
   }
 }
