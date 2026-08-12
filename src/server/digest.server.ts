@@ -611,8 +611,38 @@ export async function getUserDigest(
   options?: { now?: Date },
 ): Promise<UserDigest> {
   const authContext = await getAuthContext(token);
-  const userId = authContext.session?.user.id ?? null;
+  return buildDigest(authContext, authContext.session?.user.id ?? null, options);
+}
 
+/**
+ * The same digest, for a user who is not making the request.
+ *
+ * The daily digest email has no session to resolve — it runs on a schedule,
+ * for every eligible recipient at once. It reuses the WhatsApp webhook's
+ * existing session-less path (resolveAuthContextForProfile) rather than
+ * inventing a second way to establish who someone is, so the email is scoped
+ * by exactly the same capability and policy checks as the in-app dialog. A
+ * recipient can never be emailed a fact the UI would have hidden from them.
+ */
+export async function getUserDigestForUser(
+  userId: string,
+  options?: { now?: Date },
+): Promise<UserDigest> {
+  const { resolveAuthContextForProfile } = await import("@/server/livey-service.server");
+  const resolved = await resolveAuthContextForProfile(userId);
+  return buildDigest(resolved, userId, options);
+}
+
+type DigestAuth = Pick<
+  Awaited<ReturnType<typeof getAuthContext>>,
+  "profile" | "roles" | "assignment" | "activeContext"
+>;
+
+async function buildDigest(
+  authContext: DigestAuth,
+  userId: string | null,
+  options?: { now?: Date },
+): Promise<UserDigest> {
   if (!userId || !authContext.activeContext) {
     return { ...EMPTY_USER_DIGEST };
   }

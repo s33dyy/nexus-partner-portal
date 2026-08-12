@@ -165,8 +165,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             </PopoverContent>
           </Popover>
 
-          <div className="ml-auto flex items-center gap-1.5">
-            <RegionFilterSelect />
+          <div className="ml-auto flex min-w-0 items-center gap-1">
+            {/* Region scoping is a desktop affordance — on a phone it ate a
+                third of the bar. Reachable from the context popover instead. */}
+            <div className="hidden md:block">
+              <RegionFilterSelect />
+            </div>
             <Badge
               tone={
                 status === "approved" ? "success" : status === "rejected" ? "danger" : "warning"
@@ -175,12 +179,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               {statusLabel[status]}
             </Badge>
-            <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" />
+            <span className="mx-0.5 hidden h-5 w-px bg-border md:block" />
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="gap-1.5 px-2"
+              size="icon-sm"
+              aria-label="Open briefing"
+              className="xl:h-9 xl:w-auto xl:gap-1.5 xl:px-2"
               onClick={() => setDigestOpen(true)}
             >
               <AudioLines className="h-4 w-4" />
@@ -200,7 +205,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 gap-2 px-2">
+                <Button variant="ghost" className="h-9 shrink-0 gap-2 px-1 sm:px-2">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="text-xs bg-primary text-primary-foreground">
                       {initials}

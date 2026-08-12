@@ -262,7 +262,9 @@ export function SoftphonePanel() {
           }`}
         >
           {hasIncoming ? <PhoneIncoming className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
-          {hasIncoming ? "Incoming call" : "Softphone"}
+          {/* Label collapses on phones — an incoming call still reads clearly
+              from the pulsing destructive-tinted icon alone. */}
+          <span className="hidden md:inline">{hasIncoming ? "Incoming call" : "Softphone"}</span>
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
