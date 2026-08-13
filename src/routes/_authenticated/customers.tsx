@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
+import { RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -797,46 +798,39 @@ function CustomersPage() {
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
-              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading customers...
-              </div>
+              <RecordListSkeleton rows={6} className="p-3" />
             ) : filteredCustomers.length === 0 ? (
-              <div className="space-y-3 p-8 text-sm text-muted-foreground">
-                <div className="font-medium text-foreground">No customers match this view.</div>
-                <div>Try a different filter or add a fresh account below.</div>
-              </div>
+              <EmptyState
+                icon={<Users className="h-5 w-5" />}
+                title="No customers match this view"
+                description="Try a different filter, or add a fresh account from the panel beside this list."
+              />
             ) : (
-              <div className="divide-y">
+              <RecordList className="p-3">
                 {filteredCustomers.map((customer) => (
-                  <button
+                  <RecordRow
                     key={customer.id}
+                    tone={resolveStatusTone(customer.status)}
+                    owner={customer.account_owner}
+                    selected={selectedCustomer?.id === customer.id}
                     onClick={() => {
                       setSelectedId(customer.id);
                       setEditOpen(true);
                     }}
-                    className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 hover:bg-muted/40 ${
-                      selectedCustomer?.id === customer.id ? "bg-muted/40" : ""
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate font-medium">{customer.company_name}</div>
+                    title={customer.company_name}
+                    subtitle={`${customer.account_owner} · ${customer.segment} · ${customer.region}`}
+                    meta={<span>{customer.health_score}% health</span>}
+                    trailing={
+                      <>
+                        <span className="text-[13px] font-semibold" data-numeric>
+                          {customer.mrr}
+                        </span>
                         <Badge tone={resolveStatusTone(customer.status)}>{customer.status}</Badge>
-                      </div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {customer.account_owner} · {customer.segment} · {customer.region}
-                      </div>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <div className="font-medium">{customer.mrr}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {customer.health_score}% health
-                      </div>
-                    </div>
-                  </button>
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </RecordList>
             )}
           </CardContent>
         </Card>

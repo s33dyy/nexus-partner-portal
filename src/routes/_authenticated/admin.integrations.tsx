@@ -105,32 +105,13 @@ const INITIAL_PROVIDERS: ProviderData[] = [
     deadLetterCount: 0,
     conflicts: 0,
   },
-  {
-    id: "gyftr",
-    name: "GyFTR",
-    category: "Rewards",
-    icon: Activity,
-    state: "paused",
-    environment: "production",
-    lastOutbound: "1 day ago",
-    lastInbound: "1 day ago",
-    queueDepth: 180,
-    deadLetterCount: 0,
-    conflicts: 0,
-  },
-  {
-    id: "dhl",
-    name: "DHL Express",
-    category: "Logistics",
-    icon: Package,
-    state: "disconnected",
-    environment: "sandbox",
-    lastOutbound: null,
-    lastInbound: null,
-    queueDepth: 0,
-    deadLetterCount: 0,
-    conflicts: 0,
-  },
+  // GyFTR (rewards fulfilment) and DHL Express (logistics) are deliberately
+  // absent. Both are placeholders on the backend only — src/integrations/gyftr
+  // exists and returns a stub voucher response when unconfigured — and product
+  // direction is that neither is surfaced to operators until it is really
+  // wired. Showing a "paused" GyFTR row with a queue depth of 180 implied a
+  // live integration that does not exist. Do not re-add without a real
+  // connection behind it.
 ];
 
 function StateBadge({ state }: { state: ConnectionState }) {
