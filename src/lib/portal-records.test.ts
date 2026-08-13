@@ -3,6 +3,8 @@ import { expect, test } from "bun:test";
 import {
   getDealUsdAmount,
   getValidBackwardStages,
+  isTerminalDealStage,
+  nextDealStage,
   normalizeDealCurrencyCode,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -44,4 +46,23 @@ test("9e: getValidBackwardStages returns every earlier non-terminal stage, mirro
   // moveDealStageBackward itself also rejects moves into/out of won/lost.
   expect(getValidBackwardStages("won")).toEqual([]);
   expect(getValidBackwardStages("lost")).toEqual([]);
+});
+
+test("nextDealStage never advances out of a terminal stage", () => {
+  expect(nextDealStage("sourced")).toBe("demo");
+  expect(nextDealStage("proposal")).toBe("negotiation");
+  // Negotiation still reports "won" — the pipeline branches on that to route
+  // through markDealWon rather than an ordinary stage move.
+  expect(nextDealStage("negotiation")).toBe("won");
+  // The regression: "lost" follows "won" in DEAL_STAGE_ORDER, so a naive
+  // index+1 turned "Move forward" on a won deal into "mark this lost".
+  expect(nextDealStage("won")).toBe("won");
+  expect(nextDealStage("lost")).toBe("lost");
+});
+
+test("isTerminalDealStage marks won and lost, and nothing else", () => {
+  expect(isTerminalDealStage("won")).toBe(true);
+  expect(isTerminalDealStage("lost")).toBe(true);
+  expect(isTerminalDealStage("negotiation")).toBe(false);
+  expect(isTerminalDealStage("sourced")).toBe(false);
 });

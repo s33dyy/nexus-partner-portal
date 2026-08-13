@@ -259,7 +259,20 @@ export type GlobalSearchResult = {
   items: GlobalSearchResultItem[];
 };
 
+/** Won and Lost are outcomes, not steps — nothing advances out of them. */
+export function isTerminalDealStage(stage: DealStage): boolean {
+  return stage === "won" || stage === "lost";
+}
+
 export function nextDealStage(stage: DealStage): DealStage {
+  // A terminal stage returns itself, meaning "no forward move available".
+  // Without this, "won" would step to "lost" purely because lost follows won
+  // in DEAL_STAGE_ORDER. The server already refuses that — its
+  // FORWARD_NEXT_STAGE map (deal-commands.server.ts) skips any hop whose
+  // source or target is terminal — so callers were only ever able to turn
+  // that into a failed command, never a real move. Mirroring the server here
+  // lets the UI hide the action instead of offering one that cannot succeed.
+  if (isTerminalDealStage(stage)) return stage;
   const index = DEAL_STAGE_ORDER.indexOf(stage);
   return index >= 0 && index < DEAL_STAGE_ORDER.length - 1 ? DEAL_STAGE_ORDER[index + 1] : stage;
 }

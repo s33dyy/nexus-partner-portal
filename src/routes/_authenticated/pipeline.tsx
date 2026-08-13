@@ -15,8 +15,8 @@ import { toast } from "sonner";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
-import { BoardColumn, OwnerAvatar } from "@/components/record-list";
-import { DEAL_STAGE_TONE } from "@/lib/status-tone";
+import { BoardCard, BoardColumn } from "@/components/record-list";
+import { DEAL_STAGE_TONE, type StatusTone } from "@/lib/status-tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,7 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   DEAL_STAGE_ORDER,
   getValidBackwardStages,
+  isTerminalDealStage,
   nextDealStage,
   type DealRecord,
   type DealStage,
@@ -50,6 +51,20 @@ import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
 });
+
+/** Terminal stages, in the order they stack inside the shared closed column. */
+const CLOSED_STAGES: readonly DealStage[] = ["won", "lost"];
+
+/** Every stage that still gets a lane of its own on the board. */
+const OPEN_STAGE_ORDER = DEAL_STAGE_ORDER.filter((stage) => !CLOSED_STAGES.includes(stage));
+
+type PipelineColumn = {
+  key: string;
+  label: string;
+  tone: StatusTone;
+  emptyLabel: string;
+  deals: DealRecord[];
+};
 
 const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "account_name", header: "Account" },
@@ -217,14 +232,37 @@ function PipelinePage() {
     });
   }, [regionScopedDeals, query, stageFilter]);
 
-  const grouped = useMemo(
-    () =>
-      DEAL_STAGE_ORDER.map((stage) => ({
-        stage,
-        deals: visibleDeals.filter((deal) => deal.stage === stage),
-      })),
-    [visibleDeals],
-  );
+  // Won and Lost share one terminal column.
+  //
+  // Neither can be moved on from, so as separate columns they were two mostly
+  // empty lanes stranded at the end of the board, costing the horizontal room
+  // the open stages actually need. Together they read as the outcome split for
+  // the period. Nothing is lost by merging: each card keeps its own stage
+  // tone, so won stays green and lost stays red, and the two are sorted so
+  // every won sits above every lost.
+  const grouped = useMemo<PipelineColumn[]>(() => {
+    const columns: PipelineColumn[] = OPEN_STAGE_ORDER.map((stage) => ({
+      key: stage,
+      label: stage.replace(/_/g, " "),
+      tone: DEAL_STAGE_TONE[stage],
+      emptyLabel: "No deals in this stage.",
+      deals: visibleDeals.filter((deal) => deal.stage === stage),
+    }));
+
+    const closed = visibleDeals
+      .filter((deal) => CLOSED_STAGES.includes(deal.stage))
+      .sort((a, b) => CLOSED_STAGES.indexOf(a.stage) - CLOSED_STAGES.indexOf(b.stage));
+
+    columns.push({
+      key: "closed",
+      label: "Won / Lost",
+      tone: "success",
+      emptyLabel: "Nothing closed yet.",
+      deals: closed,
+    });
+
+    return columns;
+  }, [visibleDeals]);
 
   const totals = useMemo(() => {
     const weighted = regionScopedDeals.length
@@ -520,71 +558,87 @@ function PipelinePage() {
             <div className="flex gap-3 pb-1">
               {grouped.map((column) => (
                 <BoardColumn
-                  key={column.stage}
-                  label={column.stage.replace(/_/g, " ")}
+                  key={column.key}
+                  label={column.label}
                   count={column.deals.length}
-                  tone={DEAL_STAGE_TONE[column.stage]}
+                  tone={column.tone}
                 >
                   {column.deals.length === 0 ? (
                     <p className="rounded-md border border-dashed px-2.5 py-4 text-center text-xs text-muted-foreground">
-                      No deals in this stage.
+                      {column.emptyLabel}
                     </p>
                   ) : (
                     column.deals.map((deal) => (
-                      <div
+                      <BoardCard
                         key={deal.id}
-                        className="rounded-md border bg-card p-2.5 shadow-card transition-colors focus-within:ring-1 focus-within:ring-ring hover:border-ring/40"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 truncate text-[13px] font-medium">
-                            {deal.account_name}
+                        tone={DEAL_STAGE_TONE[deal.stage]}
+                        owner={deal.owner_name}
+                        title={deal.account_name}
+                        amount={deal.amount}
+                        details={
+                          <div className="space-y-1.5">
+                            {/* The collapsed pill truncates, so the full name
+                                is repeated here rather than only on hover. */}
+                            <div className="text-xs font-medium leading-snug">
+                              {deal.account_name}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {deal.owner_name}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {/* Named explicitly because the closed column
+                                  holds both won and lost. */}
+                              <Badge tone={DEAL_STAGE_TONE[deal.stage]} className="capitalize">
+                                {deal.stage}
+                              </Badge>
+                              <Badge tone="neutral">{deal.region}</Badge>
+                              <Badge tone="neutral">{deal.product}</Badge>
+                              <Badge tone="neutral">
+                                {formatDealProbability(deal.probability)}
+                              </Badge>
+                            </div>
                           </div>
-                          <span className="shrink-0 text-[13px] font-semibold" data-numeric>
-                            {deal.amount}
-                          </span>
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <OwnerAvatar name={deal.owner_name} size="xs" />
-                          <span className="truncate">{deal.owner_name}</span>
-                        </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                          <Badge tone="neutral">{deal.region}</Badge>
-                          <Badge tone="neutral">{deal.product}</Badge>
-                          <Badge tone={DEAL_STAGE_TONE[deal.stage]}>
-                            {formatDealProbability(deal.probability)}
-                          </Badge>
-                        </div>
-                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                          <Button
-                            className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void moveDeal(deal)}
-                          >
-                            Move forward
-                            <MoveRight />
-                          </Button>
-                          {getValidBackwardStages(deal.stage).length > 0 ? (
+                        }
+                        actions={
+                          <>
+                            {/* Won and Lost share a column now, so a "Move
+                                forward" on a won card would sit one row above
+                                the lost cards while being unable to do
+                                anything — the server refuses forward moves out
+                                of a terminal stage. */}
+                            {isTerminalDealStage(deal.stage) ? null : (
+                              <Button
+                                className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void moveDeal(deal)}
+                              >
+                                Move forward
+                                <MoveRight />
+                              </Button>
+                            )}
+                            {getValidBackwardStages(deal.stage).length > 0 ? (
+                              <Button
+                                className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openBackward(deal)}
+                              >
+                                <MoveLeft />
+                                Move backward
+                              </Button>
+                            ) : null}
                             <Button
-                              className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                              className="h-7 px-2 text-[11px]"
                               size="sm"
-                              variant="outline"
-                              onClick={() => openBackward(deal)}
+                              variant="ghost"
+                              onClick={() => openNote(deal)}
                             >
-                              <MoveLeft />
-                              Move backward
+                              Notes
                             </Button>
-                          ) : null}
-                          <Button
-                            className="h-7 px-2 text-[11px]"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openNote(deal)}
-                          >
-                            Notes
-                          </Button>
-                        </div>
-                      </div>
+                          </>
+                        }
+                      />
                     ))
                   )}
                 </BoardColumn>

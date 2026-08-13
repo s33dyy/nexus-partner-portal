@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -197,6 +197,11 @@ export function RecordList({
  * alternative (stacking columns vertically) stops it being a board at all.
  * The parent supplies `overflow-x-auto`; each column keeps a fixed min-width
  * so columns stay readable rather than compressing to nothing.
+ *
+ * The width is sized to the COLLAPSED pill, not the expanded card: the point
+ * of the pill is that more stages fit on screen at once. Names truncate at
+ * this width, so anything a card shows collapsed must also appear in full in
+ * its expanded body.
  */
 export function BoardColumn({
   label,
@@ -218,7 +223,7 @@ export function BoardColumn({
   return (
     <div
       className={cn(
-        "flex w-[280px] shrink-0 flex-col rounded-lg border bg-secondary/40 sm:w-[300px]",
+        "flex w-[196px] shrink-0 flex-col rounded-lg border bg-secondary/40 sm:w-[212px]",
         className,
       )}
     >
@@ -274,6 +279,123 @@ export function RecordListSkeleton({ rows = 5, className }: { rows?: number; cla
           <Skeleton className="hidden h-5 w-20 shrink-0 rounded-md sm:block" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Soft tinted fill for a board card's collapsed pill, per tone. */
+const TONE_TINT: Record<StatusTone, string> = {
+  none: "bg-secondary text-foreground",
+  neutral: "bg-secondary text-foreground",
+  brand: "tint-brand text-primary",
+  success: "tint-success text-success",
+  warning: "tint-warning text-warning-foreground",
+  info: "tint-info text-info",
+  danger: "tint-danger text-destructive",
+};
+
+/**
+ * A board card that reads as a coloured pill until you look at it.
+ *
+ * Collapsed it is one tinted row — owner, name, amount — so a column of ten
+ * scans as a colour-coded list rather than ten paragraphs. Hover, keyboard
+ * focus, or a tap reveals the metadata and the stage actions.
+ *
+ * Three things this has to get right, none of which hover-only CSS does:
+ *
+ *  1. TOUCH. There is no hover on a phone, so a pure `group-hover` reveal
+ *     would make the actions unreachable on exactly the device where the
+ *     board is hardest to use. Tapping the pill pins it open, and pinning is
+ *     independent of hover so it survives the pointer leaving.
+ *  2. KEYBOARD. `has-[:focus-visible]` means tabbing into the card opens it,
+ *     so the action buttons are reachable without a mouse and never receive
+ *     focus while invisible. It is deliberately NOT `focus-within`: a click
+ *     also leaves focus on the header button, so focus-within would hold the
+ *     card open after the tap that was meant to close it. `:focus-visible`
+ *     fires for keyboard focus and not for a pointer click, which is exactly
+ *     the distinction needed. Matching on the wrapper via `:has()` rather
+ *     than the button keeps it open while focus is on the actions inside.
+ *  3. LAYOUT SHIFT. The reveal animates grid-template-rows 0fr -> 1fr rather
+ *     than toggling display, which gives a real height transition without
+ *     hard-coding a pixel height that would clip longer content.
+ */
+export function BoardCard({
+  tone = "neutral",
+  title,
+  amount,
+  owner,
+  details,
+  actions,
+  className,
+}: {
+  tone?: StatusTone;
+  title: React.ReactNode;
+  amount?: React.ReactNode;
+  owner?: string | null;
+  details?: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+}) {
+  const [pinned, setPinned] = React.useState(false);
+  const hasMore = Boolean(details || actions);
+
+  return (
+    <div
+      className={cn(
+        "group relative overflow-hidden border transition-[border-radius,box-shadow,background-color] duration-150",
+        pinned
+          ? "rounded-xl bg-card shadow-card"
+          : "rounded-full bg-card hover:rounded-xl hover:shadow-card has-[:focus-visible]:rounded-xl",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        aria-expanded={hasMore ? pinned : undefined}
+        onClick={() => hasMore && setPinned((value) => !value)}
+        className={cn(
+          "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors",
+          TONE_TINT[tone],
+          hasMore && "cursor-pointer",
+        )}
+      >
+        {owner !== undefined ? <OwnerAvatar name={owner} size="xs" /> : null}
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title}</span>
+        {amount ? (
+          <span className="shrink-0 text-[13px] font-semibold" data-numeric>
+            {amount}
+          </span>
+        ) : null}
+        {hasMore ? (
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 opacity-50 transition-transform",
+              pinned ? "rotate-180" : "group-hover:translate-y-0.5",
+            )}
+            aria-hidden="true"
+          />
+        ) : null}
+      </button>
+
+      {hasMore ? (
+        <div
+          className={cn(
+            "grid transition-[grid-template-rows] duration-200 ease-out",
+            pinned
+              ? "grid-rows-[1fr]"
+              : "grid-rows-[0fr] group-hover:grid-rows-[1fr] group-has-[:focus-visible]:grid-rows-[1fr]",
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className="space-y-2 border-t px-3 py-2">
+              {details}
+              {actions ? (
+                <div className="flex flex-wrap items-center gap-1.5">{actions}</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

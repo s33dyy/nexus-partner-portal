@@ -93,6 +93,7 @@ import {
   DEAL_STAGE_ORDER,
   getDealUsdAmount,
   getValidBackwardStages,
+  isTerminalDealStage,
   nextDealStage,
   parseDealAmount,
   requiresSuperAdminApproval,
@@ -2297,14 +2298,18 @@ function DealsPage() {
                   >
                     Edit note
                   </Button>
-                  <Button onClick={() => void advance()} disabled={saving}>
-                    {saving ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowRight className="mr-2 h-4 w-4" />
-                    )}
-                    Advance stage
-                  </Button>
+                  {/* Nothing advances out of Won or Lost — the server refuses
+                      it, so offering the button only produces an error toast. */}
+                  {isTerminalDealStage(selectedDeal.stage) ? null : (
+                    <Button onClick={() => void advance()} disabled={saving}>
+                      {saving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowRight className="mr-2 h-4 w-4" />
+                      )}
+                      Advance stage
+                    </Button>
+                  )}
                   {getValidBackwardStages(selectedDeal.stage).length > 0 ? (
                     <Button variant="outline" onClick={openBackwardDialog} disabled={saving}>
                       <ArrowLeft className="mr-2 h-4 w-4" />
