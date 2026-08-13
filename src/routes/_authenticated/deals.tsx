@@ -28,7 +28,7 @@ import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { DealParticipantTags } from "@/components/deal-participant-tags";
 import { DealActivityTimeline } from "@/components/deal-activity-timeline";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
-import { GroupHeader, RecordList, RecordRow } from "@/components/record-list";
+import { GroupHeader, RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { DEAL_STAGE_TONE } from "@/lib/status-tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1862,10 +1862,7 @@ function DealsPage() {
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading deals...
-            </div>
+            <RecordListSkeleton rows={6} className="p-3" />
           ) : filteredDeals.length === 0 ? (
             <EmptyState
               icon={<Search className="h-5 w-5" />}

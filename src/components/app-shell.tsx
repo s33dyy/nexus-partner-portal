@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { AppSidebar } from "@/components/app-sidebar";
+import { CommandPalette, CommandPaletteHint } from "@/components/command-palette";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { SoftphonePanel } from "@/components/softphone-panel";
 import { DailyDigestDialog } from "@/components/daily-digest-dialog";
@@ -55,6 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const initials =
     profile?.full_name
       ?.split(" ")
@@ -165,6 +167,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </PopoverContent>
           </Popover>
 
+          <CommandPaletteHint onClick={() => setPaletteOpen(true)} />
+
           <div className="ml-auto flex min-w-0 items-center gap-1">
             {/* Region scoping is a desktop affordance — on a phone it ate a
                 third of the bar. Reachable from the context popover instead. */}
@@ -242,6 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
       </SidebarInset>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <DailyDigestDialog
         open={digestOpen}
         onOpenChange={setDigestOpen}

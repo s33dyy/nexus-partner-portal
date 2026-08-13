@@ -4,7 +4,7 @@ import { CalendarClock, CheckSquare, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState, PageHeader } from "@/components/page-header";
-import { RecordList, RecordRow } from "@/components/record-list";
+import { RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -436,9 +436,7 @@ function TasksPage() {
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
-            </div>
+            <RecordListSkeleton rows={5} className="p-3" />
           ) : visibleTasks.length === 0 ? (
             <EmptyState
               icon={<CheckSquare className="h-5 w-5" />}

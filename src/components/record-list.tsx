@@ -2,6 +2,7 @@ import * as React from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { StatusTone } from "@/lib/status-tone";
 
@@ -241,6 +242,38 @@ export function BoardColumn({
         }
       />
       <div className="flex min-h-24 flex-col gap-2 p-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder shaped like the rows it replaces.
+ *
+ * Replaces the "Loading deals…" spinner-and-sentence pattern. A skeleton that
+ * matches the real row's geometry means the layout doesn't jump when data
+ * lands, and the screen reads as "filling in" rather than "empty and busy" —
+ * which is most of what makes an app feel fast rather than merely be fast.
+ */
+export function RecordListSkeleton({ rows = 5, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)} aria-hidden="true">
+      {Array.from({ length: rows }, (_, index) => (
+        <div
+          key={index}
+          className="relative flex items-center gap-3 overflow-hidden rounded-md border bg-card px-3 py-2.5 pl-4"
+        >
+          <span className="absolute inset-y-0 left-0 w-[3px] bg-muted-foreground/15" />
+          <Skeleton className="h-5 w-5 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            {/* Widths vary per row so the block doesn't read as a striped
+                pattern, which is what makes a skeleton look like a bug. */}
+            <Skeleton className="h-3.5" style={{ width: `${38 + ((index * 13) % 34)}%` }} />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+          <Skeleton className="hidden h-3.5 w-16 shrink-0 sm:block" />
+          <Skeleton className="hidden h-5 w-20 shrink-0 rounded-md sm:block" />
+        </div>
+      ))}
     </div>
   );
 }
