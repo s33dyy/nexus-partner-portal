@@ -127,6 +127,7 @@ function SettingsPage() {
   const [whatsappCodeDraft, setWhatsappCodeDraft] = useState("");
   const [whatsappCodeSent, setWhatsappCodeSent] = useState(false);
   const [savingReminderPref, setSavingReminderPref] = useState(false);
+  const [savingDigestPref, setSavingDigestPref] = useState(false);
   const [sendingWhatsappCode, setSendingWhatsappCode] = useState(false);
   const [verifyingWhatsappCode, setVerifyingWhatsappCode] = useState(false);
   const [disconnectingWhatsapp, setDisconnectingWhatsapp] = useState(false);
@@ -243,6 +244,25 @@ function SettingsPage() {
       toast.error(error instanceof Error ? error.message : "Couldn't update your reminder setting");
     } finally {
       setSavingReminderPref(false);
+    }
+  };
+
+  const toggleDigestEmailOptOut = async () => {
+    if (!profile?.id) return;
+    const next = !profile.digest_email_opt_out;
+    setSavingDigestPref(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ digest_email_opt_out: next })
+        .eq("id", profile.id);
+      if (error) throw error;
+      toast.success(next ? "Daily briefing email turned off" : "Daily briefing email turned on");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update your email setting");
+    } finally {
+      setSavingDigestPref(false);
     }
   };
 
@@ -726,6 +746,29 @@ function SettingsPage() {
             >
               {savingReminderPref && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {profile?.reminder_opt_out ? "Turn on" : "Turn off"}
+            </Button>
+          </div>
+
+          <div className="mt-3 flex items-start justify-between gap-4 rounded-xl border bg-muted/20 p-4">
+            <div className="min-w-0">
+              <div className="font-medium">
+                {profile?.digest_email_opt_out
+                  ? "Daily briefing email is off"
+                  : "Daily briefing email is on"}
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {profile?.digest_email_opt_out
+                  ? "You'll still see the briefing in the app, just not by email."
+                  : "One email each morning summarising your pipeline, tasks and tickets."}
+              </p>
+            </div>
+            <Button
+              variant={profile?.digest_email_opt_out ? "default" : "outline"}
+              disabled={savingDigestPref}
+              onClick={() => void toggleDigestEmailOptOut()}
+            >
+              {savingDigestPref && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {profile?.digest_email_opt_out ? "Turn on" : "Turn off"}
             </Button>
           </div>
         </CardContent>

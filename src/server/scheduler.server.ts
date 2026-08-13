@@ -1,3 +1,4 @@
+import { describeDigestEmailSweep, runDigestEmailSweep } from "@/server/digest-email.server";
 import { describeSweep, runReminderSweep } from "@/server/reminders.server";
 
 // Background job scheduling.
@@ -57,11 +58,22 @@ export async function runRemindersOnce(source: string): Promise<void> {
   }
   sweepInFlight = true;
   try {
-    const summary = await runReminderSweep();
-    console.log(`${describeSweep(summary)} (via ${source})`);
-  } catch (error) {
-    // A failed sweep must never take the server down or stop the interval.
-    console.error("[scheduler] reminder sweep failed", error);
+    // Both sweeps share the tick. They are independently idempotent (each
+    // claims its own dispatch rows before sending), and each is wrapped so a
+    // failure in one cannot stop the other from running.
+    try {
+      const summary = await runReminderSweep();
+      console.log(`${describeSweep(summary)} (via ${source})`);
+    } catch (error) {
+      console.error("[scheduler] reminder sweep failed", error);
+    }
+
+    try {
+      const summary = await runDigestEmailSweep();
+      console.log(`${describeDigestEmailSweep(summary)} (via ${source})`);
+    } catch (error) {
+      console.error("[scheduler] digest email sweep failed", error);
+    }
   } finally {
     sweepInFlight = false;
   }
@@ -78,7 +90,7 @@ export function startBackgroundJobs(): void {
   }
 
   const period = intervalMs();
-  console.log(`[scheduler] reminder sweep every ${Math.round(period / 60_000)}m`);
+  console.log(`[scheduler] reminder + digest-email sweep every ${Math.round(period / 60_000)}m`);
 
   setTimeout(() => {
     void runRemindersOnce("boot");
@@ -128,11 +140,13 @@ export async function handleReminderJobRequest(request: Request): Promise<Respon
   }
 
   try {
-    const summary = await runReminderSweep();
-    console.log(`${describeSweep(summary)} (via api)`);
-    return json({ ok: true, summary }, 200);
+    const reminders = await runReminderSweep();
+    console.log(`${describeSweep(reminders)} (via api)`);
+    const digestEmail = await runDigestEmailSweep();
+    console.log(`${describeDigestEmailSweep(digestEmail)} (via api)`);
+    return json({ ok: true, summary: reminders, digestEmail }, 200);
   } catch (error) {
-    console.error("[scheduler] reminder sweep failed (api)", error);
+    console.error("[scheduler] job sweep failed (api)", error);
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
   }
 }

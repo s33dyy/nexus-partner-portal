@@ -115,6 +115,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "whatsapp_phone_e164",
     "whatsapp_verified_at",
     "reminder_opt_out",
+    "digest_email_opt_out",
     "call_ready",
     "is_seed",
     "created_at",

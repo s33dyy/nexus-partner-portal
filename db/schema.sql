@@ -2062,3 +2062,33 @@ CREATE TABLE IF NOT EXISTS reminder_dispatches (
 CREATE UNIQUE INDEX IF NOT EXISTS reminder_dispatches_dedupe_uidx
   ON reminder_dispatches (subject_type, subject_id, recipient_user_id, offset_key, channel, target_date);
 CREATE INDEX IF NOT EXISTS reminder_dispatches_created_at_idx ON reminder_dispatches (created_at);
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-12: Daily digest email.
+--
+-- Separate from reminder_dispatches on purpose. That table's uniqueness key is
+-- (subject, subject_id, recipient, offset, channel, target_date) because a
+-- reminder is about a RECORD; a digest is about a PERSON and a DAY, and has no
+-- subject at all. Reusing it would have meant a synthetic subject_id and a
+-- misleading table name for anyone reading the schema later.
+--
+-- One row per recipient per day, unique so the sweep is safe to run on the
+-- same interval as reminders (every 30 minutes) without ever sending twice.
+CREATE TABLE IF NOT EXISTS digest_email_dispatches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  target_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending | sent | skipped | failed
+  detail TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS digest_email_dispatches_dedupe_uidx
+  ON digest_email_dispatches (recipient_user_id, target_date);
+CREATE INDEX IF NOT EXISTS digest_email_dispatches_created_at_idx
+  ON digest_email_dispatches (created_at);
+
+-- Separate opt-out from reminder_opt_out: a user who mutes per-record nudges
+-- may still want the once-a-day summary, and vice versa. Collapsing them into
+-- one flag would make "turn off reminders" silently also stop the digest.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS digest_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
