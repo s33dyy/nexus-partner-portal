@@ -377,7 +377,10 @@ test("getUserDigest gates each section independently by its own feature capabili
 });
 
 test("getUserDigest excludes done/canceled tasks and tasks not due soon, keeps open near-due tasks", async () => {
-  const now = Date.now();
+  // Anchored to MORNING, not Date.now(): the digest under test runs on the
+  // pinned clock, so fixtures built from the real clock drift out of the
+  // "due soon" horizon as real time passes and fail on a date change.
+  const now = MORNING.getTime();
   const soon = new Date(now + 24 * 60 * 60 * 1000).toISOString();
   const farFuture = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
   const overdue = new Date(now - 24 * 60 * 60 * 1000).toISOString();
@@ -421,7 +424,7 @@ test("getUserDigest excludes done/canceled tasks and tasks not due soon, keeps o
 });
 
 test("getUserDigest narrative covers every populated section and skips the fabricated-fact risk of an LLM", async () => {
-  const soon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const soon = new Date(MORNING.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
   const harness = await installFakePool({
     newsRows: [
