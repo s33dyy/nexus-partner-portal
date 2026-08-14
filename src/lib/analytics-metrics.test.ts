@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildMonthRange,
+  comparePeriods,
   computeKpis,
   dealUsd,
   lossReasonMix,
   newVsExistingBusiness,
   percentChange,
+  productMix,
   projectedDealsByMonth,
+  sourceMix,
   stageMix,
   winRateByMonth,
   wonDealsByMonth,
@@ -309,5 +312,66 @@ describe("avgDaysToClose exclusions", () => {
     );
     expect(kpis.avgDaysToClose).toBeNull();
     expect(kpis.daysToCloseExcluded).toBe(1);
+  });
+});
+
+describe("comparePeriods", () => {
+  // Closed deals belong to the window their close date falls in; open deals
+  // have no close date to be judged by, so they belong to the window they
+  // were created in. Filtering everything by one column would either drop the
+  // entire live pipeline from the current period or credit a year-old deal to
+  // this month.
+  const now = new Date("2026-08-15T00:00:00.000Z");
+  const daysAgo = (n: number) =>
+    new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  test("splits closed deals by close date and open deals by creation date", () => {
+    const { current, previous } = comparePeriods(
+      [
+        deal({ stage: "won", amount_usd: 1000, close_date: daysAgo(5) }),
+        deal({ stage: "won", amount_usd: 400, close_date: daysAgo(45) }),
+        deal({ stage: "demo", created_at: `${daysAgo(10)}T00:00:00.000Z` }),
+        deal({ stage: "demo", created_at: `${daysAgo(50)}T00:00:00.000Z` }),
+      ],
+      now,
+      30,
+    );
+    expect(current.totalSales).toBe(1000);
+    expect(previous.totalSales).toBe(400);
+    expect(current.openDeals).toBe(1);
+    expect(previous.openDeals).toBe(1);
+  });
+
+  test("a deal older than both windows lands in neither", () => {
+    const { current, previous } = comparePeriods(
+      [deal({ stage: "won", amount_usd: 9999, close_date: daysAgo(200) })],
+      now,
+      30,
+    );
+    expect(current.totalSales).toBe(0);
+    expect(previous.totalSales).toBe(0);
+  });
+});
+
+describe("productMix and sourceMix", () => {
+  test("product mix ranks won value and ignores open deals", () => {
+    const mix = productMix([
+      deal({ stage: "won", product: "Booking Platform", amount_usd: 500 }),
+      deal({ stage: "won", product: "Booking Platform", amount_usd: 700 }),
+      deal({ stage: "won", product: "Remote Monitoring", amount_usd: 900 }),
+      deal({ stage: "demo", product: "Booking Platform", amount_usd: 10_000 }),
+    ]);
+    expect(mix[0]).toMatchObject({ label: "Booking Platform", count: 2, value: 1200 });
+    expect(mix[1]).toMatchObject({ label: "Remote Monitoring", value: 900 });
+  });
+
+  test("source mix counts every deal, open or closed, since channel is about intake", () => {
+    const mix = sourceMix([
+      deal({ stage: "won", source: "Referral" }),
+      deal({ stage: "demo", source: "Referral" }),
+      deal({ stage: "lost", source: "Inbound" }),
+    ]);
+    expect(mix[0]).toMatchObject({ label: "Referral", count: 2 });
+    expect(mix[1]).toMatchObject({ label: "Inbound", count: 1 });
   });
 });

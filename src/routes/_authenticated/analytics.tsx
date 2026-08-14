@@ -33,11 +33,16 @@ import { buildExportFilename } from "@/lib/export-files";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import {
+  comparePeriods,
   computeKpis,
   lossReasonMix,
+  newVsExistingBusiness,
   ownerMix,
+  percentChange,
+  productMix,
   projectedDealsByMonth,
   regionMix,
+  sourceMix,
   stageMix,
   winRateByMonth,
   wonDealsByMonth,
@@ -160,6 +165,22 @@ function AnalyticsPage() {
   const losses = useMemo(() => lossReasonMix(deals), [deals]);
   const regions = useMemo(() => regionMix(deals), [deals]);
   const owners = useMemo(() => ownerMix(deals), [deals]);
+  const products = useMemo(() => productMix(deals), [deals]);
+  const sources = useMemo(() => sourceMix(deals), [deals]);
+  const comparison = useMemo(() => comparePeriods(deals, now, 30), [deals, now]);
+  const businessSplit = useMemo(() => newVsExistingBusiness(deals), [deals]);
+  const deltaLabel = `vs prior ${comparison.windowDays} days`;
+
+  // Repeat business is only a meaningful split once some customer has bought
+  // twice. Below that the gauge is pinned at 100% and is decoration.
+  const businessSplitTotal = businessSplit.newBusiness + businessSplit.existing;
+  const businessSplitData = useMemo(
+    () => [
+      { key: "new", label: "New business", value: businessSplit.newBusiness },
+      { key: "existing", label: "Existing business", value: businessSplit.existing },
+    ],
+    [businessSplit],
+  );
 
   // Sample counts drive ChartFrame's empty/thin states. They count SOURCE
   // ROWS, not chart points: a 12-month series always has 12 points even when
@@ -280,24 +301,41 @@ function AnalyticsPage() {
         />
       ) : null}
 
+      {/* Every tile drills through to the rows behind it — a KPI is a question
+          and the filtered list is the answer. Deltas compare the last 30 days
+          with the 30 before, anchored on close date for decided deals and
+          creation date for open ones. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
           tone="violet"
           label="Total sales"
           value={formatUsd(kpis.totalSales)}
           hint={`${formatCount(kpis.wonDeals)} closed won`}
+          delta={percentChange(comparison.current.totalSales, comparison.previous.totalSales)}
+          deltaLabel={deltaLabel}
+          to="/deals"
+          search={{ stage: "won" }}
         />
         <KpiTile
           tone="indigo"
           label="Win rate"
           value={formatPercent(kpis.winRate, 2)}
           hint="Won vs decided deals"
+          delta={
+            comparison.current.winRate !== null && comparison.previous.winRate !== null
+              ? percentChange(comparison.current.winRate, comparison.previous.winRate)
+              : null
+          }
+          deltaLabel={deltaLabel}
+          to="/deals"
+          search={{ status: "won" }}
         />
         <KpiTile
           tone="sky"
           label="Close rate"
           value={formatPercent(kpis.closeRate, 2)}
           hint="Won vs every deal"
+          to="/deals"
         />
         <KpiTile
           tone="teal"
@@ -308,30 +346,47 @@ function AnalyticsPage() {
               ? `${kpis.daysToCloseExcluded} excluded — close date precedes creation`
               : "Creation to close, won deals"
           }
+          to="/deals"
+          search={{ stage: "won" }}
         />
         <KpiTile
           tone="violet"
           label="Pipeline value"
           value={formatUsd(kpis.pipelineValue)}
           hint="Open deals at face value"
+          to="/deals"
+          search={{ status: "open" }}
         />
         <KpiTile
           tone="indigo"
           label="Open deals"
           value={formatCount(kpis.openDeals)}
           hint="Still in play"
+          delta={percentChange(comparison.current.openDeals, comparison.previous.openDeals)}
+          deltaLabel={`${deltaLabel} (newly created)`}
+          to="/deals"
+          search={{ status: "open" }}
         />
         <KpiTile
           tone="sky"
           label="Weighted value"
           value={formatUsd(kpis.weightedValue)}
-          hint="Open value × probability"
+          hint="Open value x probability"
+          to="/pipeline"
         />
         <KpiTile
           tone="teal"
-          label="Avg open deal age"
-          value={formatDays(kpis.avgOpenDealAge)}
-          hint="Days since registration"
+          label="Avg deal size"
+          value={kpis.avgDealSize === null ? "—" : formatUsd(kpis.avgDealSize)}
+          hint={`Across ${formatCount(kpis.wonDeals)} won deals`}
+          delta={
+            comparison.current.avgDealSize !== null && comparison.previous.avgDealSize !== null
+              ? percentChange(comparison.current.avgDealSize, comparison.previous.avgDealSize)
+              : null
+          }
+          deltaLabel={deltaLabel}
+          to="/deals"
+          search={{ stage: "won" }}
         />
       </div>
 
@@ -634,7 +689,160 @@ function AnalyticsPage() {
             </BarChart>
           </ChartContainer>
         </ChartFrame>
+      </div>
 
+      <div className="grid gap-5 xl:grid-cols-3">
+        <ChartFrame
+          title="Won value by product"
+          description="Which products actually close."
+          sample={products.length}
+          loading={loading}
+          emptyLabel="No won deals to attribute to a product."
+          thinThreshold={0}
+        >
+          <ChartContainer
+            config={PRODUCT_CHART_CONFIG}
+            className="aspect-auto h-[240px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <BarChart
+              data={products.slice(0, 7)}
+              layout="vertical"
+              margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
+            >
+              <CartesianGrid horizontal={false} />
+              <XAxis
+                type="number"
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => formatUsd(v)}
+              />
+              <YAxis
+                type="category"
+                dataKey="label"
+                tickLine={false}
+                axisLine={false}
+                width={104}
+              />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <Bar
+                dataKey="value"
+                fill="var(--color-value)"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={22}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        </ChartFrame>
+
+        <ChartFrame
+          title="New vs existing business"
+          description="Won value from first-time customers against repeat buyers."
+          sample={businessSplitTotal > 0 ? kpis.wonDeals : 0}
+          loading={loading}
+          emptyLabel="No won deals to split yet."
+          thinThreshold={0}
+        >
+          {businessSplit.existing === 0 ? (
+            // A half-donut pinned at 100% is decoration, not a metric. Until
+            // some customer has bought twice, say so in words.
+            <div className="flex h-[240px] flex-col items-center justify-center gap-1 text-center">
+              <span className="text-2xl font-semibold" data-numeric>
+                {formatUsd(businessSplit.newBusiness)}
+              </span>
+              <span className="text-sm text-muted-foreground">all from first-time customers</span>
+              <span className="mt-1 text-xs text-muted-foreground">
+                No customer has closed a second deal yet, so there is no split to show.
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <ChartContainer
+                config={BUSINESS_CHART_CONFIG}
+                className="aspect-auto h-[170px] w-full"
+              >
+                <PieChart>
+                  <ChartTooltip content={<ChartTooltipContent nameKey="key" hideLabel />} />
+                  {/* Half donut: the reference renders this split as a gauge
+                      rather than a full circle, which reads as a ratio. */}
+                  <Pie
+                    data={businessSplitData}
+                    dataKey="value"
+                    nameKey="key"
+                    startAngle={180}
+                    endAngle={0}
+                    cy="90%"
+                    innerRadius={62}
+                    outerRadius={96}
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                  >
+                    <Cell fill="var(--chart-2)" />
+                    <Cell fill="var(--chart-1)" />
+                  </Pie>
+                </PieChart>
+              </ChartContainer>
+              <DonutLegend
+                total={businessSplitTotal}
+                items={[
+                  {
+                    key: "new",
+                    label: `New business · ${formatUsd(businessSplit.newBusiness)}`,
+                    count: businessSplit.newBusiness,
+                    color: "var(--chart-2)",
+                  },
+                  {
+                    key: "existing",
+                    label: `Existing business · ${formatUsd(businessSplit.existing)}`,
+                    count: businessSplit.existing,
+                    color: "var(--chart-1)",
+                  },
+                ]}
+              />
+            </div>
+          )}
+        </ChartFrame>
+
+        <ChartFrame
+          title="Deals by source"
+          description="Where the book comes from, by deal count."
+          sample={sources.length}
+          loading={loading}
+          emptyLabel="No deals to attribute to a source."
+          thinThreshold={0}
+        >
+          <ChartContainer
+            config={SOURCE_CHART_CONFIG}
+            className="aspect-auto h-[240px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <BarChart
+              data={sources.slice(0, 7)}
+              layout="vertical"
+              margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
+            >
+              <CartesianGrid horizontal={false} />
+              <XAxis type="number" tickLine={false} axisLine={false} allowDecimals={false} />
+              <YAxis
+                type="category"
+                dataKey="label"
+                tickLine={false}
+                axisLine={false}
+                width={104}
+              />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <Bar
+                dataKey="count"
+                fill="var(--color-count)"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={22}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        </ChartFrame>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-3">
         <ChartFrame
           title="Top closers"
           description="Won value by deal owner."
@@ -736,4 +944,17 @@ const REGION_CHART_CONFIG = {
 
 const OWNER_CHART_CONFIG = {
   value: { label: "Won value", color: "var(--success)" },
+} satisfies ChartConfig;
+
+const PRODUCT_CHART_CONFIG = {
+  value: { label: "Won value", color: "var(--chart-6)" },
+} satisfies ChartConfig;
+
+const SOURCE_CHART_CONFIG = {
+  count: { label: "Deals", color: "var(--chart-5)" },
+} satisfies ChartConfig;
+
+const BUSINESS_CHART_CONFIG = {
+  new: { label: "New business", color: "var(--chart-2)" },
+  existing: { label: "Existing business", color: "var(--chart-1)" },
 } satisfies ChartConfig;

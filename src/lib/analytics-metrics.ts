@@ -130,6 +130,84 @@ export function percentChange(current: number, previous: number): number | null 
   return ((current - previous) / Math.abs(previous)) * 100;
 }
 
+export type PeriodComparison = {
+  current: AnalyticsKpis;
+  previous: AnalyticsKpis;
+  /** Days in each window, so the UI can say what it is comparing. */
+  windowDays: number;
+};
+
+/**
+ * The same KPIs over the last N days and the N days before that.
+ *
+ * What "in the period" means depends on the metric, which is why this splits
+ * the book rather than filtering once: a CLOSED deal belongs to the window its
+ * close date falls in, but an OPEN deal belongs to the window it was created
+ * in — an open deal has no close date to be judged by, only an age. Filtering
+ * everything by one column would either drop the whole pipeline from the
+ * current period or count a deal created a year ago as this month's work.
+ */
+export function comparePeriods(
+  deals: DealRecord[],
+  now = new Date(),
+  windowDays = 30,
+): PeriodComparison {
+  const windowMs = windowDays * DAY_MS;
+  const currentStart = now.getTime() - windowMs;
+  const previousStart = currentStart - windowMs;
+
+  const inWindow = (deal: DealRecord, start: number, end: number) => {
+    const anchor = isTerminalDealStage(deal.stage as DealStage)
+      ? new Date(deal.close_date).getTime()
+      : new Date(deal.created_at).getTime();
+    return Number.isFinite(anchor) && anchor >= start && anchor < end;
+  };
+
+  return {
+    current: computeKpis(
+      deals.filter((deal) => inWindow(deal, currentStart, now.getTime())),
+      now,
+    ),
+    previous: computeKpis(
+      deals.filter((deal) => inWindow(deal, previousStart, currentStart)),
+      new Date(currentStart),
+    ),
+    windowDays,
+  };
+}
+
+/** Won value and count by product, largest first. */
+export function productMix(deals: DealRecord[]): Slice[] {
+  const byProduct = new Map<string, Slice>();
+  for (const deal of deals.filter((deal) => deal.stage === "won")) {
+    const label = deal.product?.trim() || "Unspecified";
+    const existing = byProduct.get(label);
+    if (existing) {
+      existing.count += 1;
+      existing.value += dealUsd(deal);
+    } else {
+      byProduct.set(label, { key: label, label, count: 1, value: dealUsd(deal) });
+    }
+  }
+  return [...byProduct.values()].sort((a, b) => b.value - a.value);
+}
+
+/** Where open pipeline value sits by source, so channel mix is visible. */
+export function sourceMix(deals: DealRecord[]): Slice[] {
+  const bySource = new Map<string, Slice>();
+  for (const deal of deals) {
+    const label = deal.source?.trim() || "Unspecified";
+    const existing = bySource.get(label);
+    if (existing) {
+      existing.count += 1;
+      existing.value += dealUsd(deal);
+    } else {
+      bySource.set(label, { key: label, label, count: 1, value: dealUsd(deal) });
+    }
+  }
+  return [...bySource.values()].sort((a, b) => b.count - a.count);
+}
+
 export type MonthBucket = {
   /** YYYY-MM, used as the stable key. */
   key: string;

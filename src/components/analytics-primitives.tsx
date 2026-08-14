@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Link } from "@tanstack/react-router";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +45,9 @@ export function KpiTile({
   hint,
   tone = "indigo",
   delta,
+  deltaLabel,
+  to,
+  search,
   className,
 }: {
   label: string;
@@ -52,17 +56,27 @@ export function KpiTile({
   tone?: KpiTone;
   /** Percentage change vs the prior period; null when there is no baseline. */
   delta?: number | null;
+  /** What the delta is measured against, e.g. "vs prior 30 days". */
+  deltaLabel?: string;
+  /**
+   * Where the tile drills through to. A KPI is a question ("how much is open?")
+   * and the rows behind it are the answer, so every tile that summarises a
+   * subset of deals links to that subset pre-filtered.
+   */
+  to?: string;
+  search?: Record<string, string>;
   className?: string;
 }) {
   const rising = delta !== null && delta !== undefined && delta >= 0;
-  return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-xl bg-linear-to-br p-4 text-white shadow-card",
-        TONE_GRADIENT[tone],
-        className,
-      )}
-    >
+
+  const body = (
+    <>
+      {to ? (
+        <ArrowUpRight
+          className="absolute right-3 top-3 h-4 w-4 text-white/0 transition-colors group-hover:text-white/70"
+          aria-hidden="true"
+        />
+      ) : null}
       <div className="text-[13px] font-medium text-white/80">{label}</div>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-2xl font-semibold tracking-tight" data-numeric>
@@ -85,7 +99,26 @@ export function KpiTile({
         ) : null}
       </div>
       {hint ? <div className="mt-1 text-[11px] leading-tight text-white/70">{hint}</div> : null}
-    </div>
+      {delta !== null && delta !== undefined && deltaLabel ? (
+        <div className="mt-0.5 text-[11px] leading-tight text-white/60">{deltaLabel}</div>
+      ) : null}
+    </>
+  );
+
+  const surface = cn(
+    "group relative block overflow-hidden rounded-xl bg-linear-to-br p-4 text-left text-white shadow-card",
+    TONE_GRADIENT[tone],
+    to &&
+      "transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    className,
+  );
+
+  if (!to) return <div className={surface}>{body}</div>;
+
+  return (
+    <Link to={to} search={search} className={surface}>
+      {body}
+    </Link>
   );
 }
 
