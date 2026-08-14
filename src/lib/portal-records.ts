@@ -264,6 +264,21 @@ export function isTerminalDealStage(stage: DealStage): boolean {
   return stage === "won" || stage === "lost";
 }
 
+/**
+ * True where "move forward" is really "close this deal", so the UI must ask
+ * Won or Lost instead of stepping.
+ *
+ * Negotiation is the last open stage: product.md §9.15 makes Won require an
+ * outcome date and a PO Upload-Now-or-Submit-Later choice, and says "Ordinary
+ * Lost is available only from Negotiation". The server agrees from two
+ * directions — FORWARD_NEXT_STAGE has no entry for negotiation (so an ordinary
+ * forward move out of it is refused), and nextAuthorisedActions only offers
+ * deal.mark_won when the stage is negotiation.
+ */
+export function requiresOutcomeChoice(stage: DealStage): boolean {
+  return stage === "negotiation";
+}
+
 export function nextDealStage(stage: DealStage): DealStage {
   // A terminal stage returns itself, meaning "no forward move available".
   // Without this, "won" would step to "lost" purely because lost follows won
@@ -291,7 +306,14 @@ export function nextDealStatus(currentStatus: string, stage: DealStage): string 
 // backward move, regardless of target" rule) so the UI never offers a move
 // the server would reject.
 export function getValidBackwardStages(stage: DealStage): DealStage[] {
-  if (stage === "won" || stage === "lost") return [];
+  // Reopening a closed deal returns it to Negotiation and nowhere else.
+  // product.md names Negotiation as the destination twice ("moves Deal
+  // backward to Negotiation with reason"), and a Won dropped straight to
+  // Sourced would discard the qualified/proposal/negotiation history the
+  // §9.10 dialog exists to reason about. Whether THIS deal may reopen is the
+  // server's call — moveDealStageBackward refuses once the win has released
+  // reward points — so this only describes the shape of the move.
+  if (isTerminalDealStage(stage)) return ["negotiation"];
   const index = DEAL_STAGE_ORDER.indexOf(stage);
   if (index <= 0) return [];
   return DEAL_STAGE_ORDER.slice(0, index).filter(

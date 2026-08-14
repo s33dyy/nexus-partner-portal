@@ -42,10 +42,13 @@ test("9e: getValidBackwardStages returns every earlier non-terminal stage, mirro
     "qualified",
     "proposal",
   ]);
-  // Terminal stages have no valid backward target through this helper —
-  // moveDealStageBackward itself also rejects moves into/out of won/lost.
-  expect(getValidBackwardStages("won")).toEqual([]);
-  expect(getValidBackwardStages("lost")).toEqual([]);
+  // A closed deal reopens to Negotiation and nowhere else: product.md names
+  // it as the destination ("moves Deal backward to Negotiation with reason"),
+  // and isBackwardMove's index test would otherwise pass won->sourced too.
+  // Whether a PARTICULAR closed deal may reopen is the server's call — it
+  // refuses once the win has released reward points.
+  expect(getValidBackwardStages("won")).toEqual(["negotiation"]);
+  expect(getValidBackwardStages("lost")).toEqual(["negotiation"]);
 });
 
 test("nextDealStage never advances out of a terminal stage", () => {

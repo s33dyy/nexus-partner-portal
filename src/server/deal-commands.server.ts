@@ -52,11 +52,69 @@ for (let index = 0; index < DEAL_STAGE_ORDER.length - 1; index += 1) {
   FORWARD_NEXT_STAGE[from] = to;
 }
 
+/**
+ * The stage a reopened Won/Lost deal returns to.
+ *
+ * product.md names Negotiation twice as the destination — "PO Pending → Not
+ * Applicable | Tagged participant moves Deal backward to Negotiation with
+ * reason" and the same for "Rejected Outcome". Reopening straight to an
+ * earlier stage would discard the qualified/proposal/negotiation history the
+ * §9.10 dialog is supposed to reason about.
+ */
+const REOPEN_STAGE: DealStage = "negotiation";
+
 function isBackwardMove(from: DealStage, to: DealStage): boolean {
-  if (TERMINAL_STAGES.has(from) || TERMINAL_STAGES.has(to)) return false;
+  // Nothing may move INTO a terminal stage backwards — Won and Lost are only
+  // ever reached through their own named commands, which carry the outcome
+  // date, PO choice and loss reason §9.15 requires.
+  if (TERMINAL_STAGES.has(to)) return false;
+  // Out of a terminal stage, Negotiation is the only permitted destination.
+  // This is deliberately narrower than "any earlier stage": the index test
+  // below would happily pass won→sourced and lost→demo, so relaxing the old
+  // blanket terminal check by deletion would have legalised all of them.
+  if (TERMINAL_STAGES.has(from)) return to === REOPEN_STAGE;
   const fromIndex = DEAL_STAGE_ORDER.indexOf(from);
   const toIndex = DEAL_STAGE_ORDER.indexOf(to);
   return fromIndex >= 0 && toIndex >= 0 && toIndex < fromIndex;
+}
+
+/**
+ * Whether a closed deal has been paid out, and so can no longer be reopened.
+ *
+ * product.md: "Approved Won is terminal for ordinary users. A Super Admin
+ * correction requires strong re-authentication, reason, financial/provider
+ * impact preview, compensating reward/accounting events, and a new review
+ * revision." None of that machinery exists here — `adjustRewardPoints`
+ * refuses any delta that would drive a balance negative, so the compensating
+ * debit is rejected in exactly the case that matters (the points were already
+ * spent). Until that path is built, a paid win is immovable for EVERY role,
+ * super admin included: refusing is recoverable, a stranded ledger is not.
+ *
+ * Two independent clauses because they can disagree. The review status is the
+ * spec's own condition; the ledger probe is the real invariant, and it still
+ * holds if a `deal_win` row was written by a seed script or the review row was
+ * mutated out from under it. `source_type = 'deal_win'` is the same key
+ * awardApprovedWinRewards uses for its own idempotency check.
+ */
+async function reopenBlockedReason(tx: PoolClient, dealId: string): Promise<string | null> {
+  const { rows } = await tx.query(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM deal_outcome_reviews WHERE deal_id = $1 AND status = 'approved'
+       ) AS review_approved,
+       EXISTS (
+         SELECT 1 FROM reward_point_events WHERE source_type = 'deal_win' AND source_id = $1
+       ) AS rewards_awarded`,
+    [dealId],
+  );
+  const row = rows[0] as { review_approved: boolean; rewards_awarded: boolean } | undefined;
+  if (row?.rewards_awarded) {
+    return "This deal's win has already released reward points. Reopening it would strand that award, so it needs a Super Admin correction with compensating reward events.";
+  }
+  if (row?.review_approved) {
+    return "This deal's outcome review is already approved. Approved Won is final for ordinary users and needs a Super Admin correction.";
+  }
+  return null;
 }
 
 export type DealCommandActor = GovernedActor;
@@ -350,8 +408,11 @@ async function runDealTransitionCommand(input: {
 
     const newVersion = deal.version + 1;
     const extra = input.extraSet?.(deal, target.toStage);
-    const extraSql = extra ? `, ${extra.sql}` : "";
-    const extraValues = extra?.values ?? [];
+    // An empty `sql` means "no extra columns for this deal" — a caller whose
+    // write-set is conditional (moveDealStageBackward's reopen path) needs a
+    // way to say that without emitting a dangling comma into the UPDATE.
+    const extraSql = extra?.sql ? `, ${extra.sql}` : "";
+    const extraValues = extra?.sql ? extra.values : [];
 
     await tx.query(
       `UPDATE portal_deals
@@ -399,7 +460,11 @@ async function runDealTransitionCommand(input: {
 }
 
 function nextAuthorisedActions(stage: DealStage): readonly string[] {
-  if (TERMINAL_STAGES.has(stage)) return [];
+  // A closed deal can still be reopened by a reasoned backward move. This
+  // takes only a stage, so it advertises the move even on an approved Won that
+  // moveDealStageBackward will refuse — safe, because the command is the
+  // authority, but worth stating so it doesn't read as a bug.
+  if (TERMINAL_STAGES.has(stage)) return ["deal.move_stage_backward"];
   const actions = ["deal.move_stage_backward", "deal.mark_lost"];
   if (FORWARD_NEXT_STAGE[stage]) actions.unshift("deal.move_stage_forward");
   if (stage === "negotiation") actions.push("deal.mark_won");
@@ -609,13 +674,50 @@ export async function moveDealStageBackward(input: {
     commandName: "deal.move_stage_backward",
     eventName: "deal.stage_reverted",
     reason,
-    resolveTarget: async (deal) => {
+    resolveTarget: async (deal, tx) => {
       if (!isBackwardMove(deal.stage, input.toStage)) {
         return validationFailure(
           `"${input.toStage}" is not a valid backward stage from "${deal.stage}"`,
         );
       }
-      return { toStage: input.toStage, toStatus: deal.status };
+
+      if (!TERMINAL_STAGES.has(deal.stage)) {
+        return { toStage: input.toStage, toStatus: deal.status };
+      }
+
+      // Reopening a closed deal — product.md's "Lost can be reopened only
+      // through a reasoned, authorised backward movement" and the PO review
+      // table's two "-> Not Applicable" rows.
+      const blocked = await reopenBlockedReason(tx, deal.id);
+      if (blocked) return validationFailure(blocked);
+
+      // The outcome review returns to Not Applicable, which is what those two
+      // PO-table rows describe. 'approved' can never match here — the guard
+      // above already refused it — and 'not_applicable' is a no-op, so this is
+      // idempotent.
+      await tx.query(
+        `UPDATE deal_outcome_reviews
+         SET status = 'not_applicable', reason = $2, version = version + 1, updated_at = now()
+         WHERE deal_id = $1 AND status IN ('requested', 'received', 'rejected')`,
+        [deal.id, reason.slice(0, 500)],
+      );
+
+      // Registration status, not outcome status: a reopened deal is open
+      // again, so leaving status = 'won'/'lost' would leave every
+      // status-filtered view still counting it as closed.
+      return {
+        toStage: input.toStage,
+        toStatus: deal.commercial_approved ? "approved" : "submitted",
+      };
+    },
+    extraSet: (deal) => {
+      if (!TERMINAL_STAGES.has(deal.stage)) return { sql: "", values: [] };
+      // markDealWon set probability to 100 and markDealLost to 0 — both mean
+      // "decided". A deal back in Negotiation is neither, so it returns to the
+      // middle option the app actually offers ("50% - Likely",
+      // DEAL_PROBABILITY_OPTIONS). po_choice is cleared because the PO
+      // decision it recorded belongs to a win that no longer exists.
+      return { sql: "probability = $6, po_choice = NULL", values: [50] };
     },
   });
 }
@@ -694,6 +796,17 @@ export async function markDealWon(input: {
     resolveTarget: async (deal) => {
       if (TERMINAL_STAGES.has(deal.stage)) {
         return validationFailure(`Deal is already closed as "${deal.stage}"`);
+      }
+      // §9.15: "Selecting Won requires ... fulfilled stage requirements", and
+      // nextAuthorisedActions has always advertised deal.mark_won only from
+      // negotiation. The command itself did not enforce that, so a deal could
+      // be closed Won straight out of `sourced` — skipping every qualification
+      // gate, including the Testing→Qualified budget check and the §9.11
+      // PAM/KAM handoff — and then become reward-eligible at PO approval.
+      if (deal.stage !== "negotiation") {
+        return validationFailure(
+          `A deal can only be marked won from negotiation (this one is at "${deal.stage}")`,
+        );
       }
       return { toStage: "won", toStatus: "won" };
     },

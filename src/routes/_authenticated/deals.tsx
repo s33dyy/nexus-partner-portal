@@ -25,6 +25,11 @@ import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { DealLineItems } from "@/components/deal-line-items";
 import { DealRegistrationBadge } from "@/components/deal-registration-badge";
 import { DealOutcomeReview } from "@/components/deal-outcome-review";
+import {
+  DealOutcomeDialog,
+  type DealOutcome,
+  type DealOutcomeSubmission,
+} from "@/components/deal-outcome-dialog";
 import { DealParticipantTags } from "@/components/deal-participant-tags";
 import { DealActivityTimeline } from "@/components/deal-activity-timeline";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
@@ -95,6 +100,7 @@ import {
   getValidBackwardStages,
   isTerminalDealStage,
   nextDealStage,
+  requiresOutcomeChoice,
   parseDealAmount,
   requiresSuperAdminApproval,
   type DealRecord,
@@ -331,10 +337,13 @@ function DealsPage() {
   // and a mandatory loss reason on Lost — captured through a small dialog
   // instead of the old one-click "Mark won"/"Mark lost" buttons that sent
   // neither.
-  const [closeDialogStatus, setCloseDialogStatus] = useState<"won" | "lost" | null>(null);
-  const [closeOutcomeDate, setCloseOutcomeDate] = useState("");
-  const [closePoChoice, setClosePoChoice] = useState<"now" | "later">("later");
-  const [closeReason, setCloseReason] = useState("");
+  // The draft (outcome date, PO choice, loss reason) lives in
+  // DealOutcomeDialog. This route keeps only whether the dialog is open and
+  // which outcome it opened on — null meaning "ask", which is what leaving
+  // Negotiation now does instead of assuming Won.
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closeInitialOutcome, setCloseInitialOutcome] = useState<DealOutcome | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
   // 9e: backward movement has zero UI entry points anywhere in the shipped
   // product even though moveDealStageBackward is fully implemented and
   // tested server-side — this dialog is the first one. Mirrors the
@@ -1534,22 +1543,25 @@ function DealsPage() {
       return;
     }
 
+    // Negotiation is the last open stage, so advancing from it is a closing
+    // decision. Ask which outcome rather than assuming Won — the old branch
+    // here called markDealWon with neither the outcome date nor the PO choice
+    // §9.15 requires, and made Lost unreachable from this button entirely.
+    if (requiresOutcomeChoice(selectedDeal.stage)) {
+      openCloseDialog(null);
+      return;
+    }
+
     const trimmedNote = note.trim();
     if (trimmedNote && trimmedNote !== selectedDeal.notes) {
       await updateDeal({ notes: trimmedNote, updated_at: new Date().toISOString() });
     }
 
-    // Reaching "won" always goes through the dedicated mark-won command, even
-    // when the user triggers it via the generic "advance" action, since Won is
-    // reward-eligible and gets its own audit trail distinct from ordinary stage moves.
-    const result =
-      selectedDeal.stage === "negotiation"
-        ? await markDealWon({ dealId: selectedDeal.id, expectedVersion: selectedDeal.version })
-        : await moveDealStageForward({
-            dealId: selectedDeal.id,
-            expectedVersion: selectedDeal.version,
-            note: trimmedNote || null,
-          });
+    const result = await moveDealStageForward({
+      dealId: selectedDeal.id,
+      expectedVersion: selectedDeal.version,
+      note: trimmedNote || null,
+    });
 
     if (!result.ok) {
       toast.error(result.failure.message);
@@ -1583,83 +1595,86 @@ function DealsPage() {
     // when the pipeline stage merely reaches "won" — product.md §15.11.
   };
 
-  // §9b/§9.15: "Mark won"/"Mark lost" now open a small dialog first instead
-  // of firing the command immediately — Won captures an outcome date and a
-  // PO Upload-Now-or-Submit-Later choice, Lost requires a reason (the server
-  // enforces this too; the dialog just gives it a real place to be typed).
-  const openCloseDialog = (status: "won" | "lost") => {
+  // §9b/§9.15: "Mark won"/"Mark lost" open the dialog rather than firing the
+  // command immediately — Won captures an outcome date and a PO
+  // Upload-Now-or-Submit-Later choice, Lost requires a reason (the server
+  // enforces both; the dialog gives them a real place to be typed).
+  //
+  // `status` null is the "Advance stage" entry point out of Negotiation: the
+  // outcome is the question, so the dialog opens with neither preselected.
+  const openCloseDialog = (status: DealOutcome | null) => {
     if (!selectedDeal) return;
-    setCloseDialogStatus(status);
-    setCloseOutcomeDate(toDateInputValue(new Date().toISOString()) || "");
-    setClosePoChoice("later");
-    setCloseReason("");
+    setCloseInitialOutcome(status);
+    setCloseDialogOpen(true);
   };
 
-  const closeAs = async () => {
-    const status = closeDialogStatus;
-    if (!selectedDeal || !status) return;
-    if (status === "lost" && !closeReason.trim()) {
-      toast.error("A reason is required to mark this deal lost");
-      return;
+  const closeAs = async (submission: DealOutcomeSubmission) => {
+    if (!selectedDeal) return;
+    const status = submission.outcome;
+    setCloseBusy(true);
+    try {
+      const trimmedNote = note.trim();
+      if (trimmedNote && trimmedNote !== selectedDeal.notes) {
+        await updateDeal({ notes: trimmedNote, updated_at: new Date().toISOString() });
+      }
+
+      const result =
+        submission.outcome === "won"
+          ? await markDealWon({
+              dealId: selectedDeal.id,
+              expectedVersion: selectedDeal.version,
+              outcomeDate: submission.outcomeDate || null,
+              poChoice: submission.poChoice,
+            })
+          : await markDealLost({
+              dealId: selectedDeal.id,
+              expectedVersion: selectedDeal.version,
+              reason: submission.reason,
+            });
+
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+
+      const closeReason = submission.outcome === "lost" ? submission.reason : "";
+      const closePoChoice = submission.outcome === "won" ? submission.poChoice : "later";
+
+      setCloseDialogOpen(false);
+      await load();
+
+      await publishDealNotification({
+        deal: selectedDeal,
+        notificationTitle: status === "won" ? "Deal won" : "Deal lost",
+        notificationMessage:
+          status === "won"
+            ? `${selectedDeal.account_name} closed won (PO ${closePoChoice === "now" ? "uploading now" : "to follow"}) and is ready for PO submission.`
+            : `${selectedDeal.account_name} was closed as lost: ${closeReason}`,
+        type: `deal_${status}`,
+      });
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: `deal_${status}`,
+        targetType: "deal",
+        targetName: selectedDeal.account_name,
+        outcome: status,
+        details:
+          status === "won"
+            ? `${selectedDeal.product} closed won and prepared for PO submission (PO ${closePoChoice})`
+            : `${selectedDeal.product} closed lost: ${closeReason}`,
+        severity: status === "won" ? "medium" : "low",
+      });
+      // Reward points are awarded when the PO review reaches its approved
+      // terminal state (outcome-review-commands.server.ts's approvePO), not
+      // when the deal is merely closed won — product.md §15.11.
+    } finally {
+      setCloseBusy(false);
     }
-
-    const trimmedNote = note.trim();
-    if (trimmedNote && trimmedNote !== selectedDeal.notes) {
-      await updateDeal({ notes: trimmedNote, updated_at: new Date().toISOString() });
-    }
-
-    const result =
-      status === "won"
-        ? await markDealWon({
-            dealId: selectedDeal.id,
-            expectedVersion: selectedDeal.version,
-            reason: closeReason.trim() || null,
-            outcomeDate: closeOutcomeDate || null,
-            poChoice: closePoChoice,
-          })
-        : await markDealLost({
-            dealId: selectedDeal.id,
-            expectedVersion: selectedDeal.version,
-            reason: closeReason.trim(),
-          });
-
-    if (!result.ok) {
-      toast.error(result.failure.message);
-      return;
-    }
-
-    setCloseDialogStatus(null);
-    await load();
-
-    await publishDealNotification({
-      deal: selectedDeal,
-      notificationTitle: status === "won" ? "Deal won" : "Deal lost",
-      notificationMessage:
-        status === "won"
-          ? `${selectedDeal.account_name} closed won (PO ${closePoChoice === "now" ? "uploading now" : "to follow"}) and is ready for PO submission.`
-          : `${selectedDeal.account_name} was closed as lost: ${closeReason.trim()}`,
-      type: `deal_${status}`,
-    });
-    await recordAuditEvent(supabase, {
-      actorName: profile?.full_name ?? "LIVEY",
-      actorRole: hasRole("super_admin")
-        ? "super_admin"
-        : hasRole("partner_admin")
-          ? "partner_admin"
-          : "partner_user",
-      action: `deal_${status}`,
-      targetType: "deal",
-      targetName: selectedDeal.account_name,
-      outcome: status,
-      details:
-        status === "won"
-          ? `${selectedDeal.product} closed won and prepared for PO submission (PO ${closePoChoice})`
-          : `${selectedDeal.product} closed lost: ${closeReason.trim()}`,
-      severity: status === "won" ? "medium" : "low",
-    });
-    // Reward points are awarded when the PO review reaches its approved
-    // terminal state (outcome-review-commands.server.ts's approvePO), not
-    // when the deal is merely closed won — product.md §15.11.
   };
 
   // 9e (§9.10/§9.19): "Any active tagged participant may request and perform
@@ -2316,22 +2331,31 @@ function DealsPage() {
                       Move backward
                     </Button>
                   ) : null}
-                  <Button
-                    variant="outline"
-                    onClick={() => openCloseDialog("won")}
-                    disabled={saving}
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Mark won
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => openCloseDialog("lost")}
-                    disabled={saving}
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    Mark lost
-                  </Button>
+                  {/* Both were rendered unconditionally, including on already
+                      closed deals where the server always refuses. Won is
+                      offered only from Negotiation, matching what
+                      nextAuthorisedActions already advertises; Lost only while
+                      the deal is still open. */}
+                  {requiresOutcomeChoice(selectedDeal.stage) ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => openCloseDialog("won")}
+                      disabled={saving}
+                    >
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Mark won
+                    </Button>
+                  ) : null}
+                  {isTerminalDealStage(selectedDeal.stage) ? null : (
+                    <Button
+                      variant="destructive"
+                      onClick={() => openCloseDialog("lost")}
+                      disabled={saving}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Mark lost
+                    </Button>
+                  )}
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
                   Viewing item {selectedIndex + 1} of {filteredDeals.length}
@@ -2383,101 +2407,15 @@ function DealsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={closeDialogStatus !== null}
-        onOpenChange={(open) => {
-          if (!open) setCloseDialogStatus(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {closeDialogStatus === "won" ? "Mark deal won" : "Mark deal lost"}
-            </DialogTitle>
-            <DialogDescription>
-              {closeDialogStatus === "won"
-                ? "Record the outcome date and whether the PO is ready now or will follow (product.md §9.15)."
-                : "A reason is required so the pipeline keeps a real record of why this deal was lost."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid gap-2 text-sm">
-              <div className="font-medium">{selectedDeal?.account_name ?? "Selected deal"}</div>
-              <div className="text-muted-foreground">
-                {selectedDeal?.product ?? "Deal"} · {selectedDeal?.stage ?? "stage"}
-              </div>
-            </div>
-            {closeDialogStatus === "won" ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="close_outcome_date">Outcome date</Label>
-                  <Input
-                    id="close_outcome_date"
-                    type="date"
-                    value={closeOutcomeDate}
-                    onChange={(e) => setCloseOutcomeDate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Purchase order</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={closePoChoice === "now" ? "default" : "outline"}
-                      onClick={() => setClosePoChoice("now")}
-                    >
-                      Upload now
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={closePoChoice === "later" ? "default" : "outline"}
-                      onClick={() => setClosePoChoice("later")}
-                    >
-                      Submit later
-                    </Button>
-                  </div>
-                  {closePoChoice === "now" ? (
-                    <p className="text-xs text-muted-foreground">
-                      The deal closes Won now; submit the PO in the Outcome Review panel below right
-                      after.
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      The deal closes Won now; the PO can be submitted any time from the Outcome
-                      Review panel.
-                    </p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="close_lost_reason">Loss reason (required)</Label>
-                <Textarea
-                  id="close_lost_reason"
-                  value={closeReason}
-                  onChange={(e) => setCloseReason(e.target.value)}
-                  placeholder="e.g. Partner went with a competitor, budget cut, project cancelled..."
-                  rows={4}
-                />
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setCloseDialogStatus(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant={closeDialogStatus === "lost" ? "destructive" : "default"}
-                onClick={() => void closeAs()}
-                disabled={closeDialogStatus === "lost" && !closeReason.trim()}
-              >
-                {closeDialogStatus === "won" ? "Confirm won" : "Confirm lost"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DealOutcomeDialog
+        open={closeDialogOpen}
+        onOpenChange={setCloseDialogOpen}
+        dealName={selectedDeal?.account_name ?? "Selected deal"}
+        dealSubtitle={selectedDeal ? `${selectedDeal.product} · ${selectedDeal.stage}` : undefined}
+        initialOutcome={closeInitialOutcome}
+        busy={closeBusy}
+        onConfirm={closeAs}
+      />
 
       <Dialog open={backwardDialogOpen} onOpenChange={setBackwardDialogOpen}>
         <DialogContent className="sm:max-w-lg">

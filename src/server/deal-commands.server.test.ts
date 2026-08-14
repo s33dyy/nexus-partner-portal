@@ -933,7 +933,7 @@ test("moveDealStageBackward rejects moving to a later stage", async () => {
 });
 
 test("markDealWon closes the deal and sets probability to 100", async () => {
-  const harness = await installFakePool(baseDealRow({ stage: "approved", version: 3 }))();
+  const harness = await installFakePool(baseDealRow({ stage: "negotiation", version: 3 }))();
   try {
     const { markDealWon } = await import("@/server/deal-commands.server");
     const actor = buildActor();
@@ -941,7 +941,9 @@ test("markDealWon closes the deal and sets probability to 100", async () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.commandName).toBe("deal.mark_won");
-      expect(result.nextAuthorisedActions).toEqual([]);
+      // A closed deal still advertises the reasoned reopen; the command
+      // refuses it once the win has released reward points.
+      expect(result.nextAuthorisedActions).toEqual(["deal.move_stage_backward"]);
     }
     const params = harness.updateCalls[0]?.params ?? [];
     expect(params[1]).toBe("won");
@@ -949,6 +951,34 @@ test("markDealWon closes the deal and sets probability to 100", async () => {
     expect(params[5]).toBe(100);
   } finally {
     harness.restore();
+  }
+});
+
+// §9.15 "Selecting Won requires ... fulfilled stage requirements", and
+// nextAuthorisedActions only ever advertised deal.mark_won from negotiation.
+// Before this guard the command accepted any non-terminal stage, so a deal
+// could be closed Won straight out of sourced — skipping every qualification
+// gate and still becoming reward-eligible once its PO was approved.
+test("markDealWon is rejected from any stage other than negotiation", async () => {
+  for (const stage of ["sourced", "demo", "testing", "qualified", "proposal"]) {
+    const harness = await installFakePool(baseDealRow({ stage, version: 3 }))();
+    try {
+      const { markDealWon } = await import("@/server/deal-commands.server");
+      const result = await markDealWon({
+        actor: buildActor(),
+        dealId: "deal-1",
+        expectedVersion: 3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.code).toBe("VALIDATION_FAILED");
+        expect(result.failure.message).toContain("negotiation");
+      }
+      // Nothing may be written on a refused transition.
+      expect(harness.updateCalls.length).toBe(0);
+    } finally {
+      harness.restore();
+    }
   }
 });
 
@@ -1278,6 +1308,226 @@ test("9g: createDeal adds no automatic RM/ISR tag when the creator holds neither
       call.sql.includes("deal_participants"),
     );
     expect(participantInsert).toBeUndefined();
+  } finally {
+    harness.restore();
+  }
+});
+
+// --- Reopening a closed deal (product.md §9.10 + the §9.15 PO review table) ---
+//
+// "Lost can be reopened only through a reasoned, authorised backward
+// movement", and the PO table's "PO Pending -> Not Applicable" / "Rejected
+// Outcome -> Not Applicable" rows are both triggered by "moves Deal backward
+// to Negotiation with reason". The hard limit is the other direction:
+// "Approved Won is terminal for ordinary users", because by then the win has
+// released reward points and this codebase has no compensating-debit path
+// (adjustRewardPoints refuses any delta that would make a balance negative).
+
+/**
+ * Routes on SQL text, unlike installFakePool which answers every SELECT with
+ * the deal row — the reopen guard issues a second, different SELECT whose
+ * answer is the whole point of these tests.
+ */
+function installReopenPool(
+  dealRow: DealRow,
+  guard: { reviewApproved: boolean; rewardsAwarded: boolean },
+) {
+  return async () => {
+    const { pool } = await import("@/server/postgres.server");
+    const updateCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+    const fakeClient = {
+      query: async (sql: string, params?: unknown[]) => {
+        const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
+        if (verb === "SELECT" && sql.includes("reward_point_events")) {
+          return {
+            rows: [
+              { review_approved: guard.reviewApproved, rewards_awarded: guard.rewardsAwarded },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (verb === "SELECT") return { rows: [dealRow], rowCount: 1 };
+        if (verb === "UPDATE") {
+          updateCalls.push({ sql, params: params ?? [] });
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      },
+      release: () => undefined,
+    };
+
+    const originalConnect = pool.connect.bind(pool);
+    pool.connect = (async () => fakeClient) as typeof pool.connect;
+
+    return {
+      updateCalls,
+      dealUpdate: () => updateCalls.find((call) => call.sql.includes("portal_deals")),
+      reviewUpdate: () => updateCalls.find((call) => call.sql.includes("deal_outcome_reviews")),
+      restore: () => {
+        pool.connect = originalConnect as typeof pool.connect;
+      },
+    };
+  };
+}
+
+test("a lost deal reopens to negotiation, and stops looking closed while doing it", async () => {
+  const harness = await installReopenPool(baseDealRow({ stage: "lost", status: "lost" }), {
+    reviewApproved: false,
+    rewardsAwarded: false,
+  })();
+  try {
+    const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageBackward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+      toStage: "negotiation",
+      reason: "Customer re-entered the process with new budget",
+    });
+    expect(result.ok).toBe(true);
+
+    const update = harness.dealUpdate();
+    expect(update?.params[1]).toBe("negotiation");
+    // Leaving status as 'lost' would keep every status-filtered view counting
+    // this as closed even though it is open again.
+    expect(update?.params[2]).toBe("approved");
+    // markDealLost set probability to 0 ("no chance"); reopened it is neither
+    // 0 nor 100 but the middle option the app actually offers.
+    expect(update?.sql).toContain("probability");
+    expect(update?.params[5]).toBe(50);
+    expect(update?.sql).toContain("po_choice = NULL");
+    // The UPDATE must stay syntactically valid — a conditional write-set that
+    // returns empty SQL previously produced a dangling comma here.
+    expect(update?.sql).not.toContain(", ,");
+    expect(update?.sql).not.toMatch(/,\s*WHERE/);
+
+    // The PO review returns to Not Applicable, per the two PO-table rows.
+    expect(harness.reviewUpdate()?.sql).toContain("not_applicable");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a won deal whose reward points were already released cannot be reopened", async () => {
+  const harness = await installReopenPool(baseDealRow({ stage: "won", status: "won" }), {
+    reviewApproved: true,
+    rewardsAwarded: true,
+  })();
+  try {
+    const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageBackward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+      toStage: "negotiation",
+      reason: "Commercial correction",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("VALIDATION_FAILED");
+      expect(result.failure.message).toContain("reward points");
+    }
+    // Nothing may be written on a refused reopen — not the deal, not the review.
+    expect(harness.updateCalls.length).toBe(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("an approved outcome review blocks the reopen even with no ledger row", async () => {
+  const harness = await installReopenPool(baseDealRow({ stage: "won", status: "won" }), {
+    reviewApproved: true,
+    rewardsAwarded: false,
+  })();
+  try {
+    const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageBackward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+      toStage: "negotiation",
+      reason: "Commercial correction",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.message).toContain("Approved Won");
+    expect(harness.updateCalls.length).toBe(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a closed deal reopens to negotiation and nowhere else", async () => {
+  // isBackwardMove's index comparison passes won->sourced on its own, so
+  // relaxing the terminal rule by deletion would have legalised every earlier
+  // stage rather than the one product.md names.
+  for (const toStage of ["sourced", "demo", "testing", "qualified", "proposal"] as const) {
+    const harness = await installReopenPool(baseDealRow({ stage: "won", status: "won" }), {
+      reviewApproved: false,
+      rewardsAwarded: false,
+    })();
+    try {
+      const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+      const result = await moveDealStageBackward({
+        actor: buildActor(),
+        dealId: "deal-1",
+        expectedVersion: 3,
+        toStage,
+        reason: "Reopening too far",
+      });
+      expect(result.ok).toBe(false);
+      expect(harness.updateCalls.length).toBe(0);
+    } finally {
+      harness.restore();
+    }
+  }
+});
+
+test("no backward move may land ON won or lost", async () => {
+  for (const toStage of ["won", "lost"] as const) {
+    const harness = await installReopenPool(baseDealRow({ stage: "negotiation" }), {
+      reviewApproved: false,
+      rewardsAwarded: false,
+    })();
+    try {
+      const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+      const result = await moveDealStageBackward({
+        actor: buildActor(),
+        dealId: "deal-1",
+        expectedVersion: 3,
+        toStage,
+        reason: "Trying to close through the backward path",
+      });
+      expect(result.ok).toBe(false);
+      expect(harness.updateCalls.length).toBe(0);
+    } finally {
+      harness.restore();
+    }
+  }
+});
+
+test("an ordinary backward move is unchanged: status preserved, no probability rewrite", async () => {
+  const harness = await installReopenPool(baseDealRow({ stage: "proposal", status: "submitted" }), {
+    reviewApproved: false,
+    rewardsAwarded: false,
+  })();
+  try {
+    const { moveDealStageBackward } = await import("@/server/deal-commands.server");
+    const result = await moveDealStageBackward({
+      actor: buildActor(),
+      dealId: "deal-1",
+      expectedVersion: 3,
+      toStage: "demo",
+      reason: "Needs another demo",
+    });
+    expect(result.ok).toBe(true);
+    const update = harness.dealUpdate();
+    expect(update?.params[1]).toBe("demo");
+    expect(update?.params[2]).toBe("submitted");
+    // The reopen write-set must not leak onto ordinary backward moves.
+    expect(update?.sql).not.toContain("probability");
+    expect(update?.sql).not.toContain("po_choice");
+    expect(harness.reviewUpdate()).toBeUndefined();
   } finally {
     harness.restore();
   }

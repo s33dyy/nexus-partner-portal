@@ -48,6 +48,7 @@ export function FormDialog({
   busyLabel,
   cancelLabel = "Cancel",
   submitDisabled = false,
+  submitVariant = "default",
   size = "md",
   footerNote,
 }: {
@@ -65,6 +66,12 @@ export function FormDialog({
   busyLabel?: string;
   cancelLabel?: string;
   submitDisabled?: boolean;
+  /**
+   * Destructive for confirmations that close or discard something — marking a
+   * deal lost, for instance. The default stays primary so the ordinary create
+   * path can't accidentally style itself as dangerous.
+   */
+  submitVariant?: "default" | "destructive";
   size?: "md" | "lg" | "xl";
   footerNote?: React.ReactNode;
 }) {
@@ -112,7 +119,7 @@ export function FormDialog({
               >
                 {cancelLabel}
               </Button>
-              <Button type="submit" disabled={busy || submitDisabled}>
+              <Button type="submit" variant={submitVariant} disabled={busy || submitDisabled}>
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 {busy ? (busyLabel ?? submitLabel) : submitLabel}
               </Button>

@@ -16,6 +16,7 @@ import { CsvExportButton } from "@/components/csv-export-button";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { BoardCard, BoardColumn } from "@/components/record-list";
+import { DealOutcomeDialog, type DealOutcomeSubmission } from "@/components/deal-outcome-dialog";
 import { DEAL_STAGE_TONE, type StatusTone } from "@/lib/status-tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/local/client";
 import {
+  markDealLost,
   markDealWon,
   moveDealStageBackward,
   moveDealStageForward,
@@ -109,6 +111,10 @@ function PipelinePage() {
   const [backwardDeal, setBackwardDeal] = useState<DealRecord | null>(null);
   const [backwardTargetStage, setBackwardTargetStage] = useState<DealStage | "">("");
   const [backwardReason, setBackwardReason] = useState("");
+  // Leaving Negotiation asks Won or Lost rather than assuming Won — see
+  // DealOutcomeDialog for why that assumption was wrong under §9.15.
+  const [outcomeDeal, setOutcomeDeal] = useState<DealRecord | null>(null);
+  const [outcomeBusy, setOutcomeBusy] = useState(false);
   const [pipelineMetric, setPipelineMetric] = useState<{
     pipelineValueUsd: number;
     openDealCount: number;
@@ -280,14 +286,19 @@ function PipelinePage() {
       toast.error("Add a customer budget before moving this deal to qualified");
       return;
     }
+    // Negotiation is the last open stage, so "forward" from here is a closing
+    // decision, not a step. Ask which outcome it reached — this used to call
+    // markDealWon outright, which both assumed the answer and skipped the
+    // outcome date and PO choice §9.15 requires.
+    if (deal.stage === "negotiation") {
+      setOutcomeDeal(deal);
+      return;
+    }
     try {
-      // Reaching "won" always goes through the dedicated mark-won command, since
-      // Won is reward-eligible and gets its own audit trail distinct from
-      // ordinary stage moves.
-      const result =
-        deal.stage === "negotiation"
-          ? await markDealWon({ dealId: deal.id, expectedVersion: deal.version })
-          : await moveDealStageForward({ dealId: deal.id, expectedVersion: deal.version });
+      const result = await moveDealStageForward({
+        dealId: deal.id,
+        expectedVersion: deal.version,
+      });
       if (!result.ok) {
         toast.error(result.failure.message);
         return;
@@ -313,12 +324,82 @@ function PipelinePage() {
         details: `${deal.product} moved to ${stage} in the pipeline`,
         severity: "low",
       });
-      // Reward points are awarded when the PO review reaches its approved
-      // terminal state (outcome-review-commands.server.ts's approvePO), not
-      // when the pipeline stage merely reaches "won" — product.md §15.11.
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move deal");
+    }
+  };
+
+  /**
+   * Commits the Won/Lost choice made in DealOutcomeDialog.
+   *
+   * Won and Lost are separate named commands rather than a stage move: Won is
+   * reward-eligible and Lost demands a reason, and each carries its own audit
+   * trail. Reward points are NOT awarded here — that happens only when the PO
+   * outcome review reaches approved (outcome-review-commands.server.ts), per
+   * product.md §15.11's "Points are not created when Deal is merely marked Won".
+   */
+  const confirmOutcome = async (submission: DealOutcomeSubmission) => {
+    const deal = outcomeDeal;
+    if (!deal) return;
+    setOutcomeBusy(true);
+    try {
+      const result =
+        submission.outcome === "won"
+          ? await markDealWon({
+              dealId: deal.id,
+              expectedVersion: deal.version,
+              outcomeDate: submission.outcomeDate || null,
+              poChoice: submission.poChoice,
+            })
+          : await markDealLost({
+              dealId: deal.id,
+              expectedVersion: deal.version,
+              reason: submission.reason,
+            });
+
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+
+      setOutcomeDeal(null);
+      toast.success(
+        submission.outcome === "won"
+          ? `${deal.account_name} closed won`
+          : `${deal.account_name} closed lost`,
+      );
+
+      await publishDealNotification(
+        deal,
+        `deal_${submission.outcome}`,
+        submission.outcome === "won" ? "Deal won" : "Deal lost",
+        submission.outcome === "won"
+          ? `${deal.account_name} closed won (PO ${submission.poChoice === "now" ? "uploading now" : "to follow"}).`
+          : `${deal.account_name} was closed as lost: ${submission.reason}`,
+      );
+      await recordAuditEvent(supabase, {
+        actorName: profile?.full_name ?? "LIVEY",
+        actorRole: hasRole("super_admin")
+          ? "super_admin"
+          : hasRole("partner_admin")
+            ? "partner_admin"
+            : "partner_user",
+        action: `deal_${submission.outcome}`,
+        targetType: "deal",
+        targetName: deal.account_name,
+        outcome: submission.outcome,
+        details:
+          submission.outcome === "won"
+            ? `${deal.product} closed won from the pipeline (PO ${submission.poChoice})`
+            : `${deal.product} closed lost from the pipeline: ${submission.reason}`,
+        severity: submission.outcome === "won" ? "medium" : "low",
+      });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to close deal");
+    } finally {
+      setOutcomeBusy(false);
     }
   };
 
@@ -369,6 +450,11 @@ function PipelinePage() {
       toast.error(error instanceof Error ? error.message : "Failed to save note");
     }
   };
+
+  // Reopening a closed deal and stepping an open one back are the same command
+  // with the same required reason, so they share a dialog — only the wording
+  // changes, because "move backward" badly undersells undoing a win.
+  const reopeningBackwardDeal = backwardDeal ? isTerminalDealStage(backwardDeal.stage) : false;
 
   const openBackward = (deal: DealRecord) => {
     setBackwardDeal(deal);
@@ -613,7 +699,10 @@ function PipelinePage() {
                                 variant="outline"
                                 onClick={() => void moveDeal(deal)}
                               >
-                                Move forward
+                                {/* From Negotiation this opens the Won/Lost
+                                    chooser, so calling it "Move forward" would
+                                    misdescribe what the click does. */}
+                                {deal.stage === "negotiation" ? "Close deal" : "Move forward"}
                                 <MoveRight />
                               </Button>
                             )}
@@ -625,7 +714,7 @@ function PipelinePage() {
                                 onClick={() => openBackward(deal)}
                               >
                                 <MoveLeft />
-                                Move backward
+                                {isTerminalDealStage(deal.stage) ? "Reopen" : "Move backward"}
                               </Button>
                             ) : null}
                             <Button
@@ -677,10 +766,14 @@ function PipelinePage() {
       <FormDialog
         open={backwardOpen}
         onOpenChange={setBackwardOpen}
-        title="Move deal backward"
-        description="Destination stage and a reason are both required (product.md §9.10/§9.19)."
+        title={reopeningBackwardDeal ? "Reopen this deal" : "Move deal backward"}
+        description={
+          reopeningBackwardDeal
+            ? "A closed deal returns to Negotiation. A win whose reward points have already been released can't be reopened here — that needs a Super Admin correction (product.md §9.15)."
+            : "Destination stage and a reason are both required (product.md §9.10/§9.19)."
+        }
         size="lg"
-        submitLabel="Confirm move backward"
+        submitLabel={reopeningBackwardDeal ? "Reopen deal" : "Confirm move backward"}
         submitDisabled={!backwardTargetStage || !backwardReason.trim()}
         onSubmit={() => void confirmBackward()}
       >
@@ -712,6 +805,17 @@ function PipelinePage() {
           />
         </Field>
       </FormDialog>
+
+      <DealOutcomeDialog
+        open={outcomeDeal !== null}
+        onOpenChange={(open) => {
+          if (!open) setOutcomeDeal(null);
+        }}
+        dealName={outcomeDeal?.account_name ?? "Selected deal"}
+        dealSubtitle={outcomeDeal ? `${outcomeDeal.product} · ${outcomeDeal.amount}` : undefined}
+        busy={outcomeBusy}
+        onConfirm={confirmOutcome}
+      />
     </div>
   );
 }
