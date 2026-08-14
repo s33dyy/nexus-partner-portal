@@ -1,52 +1,56 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { BarChart3, Download, Loader2, Printer, RefreshCw } from "lucide-react";
 import {
-  BarChart3,
-  Download,
-  Handshake,
-  HeartPulse,
-  Loader2,
-  Package,
-  Printer,
-  RefreshCw,
-  Sparkles,
-  TrendingUp,
-  Trophy,
-  Users,
-} from "lucide-react";
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Line,
+  Pie,
+  PieChart,
+  XAxis,
+  YAxis,
+} from "recharts";
 import * as XLSX from "xlsx";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, PageHeader, StatTile } from "@/components/page-header";
+import { EmptyState, PageHeader } from "@/components/page-header";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import { ChartFrame, DonutLegend, KpiTile } from "@/components/analytics-primitives";
+import { formatCount, formatDays, formatPercent, formatUsd } from "@/lib/analytics-format";
 import { supabase } from "@/integrations/local/client";
 import { buildAnalyticsWorkbook } from "@/lib/analytics-export";
 import { buildExportFilename } from "@/lib/export-files";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
 import {
-  DEAL_STAGE_ORDER,
-  parseDealAmount,
-  type CatalogItemRecord,
-  type CustomerRecord,
-  type DealRecord,
-} from "@/lib/portal-records";
+  computeKpis,
+  lossReasonMix,
+  ownerMix,
+  projectedDealsByMonth,
+  regionMix,
+  stageMix,
+  winRateByMonth,
+  wonDealsByMonth,
+} from "@/lib/analytics-metrics";
+import { type CatalogItemRecord, type CustomerRecord, type DealRecord } from "@/lib/portal-records";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
+import { SALES_REGIONS } from "@/domain/contracts/world-geography";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   component: AnalyticsPage,
 });
-
-function resolveUsdAmount(deal: Pick<DealRecord, "amount" | "amount_usd">) {
-  const usdAmount = Number(deal.amount_usd);
-  if (Number.isFinite(usdAmount) && usdAmount > 0) {
-    return usdAmount;
-  }
-  return parseDealAmount(deal.amount);
-}
 
 function AnalyticsPage() {
   const { profile, hasRole } = useAuth();
@@ -144,90 +148,42 @@ function AnalyticsPage() {
     void load();
   }, [load]);
 
-  const totals = useMemo(() => {
-    const pipeline = deals.reduce((sum, deal) => {
-      return sum + resolveUsdAmount(deal);
-    }, 0);
-    const won = deals.filter((deal) => deal.stage === "won").length;
-    const lost = deals.filter((deal) => deal.stage === "lost").length;
-    const open = deals.filter((deal) => !["won", "lost"].includes(deal.stage)).length;
-    const total = won + lost;
-    const winRate = total > 0 ? Math.round((won / total) * 100) : 0;
-    const avgHealth = customers.length
-      ? Math.round(
-          customers.reduce((sum, customer) => sum + customer.health_score, 0) / customers.length,
-        )
-      : 0;
-    return { pipeline, won, lost, open, avgHealth, winRate };
-  }, [customers, deals]);
+  // One clock for the whole page, so the 12-month window, the projection
+  // window and "age of open deals" can never disagree by a render.
+  const now = useMemo(() => new Date(), []);
 
-  const stageData = useMemo(() => {
-    return DEAL_STAGE_ORDER.map((stage) => ({
-      stage,
-      count: deals.filter((deal) => deal.stage === stage).length,
-      value: deals
-        .filter((deal) => deal.stage === stage)
-        .reduce((sum, deal) => sum + resolveUsdAmount(deal), 0),
-    }));
-  }, [deals]);
+  const kpis = useMemo(() => computeKpis(deals, now), [deals, now]);
+  const wonSeries = useMemo(() => wonDealsByMonth(deals, now), [deals, now]);
+  const projectionSeries = useMemo(() => projectedDealsByMonth(deals, now), [deals, now]);
+  const winRateSeries = useMemo(() => winRateByMonth(deals, now), [deals, now]);
+  const stages = useMemo(() => stageMix(deals), [deals]);
+  const losses = useMemo(() => lossReasonMix(deals), [deals]);
+  const regions = useMemo(() => regionMix(deals), [deals]);
+  const owners = useMemo(() => ownerMix(deals), [deals]);
 
-  const winLossFunnel = useMemo(
-    () => [
-      {
-        label: "Won",
-        count: deals.filter((d) => d.stage === "won").length,
-        color: "bg-success",
-      },
-      {
-        label: "Lost",
-        count: deals.filter((d) => d.stage === "lost").length,
-        color: "bg-destructive",
-      },
-      { label: "Open", count: totals.open, color: "bg-primary" },
-    ],
-    [deals, totals.open],
-  );
-
-  const maxWinLoss = Math.max(1, ...winLossFunnel.map((i) => i.count));
-
-  const healthBands = useMemo(() => {
-    const bands = [
-      { label: "90-100", min: 90 },
-      { label: "75-89", min: 75 },
-      { label: "60-74", min: 60 },
-      { label: "<60", min: 0 },
-    ];
-    return bands.map((band) => ({
-      label: band.label,
-      count: customers.filter((customer) => {
-        if (band.label === "<60") return customer.health_score < 60;
-        if (band.label === "90-100") return customer.health_score >= 90;
-        return customer.health_score >= band.min && customer.health_score < band.min + 15;
-      }).length,
-    }));
-  }, [customers]);
-
-  const catalogByTier = useMemo(() => {
-    const tiers = ["Registered", "Silver", "Gold", "Platinum"];
-    return tiers.map((tier) => ({
-      tier,
-      count: catalog.filter((item) => item.partner_tier.toLowerCase() === tier.toLowerCase())
-        .length,
-    }));
-  }, [catalog]);
-
-  const maxStage = Math.max(1, ...stageData.map((item) => item.count));
-  const maxHealth = Math.max(1, ...healthBands.map((item) => item.count));
-  const maxTier = Math.max(1, ...catalogByTier.map((item) => item.count));
+  // Sample counts drive ChartFrame's empty/thin states. They count SOURCE
+  // ROWS, not chart points: a 12-month series always has 12 points even when
+  // every one of them is zero, and drawing that would assert a year of
+  // measured inactivity rather than admitting there is nothing to show.
+  const wonSample = kpis.wonDeals;
+  const projectionSample = kpis.openDeals;
+  const decidedSample = kpis.wonDeals + kpis.lostDeals;
 
   const exportExcel = () => {
     const workbook = buildAnalyticsWorkbook({
       generatedAt: new Date().toISOString(),
       metrics: {
-        pipelineValue: `$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
-        wonDeals: totals.won,
-        openDeals: totals.open,
-        avgHealth: `${totals.avgHealth}%`,
+        pipelineValue: formatUsd(kpis.pipelineValue, false),
+        wonDeals: kpis.wonDeals,
+        openDeals: kpis.openDeals,
+        avgHealth: `${
+          customers.length
+            ? Math.round(
+                customers.reduce((sum, customer) => sum + customer.health_score, 0) /
+                  customers.length,
+              )
+            : 0
+        }%`,
       },
       deals,
       customers,
@@ -237,17 +193,44 @@ function AnalyticsPage() {
     XLSX.writeFile(workbook, buildExportFilename("livey-analytics", "xlsx"));
   };
 
+  const stageChartConfig = useMemo<ChartConfig>(
+    () =>
+      Object.fromEntries(
+        stages.map((slice, index) => [
+          slice.key,
+          { label: slice.label, color: STAGE_COLORS[slice.key] ?? paletteColor(index) },
+        ]),
+      ),
+    [stages],
+  );
+
+  const lossChartConfig = useMemo<ChartConfig>(
+    () =>
+      Object.fromEntries(
+        losses.map((slice, index) => [
+          slice.key,
+          { label: slice.label, color: lossColor(slice.key, index) },
+        ]),
+      ),
+    [losses],
+  );
+
+  const hasAnyDeal = deals.length > 0;
+
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Workspace"
         icon={<BarChart3 className="h-3.5 w-3.5" />}
         title="Analytics"
-        description="Review revenue, health, and catalog trends using the live records that power the rest of the portal."
+        description="Revenue, pipeline and win/loss trends from the live records that power the rest of the portal."
         actions={
           <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <Badge tone={source === "database" ? "success" : "neutral"}>
-              {source === "database" ? "Live Postgres data" : "Empty state"}
+            {/* Driven by the filtered rows, not the raw fetch — the old badge
+                read "Live Postgres data" while every chart below it was empty
+                because the region filter had excluded everything. */}
+            <Badge tone={hasAnyDeal ? "success" : "neutral"}>
+              {hasAnyDeal ? "Live Postgres data" : "Nothing in scope"}
             </Badge>
             <Button
               variant="outline"
@@ -282,248 +265,475 @@ function AnalyticsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
-        <StatTile
-          label="Pipeline value"
-          value={`$${totals.pipeline.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          hint="Current deal rows"
-          icon={<Sparkles className="h-4 w-4" />}
-          tone="brand"
+      {!loading && !hasAnyDeal ? (
+        <EmptyState
+          icon={<BarChart3 className="h-5 w-5" />}
+          title="No deals in the current scope"
+          description={
+            selectedRegion === "all"
+              ? "Once deals are registered, every chart on this page fills in automatically."
+              : `No deals match the ${
+                  SALES_REGIONS.find((region) => region.key === selectedRegion)?.name ??
+                  selectedRegion
+                } region filter. Switch the region selector back to All regions to see the full book.`
+          }
         />
-        <StatTile
-          label="Won deals"
-          value={String(totals.won)}
-          hint="Closed opportunities"
-          icon={<Trophy className="h-4 w-4" />}
-          tone="success"
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiTile
+          tone="violet"
+          label="Total sales"
+          value={formatUsd(kpis.totalSales)}
+          hint={`${formatCount(kpis.wonDeals)} closed won`}
         />
-        <StatTile
-          label="Open deals"
-          value={String(totals.open)}
-          hint="Still moving"
-          icon={<Handshake className="h-4 w-4" />}
-          tone="neutral"
-        />
-        <StatTile
+        <KpiTile
+          tone="indigo"
           label="Win rate"
-          value={`${totals.winRate}%`}
-          hint="Won vs. Won+Lost"
-          icon={<TrendingUp className="h-4 w-4" />}
-          tone="success"
+          value={formatPercent(kpis.winRate, 2)}
+          hint="Won vs decided deals"
         />
-        <StatTile
-          label="Avg. health"
-          value={`${totals.avgHealth}%`}
-          hint="Across live customers"
-          icon={<HeartPulse className="h-4 w-4" />}
-          tone="neutral"
+        <KpiTile
+          tone="sky"
+          label="Close rate"
+          value={formatPercent(kpis.closeRate, 2)}
+          hint="Won vs every deal"
+        />
+        <KpiTile
+          tone="teal"
+          label="Avg days to close"
+          value={formatDays(kpis.avgDaysToClose)}
+          hint={
+            kpis.daysToCloseExcluded > 0
+              ? `${kpis.daysToCloseExcluded} excluded — close date precedes creation`
+              : "Creation to close, won deals"
+          }
+        />
+        <KpiTile
+          tone="violet"
+          label="Pipeline value"
+          value={formatUsd(kpis.pipelineValue)}
+          hint="Open deals at face value"
+        />
+        <KpiTile
+          tone="indigo"
+          label="Open deals"
+          value={formatCount(kpis.openDeals)}
+          hint="Still in play"
+        />
+        <KpiTile
+          tone="sky"
+          label="Weighted value"
+          value={formatUsd(kpis.weightedValue)}
+          hint="Open value × probability"
+        />
+        <KpiTile
+          tone="teal"
+          label="Avg open deal age"
+          value={formatDays(kpis.avgOpenDealAge)}
+          hint="Days since registration"
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-base">Deal stage mix</CardTitle>
-            <CardDescription>Where opportunities sit in the pipeline right now.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading charts...
-              </div>
-            ) : deals.length === 0 ? (
-              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No deal records yet. Add one to populate the chart.
-              </div>
-            ) : (
-              stageData.map((item) => (
-                <div key={item.stage} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="capitalize">{item.stage}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-muted-foreground">
-                        ${item.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                      </span>
-                      <span className="w-6 text-right font-medium">{item.count}</span>
-                    </div>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${(item.count / maxStage) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid gap-5 xl:grid-cols-3">
+        <ChartFrame
+          className="xl:col-span-2"
+          title="Won deals (last 12 months)"
+          description="Closed value and deal count by committed close date."
+          sample={wonSample}
+          loading={loading}
+          emptyLabel="No deals have closed won yet."
+          thinLabel={`Only ${wonSample} won ${wonSample === 1 ? "deal" : "deals"} so far — not yet a trend.`}
+        >
+          <ChartContainer
+            config={WON_CHART_CONFIG}
+            className="aspect-auto h-[260px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <ComposedChart data={wonSeries} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="label"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                yAxisId="value"
+                tickLine={false}
+                axisLine={false}
+                width={52}
+                tickFormatter={(value: number) => formatUsd(value)}
+                domain={[0, (max: number) => Math.max(Math.ceil(max * 1.2), 1)]}
+              />
+              <YAxis
+                yAxisId="count"
+                orientation="right"
+                tickLine={false}
+                axisLine={false}
+                width={28}
+                allowDecimals={false}
+                domain={[0, (max: number) => Math.max(Math.ceil(max * 1.4), 1)]}
+              />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <Bar
+                yAxisId="value"
+                dataKey="value"
+                fill="var(--color-value)"
+                radius={[4, 4, 0, 0]}
+                maxBarSize={28}
+                isAnimationActive={false}
+              />
+              {/* dot is explicit: a month-count series with a single non-zero
+                  point draws no line segment at all, so without a dot the
+                  chart renders as an empty box. */}
+              <Line
+                yAxisId="count"
+                dataKey="count"
+                stroke="var(--color-count)"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                isAnimationActive={false}
+              />
+            </ComposedChart>
+          </ChartContainer>
+        </ChartFrame>
 
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-base">Customer health bands</CardTitle>
-            <CardDescription>How strong the live account base looks by score.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {customers.length === 0 ? (
-              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No customer records yet. Add one to populate the health bands.
-              </div>
-            ) : (
-              healthBands.map((band) => (
-                <div key={band.label} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>{band.label}</span>
-                    <span className="font-medium">{band.count}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-success"
-                      style={{ width: `${(band.count / maxHealth) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="text-base">Win / Loss funnel</CardTitle>
-          <CardDescription>
-            How resolved deals break down between wins, losses, and still-open opportunities.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 pt-6">
-          {deals.length === 0 ? (
-            <EmptyState
-              icon={<BarChart3 className="h-5 w-5" />}
-              title="No deal records yet"
-              description="Analytics fill in as deals are registered and move through the pipeline."
+        <ChartFrame
+          title="Sales pipeline"
+          description="Share of deals sitting in each stage."
+          sample={deals.length}
+          loading={loading}
+          emptyLabel="No deals to break down."
+          thinThreshold={0}
+        >
+          <div className="flex flex-col items-center gap-4 sm:flex-row">
+            <ChartContainer
+              config={stageChartConfig}
+              className="aspect-square h-[180px] w-[180px] shrink-0"
+            >
+              <PieChart>
+                <ChartTooltip content={<ChartTooltipContent nameKey="key" hideLabel />} />
+                <Pie
+                  data={stages}
+                  dataKey="count"
+                  nameKey="key"
+                  innerRadius={52}
+                  outerRadius={78}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                >
+                  {stages.map((slice, index) => (
+                    <Cell key={slice.key} fill={STAGE_COLORS[slice.key] ?? paletteColor(index)} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ChartContainer>
+            <DonutLegend
+              total={stages.reduce((sum, slice) => sum + slice.count, 0)}
+              items={stages.map((slice, index) => ({
+                key: slice.key,
+                label: slice.label,
+                count: slice.count,
+                color: STAGE_COLORS[slice.key] ?? paletteColor(index),
+              }))}
             />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-3">
-              {winLossFunnel.map((item) => (
-                <div key={item.label} className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{item.label}</span>
-                    <span className="text-muted-foreground">{item.count}</span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full rounded-full ${item.color}`}
-                      style={{ width: `${(item.count / maxWinLoss) * 100}%` }}
-                    />
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {deals.length > 0
-                      ? `${Math.round((item.count / deals.length) * 100)}% of all deals`
-                      : "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </ChartFrame>
+      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-base">Partner catalog mix</CardTitle>
-            <CardDescription>Which tiers are backing the live product set.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {catalog.length === 0 ? (
-              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No catalog items yet. Add one to populate this section.
-              </div>
-            ) : (
-              catalogByTier.map((item) => (
-                <div key={item.tier} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>{item.tier}</span>
-                    <span className="font-medium">{item.count}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-warning"
-                      style={{ width: `${(item.count / maxTier) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid gap-5 xl:grid-cols-3">
+        <ChartFrame
+          className="xl:col-span-2"
+          title="Deals projection (next 12 months)"
+          description="Open pipeline weighted by probability, by expected close month."
+          sample={projectionSample}
+          loading={loading}
+          emptyLabel="No open deals to project."
+          thinLabel={`Only ${projectionSample} open ${projectionSample === 1 ? "deal" : "deals"} — the projection will firm up as the pipeline grows.`}
+        >
+          <ChartContainer
+            config={PROJECTION_CHART_CONFIG}
+            className="aspect-auto h-[260px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <ComposedChart
+              data={projectionSeries}
+              margin={{ left: 4, right: 4, top: 8, bottom: 0 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="label"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                yAxisId="value"
+                tickLine={false}
+                axisLine={false}
+                width={52}
+                tickFormatter={(value: number) => formatUsd(value)}
+                domain={[0, (max: number) => Math.max(Math.ceil(max * 1.2), 1)]}
+              />
+              <YAxis
+                yAxisId="count"
+                orientation="right"
+                tickLine={false}
+                axisLine={false}
+                width={28}
+                allowDecimals={false}
+                domain={[0, (max: number) => Math.max(Math.ceil(max * 1.4), 1)]}
+              />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              {/* Dashed, because every point here is a forecast rather than a
+                  measurement — the solid/dashed distinction is the only thing
+                  separating this chart from the one above it. */}
+              <Line
+                yAxisId="value"
+                dataKey="value"
+                stroke="var(--color-value)"
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={{ r: 3 }}
+                isAnimationActive={false}
+              />
+              <Line
+                yAxisId="count"
+                dataKey="count"
+                stroke="var(--color-count)"
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={{ r: 3 }}
+                isAnimationActive={false}
+              />
+            </ComposedChart>
+          </ChartContainer>
+        </ChartFrame>
 
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-base">Quick takeaways</CardTitle>
-            <CardDescription>Live data can still support decision-making.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-6 text-sm">
-            {deals.length === 0 && customers.length === 0 && catalog.length === 0 ? (
-              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No analytics data is available yet.
-              </div>
-            ) : (
-              <>
-                <Insight
-                  icon={TrendingUp}
-                  title="Winning pace"
-                  body={`${totals.won} opportunities have already closed won this cycle.`}
-                />
-                <Insight
-                  icon={Sparkles}
-                  title="Healthy accounts"
-                  body={`${customers.filter((customer) => customer.health_score >= 90).length} customers are in top health.`}
-                />
-                <Insight
-                  icon={BarChart3}
-                  title="Catalog focus"
-                  body={`${catalog.length} catalog items are available for partner motion.`}
-                />
-              </>
-            )}
-          </CardContent>
-        </Card>
+        <ChartFrame
+          title="Deal loss reasons"
+          description="Why closed-lost deals were lost."
+          sample={kpis.lostDeals}
+          loading={loading}
+          emptyLabel="Nothing has been lost yet."
+          thinThreshold={0}
+        >
+          <div className="flex flex-col items-center gap-4 sm:flex-row">
+            <ChartContainer
+              config={lossChartConfig}
+              className="aspect-square h-[180px] w-[180px] shrink-0"
+            >
+              <PieChart>
+                <ChartTooltip content={<ChartTooltipContent nameKey="key" hideLabel />} />
+                <Pie
+                  data={losses}
+                  dataKey="count"
+                  nameKey="key"
+                  innerRadius={52}
+                  outerRadius={78}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                >
+                  {losses.map((slice, index) => (
+                    <Cell key={slice.key} fill={lossColor(slice.key, index)} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ChartContainer>
+            <DonutLegend
+              total={losses.reduce((sum, slice) => sum + slice.count, 0)}
+              items={losses.map((slice, index) => ({
+                key: slice.key,
+                label: slice.label,
+                count: slice.count,
+                color: lossColor(slice.key, index),
+              }))}
+            />
+          </div>
+        </ChartFrame>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-3">
+        <ChartFrame
+          title="Win rate trend"
+          description="Share of each month's decided deals that were won."
+          sample={decidedSample}
+          loading={loading}
+          emptyLabel="No deals have been decided yet."
+          thinLabel={`Only ${decidedSample} decided ${decidedSample === 1 ? "deal" : "deals"} — a single result moves this chart a long way.`}
+        >
+          <ChartContainer
+            config={WIN_RATE_CHART_CONFIG}
+            className="aspect-auto h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <BarChart data={winRateSeries} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="label"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                width={40}
+                domain={[0, 100]}
+                tickFormatter={(value: number) => `${value}%`}
+              />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              {/* Months with no decisions carry winRate null, so recharts skips
+                  the bar entirely rather than drawing a 0% column that would
+                  read as "we lost everything that month". */}
+              <Bar
+                dataKey="winRate"
+                fill="var(--color-winRate)"
+                radius={[4, 4, 0, 0]}
+                maxBarSize={26}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        </ChartFrame>
+
+        <ChartFrame
+          title="Open pipeline by region"
+          description="Where the winnable value sits."
+          sample={regions.length}
+          loading={loading}
+          emptyLabel="No open deals to place."
+          thinThreshold={0}
+        >
+          <ChartContainer
+            config={REGION_CHART_CONFIG}
+            className="aspect-auto h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <BarChart
+              data={regions}
+              layout="vertical"
+              margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
+            >
+              <CartesianGrid horizontal={false} />
+              <XAxis
+                type="number"
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => formatUsd(v)}
+              />
+              <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={72} />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <Bar
+                dataKey="value"
+                fill="var(--color-value)"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={24}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        </ChartFrame>
+
+        <ChartFrame
+          title="Top closers"
+          description="Won value by deal owner."
+          sample={owners.length}
+          loading={loading}
+          emptyLabel="No won deals to attribute yet."
+          thinThreshold={0}
+        >
+          <ChartContainer
+            config={OWNER_CHART_CONFIG}
+            className="aspect-auto h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
+          >
+            <BarChart
+              data={owners.slice(0, 6)}
+              layout="vertical"
+              margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
+            >
+              <CartesianGrid horizontal={false} />
+              <XAxis
+                type="number"
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => formatUsd(v)}
+              />
+              <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={92} />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <Bar
+                dataKey="value"
+                fill="var(--color-value)"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={24}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        </ChartFrame>
       </div>
     </div>
   );
 }
 
-function Metric({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <Card>
-      <CardContent className="space-y-1 p-5">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">{label}</div>
-        <div className="text-2xl font-semibold tracking-tight">{value}</div>
-        <div className="text-sm text-muted-foreground">{hint}</div>
-      </CardContent>
-    </Card>
-  );
+/**
+ * Stage colours.
+ *
+ * Deliberately NOT DEAL_STAGE_TONE: that map collapses eight stages into five
+ * semantic tones, so demo and testing are both "info" and qualified and
+ * proposal are both "brand" — two identical adjacent slices in a donut, which
+ * reads as one category. Badges encode escalation; chart slices encode
+ * identity, and those are different jobs.
+ */
+const STAGE_COLORS: Record<string, string> = {
+  sourced: "var(--chart-1)",
+  demo: "var(--chart-2)",
+  testing: "var(--chart-7)",
+  qualified: "var(--chart-3)",
+  proposal: "var(--chart-8)",
+  negotiation: "var(--chart-4)",
+  won: "var(--success)",
+  lost: "var(--destructive)",
+};
+
+const PALETTE = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "var(--chart-6)",
+  "var(--chart-7)",
+  "var(--chart-8)",
+];
+
+function paletteColor(index: number): string {
+  return PALETTE[index % PALETTE.length];
 }
 
-function Insight({
-  icon: Icon,
-  title,
-  body,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="rounded-lg border bg-muted/20 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        {title}
-      </div>
-      <div className="mt-1 text-sm text-muted-foreground">{body}</div>
-    </div>
-  );
+/** Uncategorised losses stay grey so they read as absence, not as a reason. */
+function lossColor(key: string, index: number): string {
+  return key === "Not recorded" ? "var(--muted-foreground)" : paletteColor(index);
 }
+
+const WON_CHART_CONFIG = {
+  value: { label: "Closed value", color: "var(--chart-1)" },
+  count: { label: "Won deals", color: "var(--chart-2)" },
+} satisfies ChartConfig;
+
+const PROJECTION_CHART_CONFIG = {
+  value: { label: "Projected value", color: "var(--chart-1)" },
+  count: { label: "Deals due", color: "var(--chart-2)" },
+} satisfies ChartConfig;
+
+const WIN_RATE_CHART_CONFIG = {
+  winRate: { label: "Win rate", color: "var(--chart-3)" },
+} satisfies ChartConfig;
+
+const REGION_CHART_CONFIG = {
+  value: { label: "Open value", color: "var(--chart-7)" },
+} satisfies ChartConfig;
+
+const OWNER_CHART_CONFIG = {
+  value: { label: "Won value", color: "var(--success)" },
+} satisfies ChartConfig;

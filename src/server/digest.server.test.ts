@@ -351,7 +351,12 @@ test("getUserDigest gates each section independently by its own feature capabili
         title: "Follow up",
         status: "open",
         priority: "medium",
-        due_at: new Date().toISOString(),
+        // Anchored to MORNING like every other fixture in this file, not to
+        // the real clock. The digest under test runs at MORNING, so a task
+        // dated "now" drifts out of the due-soon window as soon as the wall
+        // clock passes it — the test then fails on a date change rather than
+        // on a code change.
+        due_at: new Date(MORNING.getTime() + 12 * 60 * 60 * 1000).toISOString(),
       },
     ],
     learningTrackRows: [

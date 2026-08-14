@@ -92,7 +92,14 @@ const createDealFn = createServerFn({ method: "POST" })
   });
 
 const markDealLostFn = createServerFn({ method: "POST" })
-  .validator((input: { dealId: string; expectedVersion: number; reason: string }) => input)
+  .validator(
+    (input: {
+      dealId: string;
+      expectedVersion: number;
+      reason: string;
+      category?: string | null;
+    }) => input,
+  )
   .handler(async ({ data }): Promise<CommandExecutionResult> => {
     const actorResult = await resolveActorOrDenial();
     if (!actorResult.ok) return actorDenialResult(actorResult.failure);
@@ -102,6 +109,7 @@ const markDealLostFn = createServerFn({ method: "POST" })
       dealId: data.dealId,
       expectedVersion: data.expectedVersion,
       reason: data.reason,
+      category: data.category ?? null,
     });
   });
 
@@ -162,6 +170,7 @@ export async function markDealLost(input: {
   dealId: string;
   expectedVersion: number;
   reason: string;
+  category?: string | null;
 }): Promise<CommandExecutionResult> {
   return markDealLostFn({ data: input });
 }

@@ -1630,6 +1630,7 @@ function DealsPage() {
               dealId: selectedDeal.id,
               expectedVersion: selectedDeal.version,
               reason: submission.reason,
+              category: submission.category,
             });
 
       if (!result.ok) {

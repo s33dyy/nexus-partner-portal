@@ -314,6 +314,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "partner_id",
     "is_hidden_to_team",
     "reward_rate_percent",
+    "loss_reason_category",
+    "loss_reason_detail",
     "version",
     "is_seed",
     "created_at",

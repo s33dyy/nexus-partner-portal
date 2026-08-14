@@ -2092,3 +2092,16 @@ CREATE INDEX IF NOT EXISTS digest_email_dispatches_created_at_idx
 -- may still want the once-a-day summary, and vice versa. Collapsing them into
 -- one flag would make "turn off reminders" silently also stop the digest.
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS digest_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- --- Loss reason categories (product.md §9.15 "Lost requires: loss reason") ------
+-- The free-text reason on deal_transitions records WHY a specific deal was lost,
+-- which is the audit trail. It cannot answer "what are we losing to?" across the
+-- book — every row is a unique sentence. A bounded category alongside it makes
+-- that question answerable without taking the narrative away: the dialog asks for
+-- both, and the category is what Analytics groups by.
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS loss_reason_category TEXT;
+ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS loss_reason_detail TEXT;
+
+CREATE INDEX IF NOT EXISTS portal_deals_loss_reason_category_idx
+  ON portal_deals (loss_reason_category)
+  WHERE loss_reason_category IS NOT NULL;

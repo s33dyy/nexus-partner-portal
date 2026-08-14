@@ -36,6 +36,8 @@ function buildDeal(overrides: Partial<DealRecord>): DealRecord {
     partner_id: null,
     is_hidden_to_team: false,
     reward_rate_percent: 5,
+    loss_reason_category: null,
+    loss_reason_detail: null,
     version: 1,
     is_seed: false,
     commercial_approved: false,

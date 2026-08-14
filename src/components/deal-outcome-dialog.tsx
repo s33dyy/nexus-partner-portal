@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { toDateInputValue } from "@/lib/date-utils";
+import { DEAL_LOSS_REASONS, type DealLossReason } from "@/lib/portal-records";
 
 /**
  * The one place a deal is closed, from every surface.
@@ -41,7 +42,7 @@ export type DealPoChoice = "now" | "later";
 
 export type DealOutcomeSubmission =
   | { outcome: "won"; outcomeDate: string; poChoice: DealPoChoice }
-  | { outcome: "lost"; reason: string };
+  | { outcome: "lost"; reason: string; category: DealLossReason };
 
 export function DealOutcomeDialog({
   open,
@@ -65,6 +66,9 @@ export function DealOutcomeDialog({
   const [outcomeDate, setOutcomeDate] = React.useState("");
   const [poChoice, setPoChoice] = React.useState<DealPoChoice>("later");
   const [reason, setReason] = React.useState("");
+  // No default category. Pre-selecting one means the first option quietly
+  // becomes the most common answer in every loss report.
+  const [category, setCategory] = React.useState<DealLossReason | null>(null);
 
   // Reset on every open rather than on close: a dialog closed mid-edit would
   // otherwise flash its stale draft for a frame the next time it opens.
@@ -74,9 +78,10 @@ export function DealOutcomeDialog({
     setOutcomeDate(toDateInputValue(new Date().toISOString()) || "");
     setPoChoice("later");
     setReason("");
+    setCategory(null);
   }, [open, initialOutcome]);
 
-  const lossReasonMissing = outcome === "lost" && !reason.trim();
+  const lossReasonMissing = outcome === "lost" && (!reason.trim() || category === null);
   // Won needs a date; the server defaults a blank one to today, but §9.15 asks
   // the closer to state it, so the dialog does not submit without it.
   const outcomeDateMissing = outcome === "won" && !outcomeDate;
@@ -84,8 +89,8 @@ export function DealOutcomeDialog({
   const submit = () => {
     if (outcome === "won") {
       void onConfirm({ outcome: "won", outcomeDate, poChoice });
-    } else if (outcome === "lost") {
-      void onConfirm({ outcome: "lost", reason: reason.trim() });
+    } else if (outcome === "lost" && category) {
+      void onConfirm({ outcome: "lost", reason: reason.trim(), category });
     }
   };
 
@@ -182,15 +187,44 @@ export function DealOutcomeDialog({
       ) : null}
 
       {outcome === "lost" ? (
-        <Field label="Loss reason" htmlFor="deal_loss_reason" required>
-          <Textarea
-            id="deal_loss_reason"
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            placeholder="e.g. Partner went with a competitor, budget cut, project cancelled..."
-            rows={4}
-          />
-        </Field>
+        <>
+          {/* Both, not either: the category is what Analytics can group by,
+              the free text is what a human actually reads back later. */}
+          <Field
+            label="What lost it"
+            required
+            hint="Grouped in Analytics to show what the team keeps losing to."
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {DEAL_LOSS_REASONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={category === option}
+                  onClick={() => setCategory(option)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    category === option
+                      ? "tint-danger border-destructive/40 font-medium text-destructive"
+                      : "bg-card hover:bg-secondary",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Field label="What happened" htmlFor="deal_loss_reason" required>
+            <Textarea
+              id="deal_loss_reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="e.g. Partner went with a competitor, budget cut, project cancelled..."
+              rows={3}
+            />
+          </Field>
+        </>
       ) : null}
     </FormDialog>
   );

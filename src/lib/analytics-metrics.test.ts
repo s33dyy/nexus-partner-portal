@@ -1,0 +1,313 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  buildMonthRange,
+  computeKpis,
+  dealUsd,
+  lossReasonMix,
+  newVsExistingBusiness,
+  percentChange,
+  projectedDealsByMonth,
+  stageMix,
+  winRateByMonth,
+  wonDealsByMonth,
+} from "@/lib/analytics-metrics";
+import type { DealRecord } from "@/lib/portal-records";
+
+const ANCHOR = new Date("2026-08-15T00:00:00.000Z");
+
+function deal(overrides: Partial<DealRecord>): DealRecord {
+  return {
+    id: "deal-1",
+    account_name: "Acme",
+    customer_id: null,
+    contact_name: "Morgan",
+    poc_profile_id: null,
+    owner_name: "Priya",
+    country: "India",
+    region: "India West",
+    product: "LIV-CLD-100",
+    stage: "demo",
+    status: "submitted",
+    quantity: 1,
+    amount: "$1,000",
+    currency_code: "USD",
+    amount_value: 1000,
+    amount_usd: 1000,
+    fx_rate: null,
+    fx_provider: null,
+    fx_rate_fetched_at: null,
+    customer_budget: null,
+    probability: 50,
+    possible_close_date: null,
+    proposed_completion_date: null,
+    close_date: "2026-08-01",
+    source: "partner",
+    last_touch: "seed",
+    notes: "",
+    user_id: null,
+    partner_id: null,
+    is_hidden_to_team: false,
+    reward_rate_percent: 5,
+    commercial_approved: true,
+    loss_reason_category: null,
+    loss_reason_detail: null,
+    version: 1,
+    is_seed: false,
+    created_at: "2026-07-01T00:00:00.000Z",
+    updated_at: "2026-07-01T00:00:00.000Z",
+    ...overrides,
+  } as DealRecord;
+}
+
+describe("dealUsd", () => {
+  test("prefers the converted amount and falls back to parsing the free text", () => {
+    expect(dealUsd({ amount: "$10", amount_usd: 834.5 })).toBe(834.5);
+    expect(dealUsd({ amount: "₹9,20,000", amount_usd: null })).toBe(920000);
+    // 0 and negatives are not a usable conversion — fall back rather than
+    // silently reporting a deal as worthless.
+    expect(dealUsd({ amount: "$250", amount_usd: 0 })).toBe(250);
+  });
+});
+
+describe("computeKpis", () => {
+  const deals = [
+    deal({ id: "w1", stage: "won", amount_usd: 1000, close_date: "2026-08-01" }),
+    deal({ id: "w2", stage: "won", amount_usd: 3000, close_date: "2026-08-05" }),
+    deal({ id: "l1", stage: "lost", amount_usd: 5000 }),
+    deal({ id: "o1", stage: "demo", amount_usd: 2000, probability: 25 }),
+    deal({ id: "o2", stage: "negotiation", amount_usd: 4000, probability: 100 }),
+  ];
+
+  test("win rate counts only decided deals; close rate counts everything", () => {
+    const kpis = computeKpis(deals, ANCHOR);
+    // 2 won of 3 decided.
+    expect(kpis.winRate).toBeCloseTo(66.667, 2);
+    // 2 won of 5 total — lower, because open deals sit in the denominator.
+    expect(kpis.closeRate).toBe(40);
+    expect(kpis.winRate).toBeGreaterThan(kpis.closeRate as number);
+  });
+
+  test("pipeline value counts open deals only, so banked and dead revenue stay out", () => {
+    const kpis = computeKpis(deals, ANCHOR);
+    expect(kpis.pipelineValue).toBe(6000);
+    expect(kpis.totalSales).toBe(4000);
+    // 2000*0.25 + 4000*1.0
+    expect(kpis.weightedValue).toBe(4500);
+  });
+
+  test("ratios are null rather than zero when nothing has been decided", () => {
+    const open = [deal({ stage: "demo" })];
+    const kpis = computeKpis(open, ANCHOR);
+    // "We won 0% of our deals" is a very different claim from "nothing has
+    // closed yet", and a tile that prints 0% makes the first one.
+    expect(kpis.winRate).toBeNull();
+    expect(kpis.avgDaysToClose).toBeNull();
+    expect(kpis.avgDealSize).toBeNull();
+  });
+
+  test("an empty book produces no NaN anywhere", () => {
+    const kpis = computeKpis([], ANCHOR);
+    expect(kpis.totalSales).toBe(0);
+    expect(kpis.closeRate).toBeNull();
+    expect(Object.values(kpis).some((v) => typeof v === "number" && Number.isNaN(v))).toBe(false);
+  });
+
+  test("average days to close measures creation to close", () => {
+    const kpis = computeKpis(
+      [deal({ stage: "won", created_at: "2026-07-01T00:00:00.000Z", close_date: "2026-07-31" })],
+      ANCHOR,
+    );
+    expect(kpis.avgDaysToClose).toBe(30);
+  });
+});
+
+describe("percentChange", () => {
+  test("returns null against a zero baseline instead of Infinity", () => {
+    expect(percentChange(50, 0)).toBeNull();
+    expect(percentChange(150, 100)).toBe(50);
+    expect(percentChange(50, 100)).toBe(-50);
+  });
+});
+
+describe("buildMonthRange", () => {
+  test("produces a contiguous timeline, not just the months that have data", () => {
+    const months = buildMonthRange(ANCHOR, 11, 0);
+    expect(months.length).toBe(12);
+    expect(months[0].key).toBe("2025-09");
+    expect(months[11].key).toBe("2026-08");
+  });
+
+  test("spans a year boundary without repeating or skipping a month", () => {
+    const months = buildMonthRange(new Date("2026-01-15T00:00:00.000Z"), 3, 0);
+    expect(months.map((m) => m.key)).toEqual(["2025-10", "2025-11", "2025-12", "2026-01"]);
+  });
+});
+
+describe("wonDealsByMonth", () => {
+  test("buckets by close date and keeps empty months as zeroes", () => {
+    const series = wonDealsByMonth(
+      [
+        deal({ stage: "won", amount_usd: 1000, close_date: "2026-08-03" }),
+        deal({ stage: "won", amount_usd: 500, close_date: "2026-08-20" }),
+        deal({ stage: "won", amount_usd: 250, close_date: "2026-06-10" }),
+      ],
+      ANCHOR,
+    );
+    expect(series.length).toBe(12);
+    const august = series.find((b) => b.key === "2026-08");
+    expect(august?.value).toBe(1500);
+    expect(august?.count).toBe(2);
+    // The gap between June and August must stay visible as a real zero.
+    expect(series.find((b) => b.key === "2026-07")?.value).toBe(0);
+    expect(series.find((b) => b.key === "2026-06")?.count).toBe(1);
+  });
+
+  test("ignores deals that never closed won", () => {
+    const series = wonDealsByMonth(
+      [deal({ stage: "lost", close_date: "2026-08-03" }), deal({ stage: "demo" })],
+      ANCHOR,
+    );
+    expect(series.every((bucket) => bucket.count === 0)).toBe(true);
+  });
+});
+
+describe("projectedDealsByMonth", () => {
+  test("weights by probability and prefers the possible close date", () => {
+    const series = projectedDealsByMonth(
+      [
+        deal({
+          stage: "demo",
+          amount_usd: 4000,
+          probability: 25,
+          possible_close_date: "2026-09-10",
+        }),
+        deal({ stage: "proposal", amount_usd: 1000, probability: 100, close_date: "2026-09-20" }),
+      ],
+      ANCHOR,
+    );
+    const september = series.find((bucket) => bucket.key === "2026-09");
+    // 4000*0.25 + 1000*1.0 — a projection at face value would say 5000.
+    expect(september?.value).toBe(2000);
+    expect(september?.count).toBe(2);
+  });
+
+  test("excludes closed deals — a projection is about what is still winnable", () => {
+    const series = projectedDealsByMonth(
+      [
+        deal({ stage: "won", close_date: "2026-09-01" }),
+        deal({ stage: "lost", close_date: "2026-09-01" }),
+      ],
+      ANCHOR,
+    );
+    expect(series.every((bucket) => bucket.count === 0)).toBe(true);
+  });
+});
+
+describe("winRateByMonth", () => {
+  test("a month with no decisions is null, not zero", () => {
+    const series = winRateByMonth(
+      [
+        deal({ stage: "won", close_date: "2026-08-02" }),
+        deal({ stage: "lost", close_date: "2026-08-09" }),
+      ],
+      ANCHOR,
+    );
+    expect(series.find((m) => m.key === "2026-08")?.winRate).toBe(50);
+    expect(series.find((m) => m.key === "2026-07")?.winRate).toBeNull();
+    expect(series.find((m) => m.key === "2026-07")?.decided).toBe(0);
+  });
+});
+
+describe("stageMix", () => {
+  test("returns stages in pipeline order and drops the empty ones", () => {
+    const mix = stageMix([
+      deal({ stage: "demo" }),
+      deal({ stage: "demo" }),
+      deal({ stage: "won", amount_usd: 900 }),
+    ]);
+    expect(mix.map((slice) => slice.key)).toEqual(["demo", "won"]);
+    expect(mix[0].count).toBe(2);
+    expect(mix[1].value).toBe(900);
+  });
+});
+
+describe("lossReasonMix", () => {
+  test("groups by category, largest first, and keeps uncategorised losses visible", () => {
+    const mix = lossReasonMix([
+      deal({ stage: "lost", loss_reason_category: "Price too high", amount_usd: 100 }),
+      deal({ stage: "lost", loss_reason_category: "Price too high", amount_usd: 200 }),
+      deal({ stage: "lost", loss_reason_category: "Chose a competitor" }),
+      // Closed before categories existed — dropping it would make the
+      // recorded reasons look like the complete picture.
+      deal({ stage: "lost", loss_reason_category: null }),
+      deal({ stage: "won" }),
+    ]);
+    expect(mix[0]).toMatchObject({ label: "Price too high", count: 2, value: 300 });
+    expect(mix.map((s) => s.label)).toContain("Not recorded");
+    expect(mix.reduce((sum, slice) => sum + slice.count, 0)).toBe(4);
+  });
+});
+
+describe("newVsExistingBusiness", () => {
+  test("a customer's first win is new business and later wins are existing", () => {
+    const split = newVsExistingBusiness([
+      deal({ stage: "won", customer_id: "c1", amount_usd: 1000, close_date: "2026-01-10" }),
+      deal({ stage: "won", customer_id: "c1", amount_usd: 400, close_date: "2026-05-10" }),
+      deal({ stage: "won", customer_id: "c2", amount_usd: 600, close_date: "2026-03-10" }),
+    ]);
+    expect(split.newBusiness).toBe(1600);
+    expect(split.existing).toBe(400);
+  });
+
+  test("order of the input does not change the split", () => {
+    const rows = [
+      deal({ id: "b", stage: "won", customer_id: "c1", amount_usd: 400, close_date: "2026-05-10" }),
+      deal({
+        id: "a",
+        stage: "won",
+        customer_id: "c1",
+        amount_usd: 1000,
+        close_date: "2026-01-10",
+      }),
+    ];
+    // Sorted by close date internally, so the January deal is the first win
+    // regardless of which row the query happened to return first.
+    expect(newVsExistingBusiness(rows)).toEqual({ newBusiness: 1000, existing: 400 });
+  });
+
+  test("a deal with no customer counts as new — it cannot be shown to repeat", () => {
+    const split = newVsExistingBusiness([
+      deal({ stage: "won", customer_id: null, amount_usd: 100 }),
+      deal({ stage: "won", customer_id: null, amount_usd: 100 }),
+    ]);
+    expect(split).toEqual({ newBusiness: 200, existing: 0 });
+  });
+});
+
+describe("avgDaysToClose exclusions", () => {
+  // The seeded rows genuinely have close_date before created_at (one lost deal
+  // by 20 days, one won by 2). Clamping each to zero would report a confident
+  // "0 days to close"; including them raw reports "-1 days". Neither is true,
+  // so they are excluded and counted.
+  test("drops deals whose close date precedes creation, and says how many", () => {
+    const kpis = computeKpis(
+      [
+        deal({ stage: "won", created_at: "2026-07-29T00:00:00.000Z", close_date: "2026-07-27" }),
+        deal({ stage: "won", created_at: "2026-07-01T00:00:00.000Z", close_date: "2026-07-11" }),
+      ],
+      ANCHOR,
+    );
+    expect(kpis.avgDaysToClose).toBe(10);
+    expect(kpis.daysToCloseExcluded).toBe(1);
+  });
+
+  test("all-negative durations report nothing rather than a fabricated zero", () => {
+    const kpis = computeKpis(
+      [deal({ stage: "won", created_at: "2026-07-29T00:00:00.000Z", close_date: "2026-07-09" })],
+      ANCHOR,
+    );
+    expect(kpis.avgDaysToClose).toBeNull();
+    expect(kpis.daysToCloseExcluded).toBe(1);
+  });
+});

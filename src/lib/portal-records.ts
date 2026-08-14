@@ -57,6 +57,9 @@ export type DealRecord = {
   is_hidden_to_team: boolean;
   reward_rate_percent: number;
   commercial_approved: boolean;
+  /** Set only on lost deals — see DEAL_LOSS_REASONS. Null on every other stage. */
+  loss_reason_category: string | null;
+  loss_reason_detail: string | null;
   version: number;
   is_seed: boolean;
   created_at: string;
@@ -258,6 +261,30 @@ export type GlobalSearchResult = {
   group: "Deals" | "Partners" | "Product Catalog";
   items: GlobalSearchResultItem[];
 };
+
+/**
+ * Why deals are lost, as a bounded set.
+ *
+ * The free-text reason stays — it is the audit trail for a specific deal, and
+ * §9.15 requires it. But free text cannot be aggregated: every row is a unique
+ * sentence, so "what are we losing to?" has no answer across the book. The
+ * category is what Analytics groups by; the detail is what a human reads.
+ *
+ * Kept deliberately short. A long list gets answered by whichever option is
+ * nearest the cursor, and the tail never accumulates enough rows to mean
+ * anything.
+ */
+export const DEAL_LOSS_REASONS = [
+  "Price too high",
+  "Budget constraints",
+  "Feature limitations",
+  "Chose a competitor",
+  "Lost urgency / no decision",
+  "Timing — revisit later",
+  "Other",
+] as const;
+
+export type DealLossReason = (typeof DEAL_LOSS_REASONS)[number];
 
 /** Won and Lost are outcomes, not steps — nothing advances out of them. */
 export function isTerminalDealStage(stage: DealStage): boolean {

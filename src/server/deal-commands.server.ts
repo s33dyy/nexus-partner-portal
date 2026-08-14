@@ -716,8 +716,14 @@ export async function moveDealStageBackward(input: {
       // "decided". A deal back in Negotiation is neither, so it returns to the
       // middle option the app actually offers ("50% - Likely",
       // DEAL_PROBABILITY_OPTIONS). po_choice is cleared because the PO
-      // decision it recorded belongs to a win that no longer exists.
-      return { sql: "probability = $6, po_choice = NULL", values: [50] };
+      // decision it recorded belongs to a win that no longer exists, and the
+      // loss reason because the loss no longer exists either — leaving it
+      // would keep counting this deal in the loss-reason breakdown while it
+      // sits open in Negotiation. The deal_transitions row keeps the history.
+      return {
+        sql: "probability = $6, po_choice = NULL, loss_reason_category = NULL, loss_reason_detail = NULL",
+        values: [50],
+      };
     },
   });
 }
@@ -732,8 +738,16 @@ export async function markDealLost(input: {
   dealId: string;
   expectedVersion: number;
   reason: string;
+  /**
+   * Bounded category alongside the free-text reason, so Analytics can answer
+   * "what do we keep losing to?" — a question no amount of unique sentences
+   * can. Optional at this layer: pre-existing callers and seeded rows have no
+   * category, and refusing them would rewrite history rather than record it.
+   */
+  category?: string | null;
 }): Promise<CommandExecutionResult> {
   const reason = input.reason.trim();
+  const category = input.category?.trim() || null;
   if (!reason) {
     return {
       ok: false,
@@ -756,9 +770,10 @@ export async function markDealLost(input: {
       return { toStage: "lost", toStatus: "lost" };
     },
     extraSet: () => ({
-      sql: "probability = $6, close_date = $7",
-      values: [0, todayIsoDate()],
+      sql: "probability = $6, close_date = $7, loss_reason_category = $8, loss_reason_detail = $9",
+      values: [0, todayIsoDate(), category, reason.slice(0, 1000)],
     }),
+    extraPayload: { lossReasonCategory: category },
   });
 }
 

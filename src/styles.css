@@ -51,6 +51,9 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -130,11 +133,18 @@
   --input: oklch(0.885 0.009 260);
   --ring: oklch(0.55 0.13 265);
 
+  /* Categorical ramp. Eight, not five, because the pipeline donut has eight
+   * stages and recycling a colour across two of them would read as "these two
+   * are the same thing". Hues are spaced so neighbours in the ramp stay
+   * distinguishable when they land side by side in an arc. */
   --chart-1: oklch(0.55 0.18 265);
   --chart-2: oklch(0.65 0.15 190);
   --chart-3: oklch(0.62 0.15 155);
   --chart-4: oklch(0.75 0.15 75);
   --chart-5: oklch(0.6 0.2 20);
+  --chart-6: oklch(0.58 0.17 320);
+  --chart-7: oklch(0.62 0.13 230);
+  --chart-8: oklch(0.68 0.13 110);
 
   --sidebar: oklch(0.22 0.035 265);
   --sidebar-foreground: oklch(0.92 0.01 260);
@@ -188,6 +198,9 @@
   --chart-3: oklch(0.7 0.15 155);
   --chart-4: oklch(0.78 0.16 75);
   --chart-5: oklch(0.7 0.2 20);
+  --chart-6: oklch(0.72 0.16 320);
+  --chart-7: oklch(0.72 0.13 230);
+  --chart-8: oklch(0.78 0.13 110);
 
   --sidebar: oklch(0.16 0.025 265);
   --sidebar-foreground: oklch(0.92 0.01 260);

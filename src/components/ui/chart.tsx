@@ -220,7 +220,11 @@ const ChartTooltipContent = React.forwardRef<
                             {itemConfig?.label || item.name}
                           </span>
                         </div>
-                        {item.value && (
+                        {/* `!= null`, not truthiness: a value of 0 is a real
+                            data point, and the falsy check rendered it as a
+                            bare unstyled "0" outside the span. Any month with
+                            no deals hits this. */}
+                        {item.value != null && (
                           <span className="font-mono font-medium tabular-nums text-foreground">
                             {item.value.toLocaleString()}
                           </span>

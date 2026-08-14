@@ -356,6 +356,7 @@ function PipelinePage() {
               dealId: deal.id,
               expectedVersion: deal.version,
               reason: submission.reason,
+              category: submission.category,
             });
 
       if (!result.ok) {
