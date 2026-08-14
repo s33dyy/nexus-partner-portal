@@ -1,5 +1,3 @@
-import { read, utils } from "xlsx";
-
 import { buildCsv, downloadCsv } from "@/lib/csv-export";
 import { buildExportFilename } from "@/lib/export-files";
 
@@ -26,38 +24,12 @@ export type ImportValidationResult<TRow> = {
   errors: ImportValidationError[];
 };
 
-export function parseSpreadsheetRows(
-  input: ArrayBufferLike,
-  filename = "",
-): Array<Record<string, unknown>> {
-  return parseSpreadsheetFile(input, filename).rows;
-}
-
-export function parseSpreadsheetFile(
-  input: ArrayBufferLike,
-  filename = "",
-): ParsedSpreadsheet {
-  const lowerName = filename.trim().toLowerCase();
-  const workbook = lowerName.endsWith(".csv")
-    ? read(new TextDecoder().decode(new Uint8Array(input)).replace(/^\uFEFF/, ""), {
-        type: "string",
-      })
-    : read(input, { type: "array" });
-  const [firstSheetName] = workbook.SheetNames;
-  if (!firstSheetName) return { headers: [], rows: [] };
-  const sheet = workbook.Sheets[firstSheetName];
-  if (!sheet) return { headers: [], rows: [] };
-
-  const headerMatrix = utils.sheet_to_json<Array<unknown>>(sheet, { header: 1, defval: "" }) as Array<
-    Array<unknown>
-  >;
-  const headers = (headerMatrix[0] ?? [])
-    .map((value) => String(value ?? "").trim())
-    .filter((value) => value.length > 0);
-  const rows = utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-
-  return { headers, rows };
-}
+/**
+ * Parsing lives in spreadsheet-parse.ts, which is the only module that imports
+ * xlsx (~412KB). Keeping it out of this file is what lets the helpers below be
+ * imported by a route without shipping a spreadsheet parser to every visitor.
+ * Reach it with `await import("@/lib/spreadsheet-parse")` from the handler.
+ */
 
 export function downloadTemplateCsv(input: {
   filenameStem: string;

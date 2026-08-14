@@ -32,7 +32,6 @@ import { type TeamMemberRecord } from "@/lib/portal-records";
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
-  parseSpreadsheetFile,
   validateImportTemplate,
   type ImportValidationError,
 } from "@/lib/spreadsheet-import";
@@ -272,6 +271,7 @@ function PartnerTeamPage() {
     setImportErrors([]);
     setImportMessage(null);
     try {
+      const { parseSpreadsheetFile } = await import("@/lib/spreadsheet-parse");
       const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
       const templateErrors = validateImportTemplate(parsed, TEAM_IMPORT_TEMPLATE_COLUMNS);
       if (templateErrors.length > 0) {

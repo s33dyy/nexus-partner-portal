@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import type * as XLSX from "xlsx";
 
 import { type CsvColumn } from "@/lib/csv-export";
 import { sumRewardPoints, type RewardPointEventRecord } from "@/lib/rewards";
@@ -61,7 +61,10 @@ function normalizeInteger(value: unknown) {
   return Number.isFinite(numeric) ? numeric : Number.NaN;
 }
 
-function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
+function readRewardCatalogImportRowsFromWorkbook(
+  workbook: XLSX.WorkBook,
+  utils: typeof XLSX.utils,
+) {
   const firstSheet = workbook.SheetNames[0];
   if (!firstSheet) {
     throw new Error("The selected file does not contain a worksheet.");
@@ -73,7 +76,7 @@ function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
   }
 
   const rawRows =
-    (XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
+    (utils.sheet_to_json(sheet, { defval: "" }) as Array<Record<string, unknown>>) ?? [];
 
   return rawRows.map((row) =>
     Object.fromEntries(
@@ -89,16 +92,27 @@ function readRewardCatalogImportRowsFromWorkbook(workbook: XLSX.WorkBook) {
   );
 }
 
+/**
+ * xlsx (~412KB) is loaded on demand rather than at module scope, so that
+ * importing `calculateOutstandingRewardPoints` from this file — which the
+ * Rewards page does on every visit — no longer ships a spreadsheet parser.
+ * Already async, so the deferred import costs nothing at the call site.
+ */
 export async function readRewardCatalogImportRows(file: File) {
+  const { read, utils } = await import("xlsx");
   const extension = file.name.split(".").pop()?.toLowerCase();
 
   if (extension === "csv") {
-    const workbook = XLSX.read(await file.text(), { type: "string" });
-    return readRewardCatalogImportRowsFromWorkbook(workbook);
+    return readRewardCatalogImportRowsFromWorkbook(
+      read(await file.text(), { type: "string" }),
+      utils,
+    );
   }
 
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-  return readRewardCatalogImportRowsFromWorkbook(workbook);
+  return readRewardCatalogImportRowsFromWorkbook(
+    read(await file.arrayBuffer(), { type: "array" }),
+    utils,
+  );
 }
 
 export function validateRewardCatalogImportRows(

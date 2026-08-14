@@ -110,7 +110,6 @@ import {
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
-  parseSpreadsheetFile,
   validateImportTemplate,
 } from "@/lib/spreadsheet-import";
 
@@ -1026,6 +1025,7 @@ function DealsPage() {
     setImporting(true);
 
     try {
+      const { parseSpreadsheetFile } = await import("@/lib/spreadsheet-parse");
       const parsed = normalizeDealImportSpreadsheet(
         parseSpreadsheetFile(await file.arrayBuffer(), file.name),
       );

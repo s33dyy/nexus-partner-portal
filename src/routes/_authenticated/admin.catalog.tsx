@@ -31,7 +31,6 @@ import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
 import {
-  parseSpreadsheetFile,
   validateImportTemplate,
   downloadTemplateCsv,
   buildImportSummaryMessage,
@@ -253,6 +252,7 @@ function AdminCatalogPage() {
     setImportMessage(null);
 
     try {
+      const { parseSpreadsheetFile } = await import("@/lib/spreadsheet-parse");
       const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
       const templateErrors = validateImportTemplate(
         parsed,

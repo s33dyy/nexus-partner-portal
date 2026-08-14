@@ -37,7 +37,6 @@ import { ImportFeedback } from "@/lib/import-feedback";
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
-  parseSpreadsheetFile,
   validateImportTemplate,
   type ImportValidationError,
 } from "@/lib/spreadsheet-import";
@@ -432,6 +431,7 @@ function AdminUsersPage() {
     setImportErrors([]);
     setImportMessage(null);
     try {
+      const { parseSpreadsheetFile } = await import("@/lib/spreadsheet-parse");
       const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
       const templateErrors = validateImportTemplate(parsed, USER_IMPORT_TEMPLATE_COLUMNS);
       if (templateErrors.length > 0) {

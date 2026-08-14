@@ -5,7 +5,11 @@ import {
   CUSTOMER_IMPORT_TEMPLATE_COLUMNS,
 } from "@/lib/customer-import";
 import { buildCsv } from "@/lib/csv-export";
-import { DEAL_IMPORT_TEMPLATE_COLUMNS, DEAL_IMPORT_TEMPLATE_SAMPLE, validateDealImportRows } from "@/lib/deal-import";
+import {
+  DEAL_IMPORT_TEMPLATE_COLUMNS,
+  DEAL_IMPORT_TEMPLATE_SAMPLE,
+  validateDealImportRows,
+} from "@/lib/deal-import";
 import { validateImportTemplate } from "@/lib/spreadsheet-import";
 import { REWARD_CATALOG_IMPORT_TEMPLATE_COLUMNS as REWARD_TEMPLATE_COLUMNS } from "@/lib/reward-admin";
 import {
@@ -14,7 +18,7 @@ import {
   validateTeamImportRows,
 } from "@/lib/team-import";
 import { USER_IMPORT_TEMPLATE_COLUMNS, validateUserImportRows } from "@/lib/user-import";
-import { parseSpreadsheetFile } from "@/lib/spreadsheet-import";
+import { parseSpreadsheetFile } from "@/lib/spreadsheet-parse";
 
 test("validateUserImportRows normalizes valid rows and keeps template columns stable", () => {
   const result = validateUserImportRows([
@@ -197,7 +201,9 @@ test("validateImportTemplate rejects files missing required template columns", (
   ).toEqual([
     {
       rowNumber: 1,
-      messages: ["Missing required columns: Image Path, Category, Points Cost, Stock, Availability"],
+      messages: [
+        "Missing required columns: Image Path, Category, Points Cost, Stock, Availability",
+      ],
     },
   ]);
 });

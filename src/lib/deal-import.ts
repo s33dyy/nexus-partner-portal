@@ -15,7 +15,6 @@ import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   buildImportValidationResult,
-  parseSpreadsheetRows,
   type ParsedSpreadsheet,
   type ImportValidationError,
   type ImportValidationResult,
@@ -150,8 +149,7 @@ const DEAL_IMPORT_HEADER_LOOKUP = new Map<string, DealImportTemplateColumn>(
   DEAL_IMPORT_TEMPLATE_COLUMNS_ALL.flatMap((column) => {
     const aliases = [column.header, ...(DEAL_IMPORT_HEADER_ALIASES[column.key] ?? [])];
     return aliases.map(
-      (alias) =>
-        [alias.trim().toLowerCase(), column.key] as [string, DealImportTemplateColumn],
+      (alias) => [alias.trim().toLowerCase(), column.key] as [string, DealImportTemplateColumn],
     );
   }),
 );
@@ -233,15 +231,21 @@ export function getDealImportTemplateSample(
     Object.fromEntries(
       columns.map((column) => [
         column.key,
-        DEAL_IMPORT_TEMPLATE_SAMPLE_ROW[
-          column.key as keyof typeof DEAL_IMPORT_TEMPLATE_SAMPLE_ROW
-        ],
+        DEAL_IMPORT_TEMPLATE_SAMPLE_ROW[column.key as keyof typeof DEAL_IMPORT_TEMPLATE_SAMPLE_ROW],
       ]),
     ),
   ];
 }
 
-export function parseDealImportWorkbook(input: ArrayBufferLike, filename = "import.xlsx"): DealImportRow[] {
+/**
+ * Async because the xlsx parser is loaded on demand — see spreadsheet-parse.ts.
+ * Nothing calls this on a render path; it runs from a file-upload handler.
+ */
+export async function parseDealImportWorkbook(
+  input: ArrayBufferLike,
+  filename = "import.xlsx",
+): Promise<DealImportRow[]> {
+  const { parseSpreadsheetRows } = await import("@/lib/spreadsheet-parse");
   return parseSpreadsheetRows(input, filename);
 }
 
@@ -310,7 +314,8 @@ export function validateDealImportRows(
       notes: asTrimmedString(row.notes),
     };
 
-    if (requireAccountName && !normalizedRow.account_name) messages.push("Account name is required");
+    if (requireAccountName && !normalizedRow.account_name)
+      messages.push("Account name is required");
     if (!normalizedRow.contact_name) messages.push("Contact name is required");
     if (requireOwnerName && !normalizedRow.owner_name) messages.push("Owner name is required");
     if (!normalizedRow.region) messages.push("Region is required");

@@ -59,7 +59,6 @@ import {
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
-  parseSpreadsheetFile,
   validateImportTemplate,
   type ImportValidationError,
 } from "@/lib/spreadsheet-import";
@@ -630,6 +629,7 @@ function CustomersPage() {
     setImportErrors([]);
     setImportMessage(null);
     try {
+      const { parseSpreadsheetFile } = await import("@/lib/spreadsheet-parse");
       const parsed = parseSpreadsheetFile(await file.arrayBuffer(), file.name);
       const templateErrors = validateImportTemplate(parsed, CUSTOMER_IMPORT_TEMPLATE_COLUMNS);
       if (templateErrors.length > 0) {

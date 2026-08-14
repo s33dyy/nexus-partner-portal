@@ -17,7 +17,7 @@ function toArrayBuffer(buffer: Uint8Array) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
-test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workbook", () => {
+test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workbook", async () => {
   const workbook = utils.book_new();
   const sheet = utils.json_to_sheet([
     {
@@ -40,7 +40,7 @@ test("parseDealImportWorkbook reads rows from the first sheet of an xlsx workboo
   utils.book_append_sheet(workbook, sheet, "Deals");
 
   const workbookBytes = write(workbook, { bookType: "xlsx", type: "buffer" });
-  const rows = parseDealImportWorkbook(toArrayBuffer(workbookBytes));
+  const rows = await parseDealImportWorkbook(toArrayBuffer(workbookBytes));
 
   expect(rows).toHaveLength(1);
   expect(rows[0]?.account_name).toBe("Acme Systems");
@@ -160,7 +160,9 @@ test("partner-side deal templates use the reduced import shape", () => {
     "possible_close_date",
     "source",
   ]);
-  expect(getDealImportTemplateDownloadColumns({ mode: "partner" }).map((column) => column.header)).toEqual([
+  expect(
+    getDealImportTemplateDownloadColumns({ mode: "partner" }).map((column) => column.header),
+  ).toEqual([
     "Client",
     "Country",
     "Region",
@@ -189,22 +191,24 @@ test("partner-side deal templates use the reduced import shape", () => {
 });
 
 test("super-admin deal templates keep the wider current shape", () => {
-  expect(getDealImportTemplateColumns({ mode: "super_admin" }).map((column) => column.key)).toEqual([
-    "account_name",
-    "contact_name",
-    "owner_name",
-    "country",
-    "region",
-    "product",
-    "quantity",
-    "amount",
-    "currency_code",
-    "customer_budget",
-    "possible_close_date",
-    "probability",
-    "source",
-    "notes",
-  ]);
+  expect(getDealImportTemplateColumns({ mode: "super_admin" }).map((column) => column.key)).toEqual(
+    [
+      "account_name",
+      "contact_name",
+      "owner_name",
+      "country",
+      "region",
+      "product",
+      "quantity",
+      "amount",
+      "currency_code",
+      "customer_budget",
+      "possible_close_date",
+      "probability",
+      "source",
+      "notes",
+    ],
+  );
 });
 
 test("validateDealImportRows allows partner-role templates to omit auto-filled columns", () => {
@@ -309,7 +313,9 @@ test("validateDealImportRows rejects invalid partner stages", () => {
   expect(result.errors).toEqual([
     {
       rowNumber: 2,
-      messages: ["Stage must be one of sourced, demo, testing, qualified, proposal, negotiation, approved, won, or lost"],
+      messages: [
+        "Stage must be one of sourced, demo, testing, qualified, proposal, negotiation, approved, won, or lost",
+      ],
     },
   ]);
 });
