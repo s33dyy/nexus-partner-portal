@@ -18,6 +18,9 @@ export type CatalogItemRecord = {
   availability: string;
   benefits: string;
   catalog_kind?: string | null;
+  /** Product photo URL; null/absent is normal and the UI branches on it. */
+  image_path?: string | null;
+  image_alt?: string | null;
   is_seed?: boolean;
   created_at?: string;
   updated_at?: string;

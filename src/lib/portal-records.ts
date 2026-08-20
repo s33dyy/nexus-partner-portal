@@ -185,6 +185,9 @@ export type CatalogItemRecord = {
   is_seed: boolean;
   created_at: string;
   updated_at: string;
+  /** Product photo URL; null is normal and the UI branches on it. */
+  image_path: string | null;
+  image_alt: string | null;
 };
 
 export type AuditEventRecord = {

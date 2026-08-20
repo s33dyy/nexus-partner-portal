@@ -2105,3 +2105,12 @@ ALTER TABLE portal_deals ADD COLUMN IF NOT EXISTS loss_reason_detail TEXT;
 CREATE INDEX IF NOT EXISTS portal_deals_loss_reason_category_idx
   ON portal_deals (loss_reason_category)
   WHERE loss_reason_category IS NOT NULL;
+
+-- --- Product imagery -----------------------------------------------------------
+-- Matches the column that portal_news_posts and reward_catalog_items already
+-- use, so the catalogue reads the same way as every other pictured record and
+-- the existing <img src={image_path}> convention carries over unchanged.
+-- Nullable: a product without a photo is normal, and a broken <img> is worse
+-- than none, so the UI branches on null rather than rendering an empty box.
+ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS image_path TEXT;
+ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS image_alt TEXT;

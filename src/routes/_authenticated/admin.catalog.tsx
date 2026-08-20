@@ -510,28 +510,56 @@ function AdminCatalogPage() {
                       selectedItem?.id === item.id ? "bg-muted/40" : ""
                     }`}
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate font-medium">{item.product_name}</div>
-                        <Badge variant="secondary">
-                          {getCatalogKindLabel(normalizeCatalogKind(item.catalog_kind))}
-                        </Badge>
-                        <Badge variant="outline">{item.partner_tier}</Badge>
-                        {item.product_status ? (
-                          <Badge tone={resolveStatusTone(item.product_status)}>
-                            {item.product_status}
+                    {/* Fixed-size thumbnail so a row's height never depends on
+                        the image, and referrerPolicy because these are hosted
+                        on liveytech.com — the CRM should not leak which
+                        products a partner is browsing back to the marketing
+                        site's logs. onError hides a broken image rather than
+                        leaving the browser's placeholder glyph in the row. */}
+                    <div className="flex min-w-0 items-center gap-3">
+                      {item.image_path ? (
+                        <img
+                          src={item.image_path}
+                          alt={item.image_alt ?? item.product_name}
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                          className="h-11 w-11 shrink-0 rounded-md border bg-card object-contain p-0.5"
+                        />
+                      ) : (
+                        <div
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed text-[10px] text-muted-foreground"
+                          aria-hidden="true"
+                        >
+                          No photo
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="truncate font-medium">{item.product_name}</div>
+                          <Badge variant="secondary">
+                            {getCatalogKindLabel(normalizeCatalogKind(item.catalog_kind))}
                           </Badge>
-                        ) : null}
-                        {item.price_book_code ? (
-                          <Badge variant="outline">
-                            {item.price_book_code}
-                            {item.price_book_version ? ` v${item.price_book_version}` : ""}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {item.product_code ? `${item.product_code} · ` : ""}
-                        {item.sku} · {item.category}
+                          <Badge variant="outline">{item.partner_tier}</Badge>
+                          {item.product_status ? (
+                            <Badge tone={resolveStatusTone(item.product_status)}>
+                              {item.product_status}
+                            </Badge>
+                          ) : null}
+                          {item.price_book_code ? (
+                            <Badge variant="outline">
+                              {item.price_book_code}
+                              {item.price_book_version ? ` v${item.price_book_version}` : ""}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-sm text-muted-foreground">
+                          {item.product_code ? `${item.product_code} · ` : ""}
+                          {item.sku} · {item.category}
+                        </div>
                       </div>
                     </div>
                     <div className="text-left sm:text-right">

@@ -524,6 +524,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "is_seed",
     "created_at",
     "updated_at",
+    "image_path",
+    "image_alt",
   ],
   portal_team_members: [
     "id",
