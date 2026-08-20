@@ -83,6 +83,18 @@ const EMPTY_FORM: CatalogForm = {
   catalog_kind: "product",
 };
 
+/**
+ * Lookup values are stored snake_cased and lowercase (registered, in_stock),
+ * but form drafts and older rows can carry the display casing. Comparing
+ * through this stops a filter from silently matching nothing.
+ */
+function normalizeLookupValue(value: string | null | undefined): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 function uniqueStrings(values: Array<string | number | null | undefined>) {
   return [...new Set(values.map((value) => String(value ?? "").trim()).filter((value) => !!value))];
 }
@@ -392,14 +404,26 @@ function AdminCatalogPage() {
           value={String(moduleItems.length)}
           hint="Catalog records in this module"
         />
+        {/* Both of these compared against display-cased strings ("Registered",
+            "In stock") that the column has never held — every row stores the
+            lookup value (registered, in_stock), so both tiles read 0 no matter
+            what the catalogue contained. Normalised rather than re-cased at the
+            source, because the stored convention is the one the lookup lists,
+            the seed fixtures and the dropdowns all already agree on. */}
         <Metric
           label="Registered"
-          value={String(moduleItems.filter((item) => item.partner_tier === "Registered").length)}
+          value={String(
+            moduleItems.filter((item) => normalizeLookupValue(item.partner_tier) === "registered")
+              .length,
+          )}
           hint="Entry-level offers"
         />
         <Metric
           label="In stock"
-          value={String(moduleItems.filter((item) => item.availability === "In stock").length)}
+          value={String(
+            moduleItems.filter((item) => normalizeLookupValue(item.availability) === "in_stock")
+              .length,
+          )}
           hint="Ready to sell"
         />
       </div>
