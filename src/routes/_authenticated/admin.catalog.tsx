@@ -26,7 +26,7 @@ import {
   createDropdownCatalogItem,
   updateDropdownCatalogItem,
 } from "@/integrations/local/dropdown-sources";
-import { supabase } from "@/integrations/local/client";
+import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
@@ -98,34 +98,95 @@ function normalizeLookupValue(value: string | null | undefined): string {
 }
 
 /**
- * Live thumbnail for whatever URL is currently typed.
+ * Cloudinary-backed photo picker.
  *
- * Same 44x44 object-contain box the list rows use, so what the form previews
- * is exactly what the row will show. Renders a dashed placeholder while the
- * field is empty and on load failure, which is what makes a typo visible
- * before it is saved rather than after.
+ * The URL is never shown or typed. Product photos live in Cloudinary like
+ * news and reward images already do, so the field is a picker plus a preview
+ * of the actual image — a raw URL box put the burden of hosting on whoever
+ * was adding the product, and made a typo indistinguishable from a product
+ * that genuinely has no photo.
+ *
+ * The stored value is still a URL (Cloudinary's secure_url), which is what
+ * keeps the imported liveytech.com photos and newly uploaded ones renderable
+ * through the same <img src={image_path}>.
  */
-function ImagePreview({ src, alt }: { src: string; alt: string }) {
+function ProductPhotoField({
+  inputId,
+  value,
+  alt,
+  uploading,
+  onPick,
+  onClear,
+}: {
+  inputId: string;
+  value: string;
+  alt: string;
+  uploading: boolean;
+  onPick: (file: File) => void;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [failed, setFailed] = useState(false);
-  const trimmed = src.trim();
+  const trimmed = value.trim();
 
   useEffect(() => setFailed(false), [trimmed]);
 
-  if (!trimmed || failed) {
-    return (
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed text-[10px] text-muted-foreground">
-        {failed ? "Bad URL" : "No photo"}
-      </div>
-    );
-  }
   return (
-    <img
-      src={trimmed}
-      alt={alt || "Product preview"}
-      referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
-      className="h-11 w-11 shrink-0 rounded-md border bg-card object-contain p-0.5"
-    />
+    <div className="flex items-start gap-3">
+      <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted/20">
+        {trimmed && !failed ? (
+          <img
+            src={trimmed}
+            alt={alt || "Product photo"}
+            referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+            className="h-full w-full object-contain p-1"
+          />
+        ) : (
+          <span className="px-1 text-center text-[10px] leading-tight text-muted-foreground">
+            {failed ? "Image failed to load" : "No photo"}
+          </span>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1 space-y-2">
+        <input
+          id={inputId}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          ref={inputRef}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onPick(file);
+            // Cleared so picking the same file twice still fires onChange.
+            event.currentTarget.value = "";
+          }}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+          >
+            {uploading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
+            {trimmed ? "Replace photo" : "Upload photo"}
+          </Button>
+          {trimmed ? (
+            <Button type="button" variant="ghost" size="sm" disabled={uploading} onClick={onClear}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">PNG, JPG or WEBP. Stored in Cloudinary.</p>
+      </div>
+    </div>
   );
 }
 
@@ -164,6 +225,7 @@ function AdminCatalogPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CatalogForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<
@@ -334,6 +396,28 @@ function AdminCatalogPage() {
       if (importInputRef.current) {
         importInputRef.current.value = "";
       }
+    }
+  };
+
+  /**
+   * Uploads to the same Cloudinary account and server function that news and
+   * reward images use, under a "catalog" folder so product shots are not
+   * mixed in with them. The handler is super_admin gated server-side, which
+   * this page already is.
+   */
+  const uploadPhoto = async (file: File) => {
+    setUploadingImage(true);
+    try {
+      const result = await uploadRewardImage({ file, folder: "catalog" });
+      if (result.error || !result.data) {
+        throw new Error(result.error?.message ?? "Image upload failed");
+      }
+      setDraft((current) => ({ ...current, image_path: result.data.secure_url }));
+      toast.success("Photo uploaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Image upload failed");
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -709,22 +793,15 @@ function AdminCatalogPage() {
                   </div>
                 </Field>
               </div>
-              <Field label="Product photo URL">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
-                      value={draft.image_path}
-                      onChange={(e) =>
-                        setDraft((value) => ({ ...value, image_path: e.target.value }))
-                      }
-                      placeholder="https://liveytech.com/wp-content/uploads/..."
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Leave blank to show a placeholder instead of a broken image.
-                    </p>
-                  </div>
-                  <ImagePreview src={draft.image_path} alt={draft.product_name} />
-                </div>
+              <Field label="Product photo">
+                <ProductPhotoField
+                  inputId="catalog_photo_create"
+                  value={draft.image_path}
+                  alt={draft.product_name}
+                  uploading={uploadingImage}
+                  onPick={(file) => void uploadPhoto(file)}
+                  onClear={() => setDraft((value) => ({ ...value, image_path: "" }))}
+                />
               </Field>
               <Field label="Benefits">
                 <Textarea
@@ -872,22 +949,15 @@ function AdminCatalogPage() {
                   </div>
                 </Field>
               </div>
-              <Field label="Product photo URL">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
-                      value={draft.image_path}
-                      onChange={(e) =>
-                        setDraft((value) => ({ ...value, image_path: e.target.value }))
-                      }
-                      placeholder="https://liveytech.com/wp-content/uploads/..."
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Leave blank to show a placeholder instead of a broken image.
-                    </p>
-                  </div>
-                  <ImagePreview src={draft.image_path} alt={draft.product_name} />
-                </div>
+              <Field label="Product photo">
+                <ProductPhotoField
+                  inputId="catalog_photo_edit"
+                  value={draft.image_path}
+                  alt={draft.product_name}
+                  uploading={uploadingImage}
+                  onPick={(file) => void uploadPhoto(file)}
+                  onClear={() => setDraft((value) => ({ ...value, image_path: "" }))}
+                />
               </Field>
               <Field label="Benefits">
                 <Textarea
