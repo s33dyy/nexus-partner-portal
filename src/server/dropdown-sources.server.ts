@@ -405,6 +405,7 @@ export async function createCatalogItemFromDropdown(input: {
   availability?: string;
   benefits?: string;
   catalog_kind?: CatalogKind;
+  image_path?: string | null;
 }) {
   // admin.catalog.tsx (the only UI caller) is itself gated to super_admin —
   // this enforces that server-side too.
@@ -439,6 +440,7 @@ export async function updateCatalogItemFromDropdown(input: {
   availability?: string;
   benefits?: string;
   catalog_kind?: CatalogKind;
+  image_path?: string | null;
 }) {
   const auth = await requireAuthenticatedCaller();
   assertSuperAdminCaller(auth);
@@ -461,6 +463,7 @@ export async function updateCatalogItemFromDropdown(input: {
     "availability",
     "benefits",
     "catalog_kind",
+    "image_path",
     "updated_at",
   ];
   const updateColumns = orderedColumns.filter((column) => columns.has(column));

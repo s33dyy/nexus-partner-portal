@@ -133,6 +133,9 @@ test("buildCatalogCreateValues turns dropdown creates into real catalog rows", (
     availability: "In stock",
     benefits: "Video and audio",
     catalog_kind: "combo",
+    // Absent input means no photo, and null is what the column stores —
+    // "" would render a broken <img> instead of the placeholder slot.
+    image_path: null,
   });
 });
 

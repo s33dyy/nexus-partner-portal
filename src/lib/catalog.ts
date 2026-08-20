@@ -54,6 +54,7 @@ export type CatalogCreateValues = {
   availability: string;
   benefits: string;
   catalog_kind: CatalogKind;
+  image_path: string | null;
 };
 
 export type CatalogInsertRow = CatalogCreateValues & {
@@ -213,6 +214,7 @@ export function buildCatalogCreateValues(input: {
   availability?: string;
   benefits?: string;
   catalog_kind?: CatalogKind;
+  image_path?: string | null;
 }): CatalogCreateValues {
   const productName = input.product_name.trim();
   return {
@@ -226,6 +228,10 @@ export function buildCatalogCreateValues(input: {
     availability: input.availability?.trim() || "In stock",
     benefits: input.benefits?.trim() || "",
     catalog_kind: normalizeCatalogKind(input.catalog_kind),
+    // Empty means "no photo", which is null in the column rather than "" —
+    // the UI branches on null to show its placeholder slot, and an empty
+    // string would render a broken <img> instead.
+    image_path: input.image_path?.trim() || null,
   };
 }
 

@@ -68,6 +68,7 @@ type CatalogForm = {
   availability: string;
   benefits: string;
   catalog_kind: CatalogKind;
+  image_path: string;
 };
 
 const EMPTY_FORM: CatalogForm = {
@@ -81,6 +82,7 @@ const EMPTY_FORM: CatalogForm = {
   availability: "In stock",
   benefits: "",
   catalog_kind: "product",
+  image_path: "",
 };
 
 /**
@@ -93,6 +95,38 @@ function normalizeLookupValue(value: string | null | undefined): string {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+/**
+ * Live thumbnail for whatever URL is currently typed.
+ *
+ * Same 44x44 object-contain box the list rows use, so what the form previews
+ * is exactly what the row will show. Renders a dashed placeholder while the
+ * field is empty and on load failure, which is what makes a typo visible
+ * before it is saved rather than after.
+ */
+function ImagePreview({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const trimmed = src.trim();
+
+  useEffect(() => setFailed(false), [trimmed]);
+
+  if (!trimmed || failed) {
+    return (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed text-[10px] text-muted-foreground">
+        {failed ? "Bad URL" : "No photo"}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={trimmed}
+      alt={alt || "Product preview"}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="h-11 w-11 shrink-0 rounded-md border bg-card object-contain p-0.5"
+    />
+  );
 }
 
 function uniqueStrings(values: Array<string | number | null | undefined>) {
@@ -220,6 +254,7 @@ function AdminCatalogPage() {
       stock: selectedItem.stock,
       availability: selectedItem.availability,
       benefits: selectedItem.benefits,
+      image_path: selectedItem.image_path ?? "",
       catalog_kind: normalizeCatalogKind(selectedItem.catalog_kind),
     });
   }, [selectedItem]);
@@ -674,6 +709,23 @@ function AdminCatalogPage() {
                   </div>
                 </Field>
               </div>
+              <Field label="Product photo URL">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Input
+                      value={draft.image_path}
+                      onChange={(e) =>
+                        setDraft((value) => ({ ...value, image_path: e.target.value }))
+                      }
+                      placeholder="https://liveytech.com/wp-content/uploads/..."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave blank to show a placeholder instead of a broken image.
+                    </p>
+                  </div>
+                  <ImagePreview src={draft.image_path} alt={draft.product_name} />
+                </div>
+              </Field>
               <Field label="Benefits">
                 <Textarea
                   value={draft.benefits}
@@ -820,6 +872,23 @@ function AdminCatalogPage() {
                   </div>
                 </Field>
               </div>
+              <Field label="Product photo URL">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Input
+                      value={draft.image_path}
+                      onChange={(e) =>
+                        setDraft((value) => ({ ...value, image_path: e.target.value }))
+                      }
+                      placeholder="https://liveytech.com/wp-content/uploads/..."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave blank to show a placeholder instead of a broken image.
+                    </p>
+                  </div>
+                  <ImagePreview src={draft.image_path} alt={draft.product_name} />
+                </div>
+              </Field>
               <Field label="Benefits">
                 <Textarea
                   value={draft.benefits}
@@ -842,6 +911,7 @@ function AdminCatalogPage() {
                       stock: selectedItem.stock,
                       availability: selectedItem.availability,
                       benefits: selectedItem.benefits,
+                      image_path: selectedItem.image_path ?? "",
                       catalog_kind: normalizeCatalogKind(selectedItem.catalog_kind),
                     })
                   }
