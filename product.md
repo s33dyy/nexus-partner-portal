@@ -6089,3 +6089,268 @@ Blueprint version 1.0 is declared implementation-ready because its authoring rev
 - phase exit gates are measurable.
 
 This document is the finished-product authority. Implementation tickets, designs, schema migrations, API contracts, test cases, and operating runbooks must reference its section and, where relevant, Source ID and Test ID.
+
+---
+
+## 24. Distributor Management and Stock Automation
+
+Chapter 24 is additive to Blueprint v1.0. It defines the LIVEY Distributor Management System (DMS) core: how a Distributor requests physical product, how that request is approved through the governed Assignment hierarchy of Section 5, how stock is tracked per SKU and per location, and which Tasks, Notifications, Activity events, and inventory evidence each step must produce.
+
+It does not redefine any term from Sections 3, 5, 8, 10, or 11. "Distributor" remains the restricted LIVEY-internal, participant-gated role of Section 5.4. "Task" remains the work item of Section 10 with its own five states and eight transitions. "Notification" remains the recipient-resolved delivery of Section 11. This chapter only adds a domain that consumes them.
+
+### 24.1 Scope and non-goals
+
+In scope for v1:
+
+- integer quantity tracking per governed Product SKU (Section 9.4) and per stock location;
+- a Distributor-initiated stock request with a governed approval, fulfilment, dispatch, and receipt lifecycle;
+- an append-only inventory movement ledger plus a row-locked balance projection;
+- automatic Task and Notification generation at every workflow step, with hierarchy escalation on SLA breach;
+- manual, reasoned opening balances and corrections posted by Super Admin.
+
+Explicit non-goals for v1, which must not be implied by any surface:
+
+- integration with any named external DMS/ERP vendor;
+- serial, batch, lot, or expiry tracking;
+- CSV or spreadsheet import of stock;
+- route optimisation, delivery scheduling, or carrier tracking;
+- claims, schemes, or distributor incentive settlement;
+- offline mobile synchronisation;
+- supplier purchase orders and inbound procurement.
+
+`portal_catalog_items.stock` is a legacy global catalogue count. It is not an inventory ledger, it is not per-location, and it is never read or written as DMS inventory truth.
+
+### 24.2 Stock model
+
+A **stock location** is a named physical place that holds stock. Every location carries a governed tenant, organisation tenant, and geography node, exactly like every other governed record in Section 5.
+
+Two location types exist in v1:
+
+| Type | Meaning | Distributor Assignment | Custodian Assignment |
+| --- | --- | --- | --- |
+| `livey_warehouse` | LIVEY-held stock available to fulfil requests | absent | required for fulfilment |
+| `distributor` | Stock held by one Distributor | required, and unique to that location | optional |
+
+A `distributor` location has exactly one owning Distributor Assignment. A `livey_warehouse` location has none. This is a database constraint, not a convention.
+
+A **balance** is the projection of all movements for one (SKU, location) pair. Five quantities are displayed, and only the first, second, and fourth are stored:
+
+| Quantity | Stored | Meaning |
+| --- | --- | --- |
+| On hand | yes | Units physically present at the location |
+| Reserved | yes | On-hand units already committed to an approved request line |
+| Available | derived | `on_hand - reserved - damaged` |
+| In transit | derived | Units dispatched from a source location and not yet received at the destination |
+| Damaged | yes | On-hand units withdrawn from sale pending write-off |
+
+Available is computed in SQL as `on_hand_quantity - reserved_quantity - damaged_quantity` and is never stored, so it cannot drift from its inputs. Every stored quantity carries a non-negative database check.
+
+A **movement** is one immutable ledger row. It records type, SKU, source location, destination location, quantity, the request line it settles (if any), the acting user and Assignment, a correlation ID, a mandatory reason for every manual type, the before and after quantities on both sides, and a unique idempotency key. Movements are never updated and never deleted; a mistake is corrected by posting a compensating movement with a reason.
+
+Movement types:
+
+| Type | Source | Destination | Effect |
+| --- | --- | --- | --- |
+| `opening_balance` | — | required | Establishes the first on-hand quantity for a (SKU, location) pair |
+| `receipt` | — | required | Increases on hand from outside the tracked system |
+| `reservation` | required | — | Increases reserved at the source; on hand unchanged |
+| `reservation_release` | required | — | Decreases reserved at the source; on hand unchanged |
+| `dispatch` | required | required | Decreases on hand and reserved at the source; creates in-transit units |
+| `delivery` | required | required | Increases on hand at the destination; settles in-transit units |
+| `transfer` | required | required | Moves on hand between locations in one step |
+| `damage` | required | — | Increases damaged at the source; on hand unchanged |
+| `adjustment` | required or destination | the other | Reasoned correction in either direction |
+
+The projection must always equal the ledger. For every (SKU, location) pair, the sum of the ledger's signed effects equals the stored balance row. This is a reconciliation invariant, testable at any time, and a divergence is an incident, not a rounding difference.
+
+### 24.3 Stock request
+
+A **stock request** is a Distributor's governed ask for product to be delivered to one of its own locations. It carries a human-readable identifier of the form `DMS-000001`, the requester's user ID, the Distributor Assignment snapshotted at submission, the direct manager Assignment snapshotted at submission, the destination location, an optional linked Deal, an optional linked Customer, a required-by date, a priority, a mandatory reason, an optimistic `version`, and a client-supplied idempotency key that is unique across the table.
+
+Snapshotting is normative. The approving authority is the `manager_assignment_id` of the requester's active Distributor Assignment **as it stood at submission**. A later reorganisation does not move an in-flight request to a different approver, and a request never resolves its approver lazily at approval time.
+
+A **request line** is one SKU on one request. Its quantities are:
+
+| Quantity | Written by | Invariant |
+| --- | --- | --- |
+| `requested_quantity` | submission | `> 0` |
+| `approved_quantity` | review | `0 <= approved <= requested` |
+| `reserved_quantity` | allocation | `0 <= reserved <= approved` |
+| `dispatched_quantity` | dispatch | `0 <= dispatched <= reserved` |
+| `received_quantity` | receipt | `0 <= received <= dispatched` |
+
+Every quantity is a positive safe integer. Fractional, zero-line, negative, and non-finite quantities are rejected at the contract layer before any transaction opens. A SKU may appear at most once per request.
+
+#### 24.3.1 States
+
+| State | Meaning |
+| --- | --- |
+| `submitted` | Awaiting the snapped manager's decision |
+| `approved` | Manager approved quantities and source locations; awaiting allocation |
+| `awaiting_stock` | Approved, but no approved line can be reserved from available stock |
+| `partially_allocated` | Some but not all approved units are reserved |
+| `allocated` | Every approved unit is reserved |
+| `dispatched` | Every reserved unit has left its source location |
+| `partially_received` | Some but not all dispatched units are confirmed at the destination |
+| `received` | Every dispatched unit is confirmed at the destination. Terminal |
+| `exception` | A problem was reported and the request needs human recovery |
+| `rejected` | Manager declined. Terminal |
+| `cancelled` | Requester withdrew before any dispatch. Terminal |
+
+#### 24.3.2 Permitted transitions
+
+| From | To |
+| --- | --- |
+| `submitted` | `approved`, `rejected`, `cancelled`, `exception` |
+| `approved` | `awaiting_stock`, `partially_allocated`, `allocated`, `cancelled`, `exception` |
+| `awaiting_stock` | `partially_allocated`, `allocated`, `cancelled`, `exception` |
+| `partially_allocated` | `allocated`, `dispatched`, `cancelled`, `exception` |
+| `allocated` | `dispatched`, `cancelled`, `exception` |
+| `dispatched` | `partially_received`, `received`, `exception` |
+| `partially_received` | `received`, `exception` |
+| `exception` | `approved`, `awaiting_stock`, `partially_allocated`, `allocated`, `dispatched`, `partially_received`, `cancelled` |
+| `received`, `rejected`, `cancelled` | — (terminal) |
+
+Any pair not listed above is rejected by the server, including a self-transition and any exit from a terminal state. There is no hard delete of a request, a line, a movement, or a transition row.
+
+Cancellation is permitted only while no unit has been dispatched. Once `dispatched_quantity > 0` on any line, the request can only move forward to receipt or sideways to `exception`.
+
+#### 24.3.3 Derived status
+
+The header status is derived from line quantities, never written directly by a client. Given a request whose lines have been reviewed:
+
+1. if every line's `received_quantity` equals its `dispatched_quantity` and at least one unit was dispatched, the status is `received`;
+2. otherwise if any `received_quantity > 0`, the status is `partially_received`;
+3. otherwise if every line's `dispatched_quantity` equals its `reserved_quantity` and at least one unit was reserved, the status is `dispatched`;
+4. otherwise if every line's `reserved_quantity` equals its `approved_quantity` and at least one unit was approved, the status is `allocated`;
+5. otherwise if any `reserved_quantity > 0`, the status is `partially_allocated`;
+6. otherwise the status is `awaiting_stock`.
+
+`submitted`, `approved`, `exception`, `rejected`, and `cancelled` are set by their own explicit commands and are not derived.
+
+### 24.4 Actors and authority
+
+| Step | Permitted actor |
+| --- | --- |
+| Submit | The requesting user, acting on their own active `restricted_distributor` Assignment, to a `distributor` location owned by that same Assignment |
+| Approve / reject | The user holding the request's snapped `manager_assignment_id`, while that Assignment is active |
+| Allocate / dispatch | The custodian Assignment of the line's source location |
+| Confirm receipt | The requester, for the request's own destination location |
+| Report / resolve Exception | The requester, the snapped manager, the custodian of an involved location, or Super Admin |
+| Create location, post manual movement | Super Admin |
+
+Super Admin may act on every location and request, but never bypasses a transition rule, a quantity invariant, an idempotency key, or a terminal state. Authority is never inferred from a role string alone: the server resolves the governed actor, loads the relevant Assignment, and verifies it is active. An ended, suspended, or revoked Assignment fails closed at every step.
+
+A Distributor sees only its own locations, requests, movements, and balances. Two Distributors under the same Partner cannot see each other's stock, requests, or request existence. Internal approval rationale is never exposed to the requester beyond the manager's own decision reason.
+
+#### 24.4.1 Role capability matrix
+
+| Role | Create | Read | Update | Delete |
+| --- | --- | --- | --- | --- |
+| `super_admin` | yes | yes | yes | no |
+| `rm` | no | yes | yes | no |
+| `pam` | no | yes | yes | no |
+| `restricted_distributor` | yes | yes | yes | no |
+| `kam`, `isr`, `livey_support`, `partner_admin`, `partner_user` | no | no | no | no |
+
+Delete is `no` for every role including Super Admin, because Section 24.2 forbids destroying inventory history. Read for `rm`/`pam` is the ability to review requests within their own governed scope; it is not blanket visibility, and it never includes another Distributor's balances.
+
+Safe fields exposed to a Distributor on its own request: human ID, status, priority, required-by date, its own reason, each line's SKU, requested/approved/reserved/dispatched/received quantities, destination location, linked Deal/Customer it is already tagged on, the manager's decision reason, timestamps, and the next owner's role label. Everything else — including source location totals, other requests' quantities, and any location the Distributor does not own — is withheld.
+
+### 24.5 Workflow automation
+
+Every workflow step creates its Tasks and Notifications inside the same database transaction as the state change. There is no post-commit best-effort step, because a Task that is only sometimes created is worse than no Task.
+
+Generated Tasks carry an `automation_source`, an `automation_template_version`, and a stable `automation_key`. The key is unique among open automation Tasks, so a replayed command completes without producing a second Task. Notifications carry a subject type, subject ID, action URL, and a recipient-specific `event_key` that is unique per `(user_id, event_key)`, so one recipient receives one Notification per event while different recipients each receive their own.
+
+Automation Task keys:
+
+| Event | Key |
+| --- | --- |
+| Submission | `stock-request:<requestId>:manager-approval:<managerAssignmentId>` |
+| Approval | `stock-request:<requestId>:fulfilment:<custodianAssignmentId>` |
+| Dispatch | `stock-request:<requestId>:confirm-receipt:<requesterUserId>` |
+| SLA escalation | `stock-request:<requestId>:approval-escalation:<escalationAssignmentId>` |
+
+#### 24.5.1 Recipient matrix
+
+| Event | Task created for | Task completed | Notified |
+| --- | --- | --- | --- |
+| Submission | Snapped manager | — | Snapped manager |
+| Approval | Custodian of each approved source location | Manager approval Task | Requester, custodian |
+| Rejection | — | Manager approval Task | Requester |
+| Shortage (`awaiting_stock`) | — | — | Requester, custodian, snapped manager |
+| Allocation | — | — | Requester, custodian |
+| Dispatch | Requester | Fulfilment Task | Requester |
+| Receipt | — | Confirm-receipt Task | Requester, custodian, snapped manager |
+| Cancellation | — | Every open automation Task for the request | Snapped manager, custodian if allocation had started |
+| Exception | Snapped manager | — | Requester, snapped manager, Super Admin fallback |
+| SLA escalation | Manager's own manager, or the Super Admin fallback | — | Snapped manager, escalation recipient |
+
+Every Notification carries an action URL that deep-links to the request in the Distribution workspace.
+
+#### 24.5.2 Escalation
+
+The approval Task carries a due date derived from the request's priority. When the scheduled sweep finds an open approval Task past due, it notifies the snapped manager and creates exactly one escalation Task for that manager's own active `manager_assignment_id`. If no valid ancestor Assignment exists, one Task is routed to the configured Super Admin fallback and the reason is recorded on the Task. The sweep is idempotent: repeated runs neither duplicate the escalation Task nor re-notify.
+
+### 24.6 Surfaces
+
+The standalone `/distribution` workspace is the only place DMS state is written. It has four tabs — Requests, Stock, Movements, Exceptions — each a structured-filter table with no free-text global search, consistent with Section 4.
+
+| Tab | Columns |
+| --- | --- |
+| Requests | Request ID, Distributor, manager, required date, line summary, progress, status, next owner, updated |
+| Stock | SKU/product, location, on hand, reserved, available, in transit, damaged, updated |
+| Movements | Time, type, SKU, source, destination, quantity, request, actor, reason |
+| Exceptions | Request, problem, current owner, age, next action |
+
+Deals and Customers expose contextual entry points that deep-link into the workspace with the record prefilled:
+
+- Deal: `/distribution?tab=requests&newRequest=true&dealId=<deal-id>`
+- Customer: `/distribution?tab=requests&newRequest=true&customerId=<customer-id>`
+
+Deals and Customers never duplicate the request form's state and never read or write a DMS table directly. Track Stock links carry `requestId`, `productSkuId`, or `locationId` and open the movement history.
+
+The workspace renders an action only when the server-supplied `allowedActions` array contains it, and every command re-checks that authority server-side. A role name that merely looks powerful never earns a button.
+
+### 24.7 Readiness and rollback
+
+The entire Distribution surface is gated behind a server-evaluated `distribution-core` flag that is disabled by default. Evaluation fails closed: a missing flag row, an unmet dependency, or a database error all resolve to disabled, for every role including Super Admin. Hiding is enforced in three places that must agree — navigation, the direct route, and every command — so a hidden surface cannot be reached by typing its URL or replaying its server function.
+
+Rollback disables `distribution-core` first. Movement, request, line, and transition history is never deleted as part of a rollback; the data stays and the surface goes away.
+
+### 24.8 Future adapter contract
+
+An external DMS or ERP adapter, if one is ever built, is a consumer of the commands in this chapter and of the outbox envelopes they emit. It is not a second source of truth, it does not write balances directly, and it does not gain a private path around the transition and quantity rules. Until such an adapter exists and is configured, no surface may claim, imply, or simulate one.
+
+### 24.9 Acceptance and test catalogue
+
+These IDs extend Section 21 and are additive to it.
+
+| Test ID | Scenario | Expected result |
+| --- | --- | --- |
+| DMS-001 | Distributor submits a request for two SKUs to its own location | Request is created `submitted` with a `DMS-nnnnnn` human ID, both lines stored, and the manager Assignment snapped from the active Distributor Assignment |
+| DMS-002 | Distributor submits to a location it does not own | Denied; the location's existence is not revealed |
+| DMS-003 | Distributor with an ended, suspended, or revoked Assignment submits | Denied; no request row is created |
+| DMS-004 | Distributor's Assignment has no live `manager_assignment_id` | Submission is refused with a policy denial, not routed to an arbitrary manager |
+| DMS-005 | The same submission is replayed with the same idempotency key | Exactly one request, one Task, and one Notification exist; the original result is returned |
+| DMS-006 | Snapped manager approves with reduced quantities and source locations | Lines carry `approved_quantity <= requested_quantity`; status leaves `submitted`; the approval Task closes and a fulfilment Task opens for each custodian |
+| DMS-007 | An RM or PAM unrelated to the snapped Assignment attempts approval | Denied; the request is unchanged |
+| DMS-008 | Manager rejects with a reason | Status is `rejected` and terminal; the approval Task closes; the requester is notified once |
+| DMS-009 | Manager approves more than was requested | Rejected by the quantity invariant before any write |
+| DMS-010 | Custodian allocates when available stock covers every approved unit | Reservation movements are posted, reserved rises, available falls, and the status becomes `allocated` |
+| DMS-011 | Custodian allocates when available stock covers part of the request | Status becomes `partially_allocated`; the shortfall is notified to requester, custodian, and manager |
+| DMS-012 | No approved line can be reserved at all | Status becomes `awaiting_stock` and the shortage recipients are notified |
+| DMS-013 | Two custodians concurrently allocate the last available units | Row locks admit exactly one winner; the loser is refused with no partial write |
+| DMS-014 | Custodian dispatches allocated units | On hand and reserved fall at the source, in-transit units appear, the fulfilment Task closes, and a confirm-receipt Task opens for the requester |
+| DMS-015 | Requester confirms receipt of part of the dispatched quantity | Status becomes `partially_received`; destination on hand rises by exactly the confirmed quantity |
+| DMS-016 | Requester confirms the remaining quantity | Status becomes `received` and terminal; the confirm-receipt Task closes; requester, custodian, and manager are notified |
+| DMS-017 | Requester attempts to confirm more than was dispatched | Rejected by the quantity invariant |
+| DMS-018 | Requester cancels before any dispatch | Status becomes `cancelled`; reservations are released back to available; every open automation Task for the request closes |
+| DMS-019 | Requester attempts to cancel after a partial dispatch | Denied; the request stays on its forward path |
+| DMS-020 | An Exception is reported and later resolved | Status moves to `exception` and back to the recorded prior state; history retains both transitions; nothing is deleted |
+| DMS-021 | Approval Task passes its due date | Exactly one escalation Task is created for the manager's own manager, or for the Super Admin fallback with a recorded reason; a second sweep creates nothing further |
+| DMS-022 | An unrelated Distributor requests the request, its balances, its movements, or its deep link directly | Every path denies consistently without revealing existence |
+| DMS-023 | `queryTable` is called for any DMS table through the generic client path | Access denied for every role, including Super Admin |
+| DMS-024 | Balance projection is compared with the movement ledger for every fixture pair | The projection equals the ledger sum exactly |
+| DMS-025 | `distribution-core` is disabled | Navigation hides Distribution, the direct route renders the unavailable page without issuing a DMS query, and every DMS command is denied for every role |

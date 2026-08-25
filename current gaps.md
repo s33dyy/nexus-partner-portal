@@ -979,3 +979,41 @@ root incorrectly picking up `e2e/*.spec.ts` (Playwright specs, not `bun:test` on
 crashing on both — a pre-existing, unrelated test-tooling gap, not a code defect. Every future
 session verifying a fix against "the pre-existing failure baseline" should scope with
 `bun test src scripts` (excludes `e2e/`) and expect exactly one known failure, not three.
+
+---
+
+## 23. Addendum — 2026-08-25 Distributor Management (DMS) baseline
+
+Recorded as the pre-implementation baseline for `product.md` §24 (Distributor Management and Stock
+Automation), added the same day. Nothing in §1–§22 above changed.
+
+**The gap, stated plainly:** the repository has no distributor stock domain at all. `db/schema.sql`
+contains no `stock_locations`, `stock_requests`, `stock_request_lines`, `inventory_balances`,
+`inventory_movements`, or `stock_request_transitions` table; there is no `/distribution` route, no
+distribution server command or query module, and no distribution entry in the role permission
+matrix. A Distributor today can read Deals, Customers, and Tasks it is tagged on, and can do
+nothing whatsoever with physical stock.
+
+**What `portal_catalog_items.stock` is, and is not:** it is a single INTEGER column on the legacy
+marketing catalogue table, holding one global count per catalogue item. It has no location
+dimension, no movement history, no reservation or in-transit concept, and no actor, reason, or
+correlation evidence. It is **not** an inventory ledger and must never be read or written as DMS
+inventory truth. §24.2 states this normatively; it is repeated here so nobody re-discovers the
+column later and mistakes it for a starting point.
+
+**Also recorded, as the deceptive-surface baseline this delivery closes:**
+
+- `/admin/integrations` renders a hardcoded `INITIAL_PROVIDERS` array (fabricated queue depths,
+  dead-letter counts, conflict counts, and "2 mins ago" timestamps) and its Pause/Resume/
+  Disconnect/Connect buttons are a `setTimeout(800)` simulation that mutates local React state
+  only. No provider is contacted.
+- `admin.learning.tsx` renders an unconditionally `disabled` "Add lesson" button — an advertised
+  action with no implementation behind it.
+- `issueGyFTRVoucher()` returns `ok: true` with a `STUB-` voucher code when credentials are
+  absent, and `reward-commands.server.ts` accepts that as truth and marks the redemption
+  `fulfilled`. An unconfigured provider therefore reports successful fulfilment of a voucher that
+  does not exist.
+
+**Verification baseline for this work:** `bun test src scripts` → 524 pass, 0 fail. Bare `bun test`
+additionally picks up the two Playwright specs in `e2e/` and reports 2 failures for that tooling
+reason alone (see §22); scope to `src scripts` as §22 already instructs.
