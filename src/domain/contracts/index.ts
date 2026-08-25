@@ -1,4 +1,5 @@
 export * from "./commands";
+export * from "./distribution";
 export * from "./governance";
 export * from "./feature-flags";
 export * from "./money";
