@@ -1,8 +1,9 @@
-import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Boxes,
   CheckCircle2,
   DollarSign,
   Download,
@@ -19,6 +20,11 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { contextualStockAction } from "@/components/distribution/distribution-navigation";
+import {
+  newRequestForDealUrl,
+  trackStockForDealUrl,
+} from "@/components/distribution/distribution-view";
 import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { CsvExportButton } from "@/components/csv-export-button";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
@@ -370,7 +376,7 @@ function DealsPage() {
     null,
   );
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const { profile, hasRole, can, roleKey } = useAuth();
+  const { profile, hasRole, can, roleKey, surfaces } = useAuth();
   const canCreateDeals = can("deals", "create");
   const { selectedRegion } = useRegionFilter();
   useRequireAccess("full");
@@ -2314,6 +2320,34 @@ function DealsPage() {
                   >
                     Edit note
                   </Button>
+                  {/* Contextual entry into the Distribution workspace. This
+                      page deliberately owns no stock form state and calls no
+                      DMS table: it hands the deal id over in the URL and the
+                      workspace does the rest. A Distributor gets the create
+                      action; anyone else who can read Distribution gets the
+                      read-only view of this deal's requests. */}
+                  {(() => {
+                    const action = contextualStockAction({
+                      canRead: can("distribution", "read"),
+                      canCreate: can("distribution", "create"),
+                      surfaceEnabled: surfaces.distributionCore,
+                    });
+                    if (!action) return null;
+                    return (
+                      <Button asChild variant="outline">
+                        <Link
+                          to={
+                            action.intent === "create"
+                              ? newRequestForDealUrl(selectedDeal.id)
+                              : trackStockForDealUrl(selectedDeal.id)
+                          }
+                        >
+                          <Boxes className="mr-2 h-4 w-4" />
+                          {action.label}
+                        </Link>
+                      </Button>
+                    );
+                  })()}
                   {/* Nothing advances out of Won or Lost — the server refuses
                       it, so offering the button only produces an error toast. */}
                   {isTerminalDealStage(selectedDeal.stage) ? null : (

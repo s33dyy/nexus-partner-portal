@@ -17,6 +17,7 @@ import {
   CheckSquare,
   GraduationCap,
   Activity,
+  Boxes,
   ShieldQuestion,
   Phone,
 } from "lucide-react";
@@ -34,6 +35,10 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  showDistributionNavigation,
+  type DistributionAccess,
+} from "@/components/distribution/distribution-navigation";
 import { useAuth, type AppRole } from "@/hooks/use-auth";
 import { BrandLogo } from "@/components/brand-logo";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
@@ -53,6 +58,16 @@ const workspace: Item[] = [
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Insight Hub", url: "/insight-hub", icon: GraduationCap },
 ];
+
+/** Distribution sits beside Tasks. The two gates it needs live in
+ * distribution-navigation.ts so the sidebar, the palette, Deals, and
+ * Customers all read the same rule. */
+function workspaceItemsFor(access: DistributionAccess): Item[] {
+  if (!showDistributionNavigation(access)) return workspace;
+  const items = [...workspace];
+  items.splice(3, 0, { title: "Distribution", url: "/distribution", icon: Boxes });
+  return items;
+}
 
 const portal: Item[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -190,7 +205,16 @@ export function AppSidebar() {
               { title: "Onboarding", url: "/partner/onboarding", icon: Building2 },
             ])
           : null}
-        {canSeeWorkspace ? renderGroup("Workspace", workspace) : null}
+        {canSeeWorkspace
+          ? renderGroup(
+              "Workspace",
+              workspaceItemsFor({
+                canRead: can("distribution", "read"),
+                canCreate: can("distribution", "create"),
+                surfaceEnabled: surfaces.distributionCore,
+              }),
+            )
+          : null}
         {isPartnerAdmin &&
         (access.canAccessPartnerAgreement || access.canAccessPartnerOnboarding || canSeeWorkspace)
           ? renderGroup("Company", partnerAdminItems)

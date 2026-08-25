@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   BarChart3,
+  Boxes,
   Building2,
   CheckSquare,
   FileText,
@@ -30,6 +31,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { showDistributionNavigation } from "@/components/distribution/distribution-navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
 
@@ -83,6 +85,21 @@ export function CommandPalette({
             { title: "Deals", url: "/deals", icon: Handshake, keywords: "opportunities pipeline" },
             { title: "Pipeline", url: "/pipeline", icon: Kanban, keywords: "board kanban stages" },
             { title: "Tasks", url: "/tasks", icon: CheckSquare, keywords: "todo work items" },
+            // Same rule as the sidebar, from the same shared helper.
+            ...(showDistributionNavigation({
+              canRead: can("distribution", "read"),
+              canCreate: can("distribution", "create"),
+              surfaceEnabled: surfaces.distributionCore,
+            })
+              ? [
+                  {
+                    title: "Distribution",
+                    url: "/distribution",
+                    icon: Boxes,
+                    keywords: "stock inventory requests warehouse distributor",
+                  },
+                ]
+              : []),
             { title: "Customers", url: "/customers", icon: Users, keywords: "accounts clients" },
             { title: "Analytics", url: "/analytics", icon: BarChart3, keywords: "reports charts" },
             {

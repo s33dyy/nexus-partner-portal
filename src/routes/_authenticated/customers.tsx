@@ -1,7 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  Boxes,
   CircleCheck,
   Download,
   Loader2,
@@ -18,6 +19,11 @@ import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-hea
 import { RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { contextualStockAction } from "@/components/distribution/distribution-navigation";
+import {
+  newRequestForCustomerUrl,
+  trackStockForCustomerUrl,
+} from "@/components/distribution/distribution-view";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -127,7 +133,7 @@ export const Route = createFileRoute("/_authenticated/customers")({
 });
 
 function CustomersPage() {
-  const { profile, hasRole } = useAuth();
+  const { profile, hasRole, can, surfaces } = useAuth();
   const access = useRequireAccess("full");
   const { selectedRegion } = useRegionFilter();
 
@@ -1378,6 +1384,30 @@ function CustomersPage() {
                   {savingActivity ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Save activity
                 </Button>
+                {/* Same contextual deep link as Deals — the workspace owns
+                    the dialog, this page owns none of its state. */}
+                {(() => {
+                  const action = contextualStockAction({
+                    canRead: can("distribution", "read"),
+                    canCreate: can("distribution", "create"),
+                    surfaceEnabled: surfaces.distributionCore,
+                  });
+                  if (!action) return null;
+                  return (
+                    <Button asChild type="button" variant="outline">
+                      <Link
+                        to={
+                          action.intent === "create"
+                            ? newRequestForCustomerUrl(selectedCustomer.id)
+                            : trackStockForCustomerUrl(selectedCustomer.id)
+                        }
+                      >
+                        <Boxes className="mr-2 h-4 w-4" />
+                        {action.label}
+                      </Link>
+                    </Button>
+                  );
+                })()}
                 <Button type="button" onClick={() => void saveCustomer()} disabled={saving}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Save customer
