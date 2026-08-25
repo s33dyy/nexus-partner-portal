@@ -3,7 +3,16 @@ export type FeatureFlagKey =
   | "command-framework-write"
   | "active-context-switch"
   | "baseline-telemetry"
-  | "inventory-read-models";
+  | "inventory-read-models"
+  // Product-surface readiness flags. Unlike the five above (which gate a
+  // platform mechanism), these gate whether a whole user-facing surface is
+  // exposed at all. Every one ships disabled: a surface is hidden until its
+  // implementation is real, and evaluation fails closed for every role
+  // including Super Admin — see server/feature-gates.server.ts.
+  | "distribution-core"
+  | "integration-operations-centre"
+  | "learning-lesson-authoring"
+  | "gyftr-fulfillment";
 
 export type FeatureFlagRegistryEntry = {
   key: FeatureFlagKey;
@@ -77,6 +86,56 @@ export const FEATURE_FLAG_REGISTRY: readonly FeatureFlagRegistryEntry[] = [
     metrics: ["inventory-run-success", "inventory-checkpoint-resume"],
     expiresAt: "2026-12-31",
     rollback: "Keep inventory read-only and disable live database execution.",
+    auditRequired: true,
+  },
+  {
+    key: "distribution-core",
+    label: "Distributor stock requests and inventory",
+    enabledByDefault: false,
+    owner: "Distribution and Logistics",
+    cohort: "internal-only",
+    dependencies: ["command-framework-write", "baseline-telemetry"],
+    metrics: ["stock-request-throughput", "distribution-denial-rate"],
+    expiresAt: null,
+    rollback:
+      "Disable distribution-core first. Navigation, direct routes, and every DMS command fail closed; movement and request history is retained, never deleted.",
+    auditRequired: true,
+  },
+  {
+    key: "integration-operations-centre",
+    label: "Integration operations centre",
+    enabledByDefault: false,
+    owner: "Platform Integrations",
+    cohort: "internal-only",
+    dependencies: ["baseline-telemetry"],
+    metrics: ["integration-readiness-reads"],
+    expiresAt: null,
+    rollback: "Disable the flag; /admin/integrations returns to the unavailable page.",
+    auditRequired: true,
+  },
+  {
+    key: "learning-lesson-authoring",
+    label: "Insight Hub lesson authoring",
+    enabledByDefault: false,
+    owner: "Enablement",
+    cohort: "internal-only",
+    dependencies: ["command-framework-write"],
+    metrics: ["lesson-authoring-writes"],
+    expiresAt: null,
+    rollback: "Disable the flag; the lesson authoring action disappears from Learning admin.",
+    auditRequired: true,
+  },
+  {
+    key: "gyftr-fulfillment",
+    label: "GyFTR digital reward fulfillment",
+    enabledByDefault: false,
+    owner: "Rewards",
+    cohort: "internal-only",
+    dependencies: ["command-framework-write"],
+    metrics: ["voucher-issue-success", "voucher-issue-failure"],
+    expiresAt: null,
+    rollback:
+      "Disable the flag; digital rewards become unrequestable and unapprovable, and no provider call is made.",
     auditRequired: true,
   },
 ] as const;

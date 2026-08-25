@@ -67,7 +67,7 @@ type LessonRow = {
 const TIER_OPTIONS = ["", "Registered", "Silver", "Gold", "Platinum"];
 
 function AdminLearningPage() {
-  const { hasRole } = useAuth();
+  const { hasRole, surfaces } = useAuth();
 
   const [tracks, setTracks] = useState<TrackRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
@@ -480,7 +480,12 @@ function AdminLearningPage() {
                   {selectedSubject ? `In "${selectedSubject.title}"` : "Select a subject first"}
                 </CardDescription>
               </div>
-              {selectedSubjectId && (
+              {/* Lesson authoring is not built. The button used to render
+                  permanently disabled, which reads as "you lack permission"
+                  rather than "this does not exist" — so it is absent until
+                  learning-lesson-authoring is enabled and there is a real
+                  editor behind it. */}
+              {selectedSubjectId && surfaces.learningLessonAuthoring && (
                 <Button size="sm" variant="outline" disabled>
                   <Plus className="mr-1 h-3.5 w-3.5" />
                   Add lesson

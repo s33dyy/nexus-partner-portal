@@ -124,6 +124,8 @@ type CatalogRow = {
   availability: string;
   retired_at: string | null;
   retired_by: string | null;
+  requires_shipping: boolean;
+  fulfillment_assignee_id: string | null;
 };
 
 type RedemptionRow = {
@@ -157,11 +159,27 @@ type PointEventRow = {
   reversal_of: string | null;
 };
 
+type TaskRow = {
+  id: string;
+  title: string;
+  status: string;
+  related_type: string | null;
+  related_id: string | null;
+  assignee_id: string | null;
+  creator_id: string | null;
+  partner_id: string | null;
+};
+
 type RewardHarnessState = {
   profiles: Array<{ id: string; partner_id: string | null }>;
   catalog: CatalogRow[];
   redemptions: RedemptionRow[];
   pointEvents: PointEventRow[];
+  tasks: TaskRow[];
+  /** Mirrors the feature_flags rows resolveProductSurface() reads. Credentials
+   * are checked before any query, so the GYFTR_* env vars must be set too for
+   * the surface to resolve true — see enableGyftrSurface below. */
+  enabledFlags: string[];
   failNextActivityInsert: boolean;
 };
 
@@ -186,9 +204,28 @@ function createRewardState(overrides: Partial<RewardHarnessState> = {}): RewardH
         availability: "available",
         retired_at: null,
         retired_by: null,
+        // Physical: picked, packed, posted by a person. Never routed to a
+        // voucher provider.
+        requires_shipping: true,
+        fulfillment_assignee_id: null,
+      },
+      {
+        id: "reward-digital-1",
+        title: "Amazon Voucher",
+        points_cost: 500,
+        stock: 5,
+        availability: "available",
+        retired_at: null,
+        retired_by: null,
+        // Digital: only GyFTR can fulfil it, so it is unavailable whenever
+        // that surface is off.
+        requires_shipping: false,
+        fulfillment_assignee_id: null,
       },
     ],
     redemptions: [],
+    tasks: [],
+    enabledFlags: [],
     pointEvents: [
       {
         id: "seed-award-1",
@@ -240,6 +277,15 @@ function installFakePool(state: RewardHarnessState) {
   const locks = createLockManager();
 
   function handleRead(sql: string, params: unknown[]) {
+    // --- resolveProductSurface's flag read (outside any tx) --------------
+    if (sql.startsWith("SELECT flag_key, enabled FROM feature_flags")) {
+      const requested = (params[0] as string[]) ?? [];
+      return {
+        rows: requested
+          .filter((flagKey) => state.enabledFlags.includes(flagKey))
+          .map((flagKey) => ({ flag_key: flagKey, enabled: true })),
+      };
+    }
     if (sql.includes("FROM reward_redemptions") && sql.includes("idempotency_key = $1")) {
       const row = state.redemptions.find((r) => r.idempotency_key === params[0]);
       return { rows: row ? [{ id: row.id, user_id: row.user_id, version: row.version }] : [] };
@@ -323,6 +369,62 @@ function installFakePool(state: RewardHarnessState) {
         await lock(`catalog:${params[0]}`);
         const row = state.catalog.find((c) => c.id === params[0]);
         return { rows: row ? [row] : [] };
+      }
+      // --- reward_catalog_items fulfillment routing (approve) ------------
+      if (
+        sql.startsWith(
+          "SELECT id, title, requires_shipping, fulfillment_assignee_id FROM reward_catalog_items",
+        )
+      ) {
+        const row = state.catalog.find((c) => c.id === params[0]);
+        return {
+          rows: row
+            ? [
+                {
+                  id: row.id,
+                  title: row.title,
+                  requires_shipping: row.requires_shipping,
+                  fulfillment_assignee_id: row.fulfillment_assignee_id,
+                },
+              ]
+            : [],
+        };
+      }
+      // --- manual fulfilment task (approve, physical rewards) ------------
+      if (sql.startsWith("INSERT INTO tasks")) {
+        const [id, title, , relatedId, assigneeId, creatorId, partnerId] = params as [
+          string,
+          string,
+          string,
+          string,
+          string | null,
+          string | null,
+          string | null,
+        ];
+        // Mirrors the statement's own WHERE NOT EXISTS guard.
+        const alreadyOpen = state.tasks.some(
+          (task) =>
+            task.related_type === "reward_redemption" &&
+            task.related_id === relatedId &&
+            task.status !== "completed" &&
+            task.status !== "cancelled",
+        );
+        if (alreadyOpen) return { rows: [], rowCount: 0 };
+        const task: TaskRow = {
+          id,
+          title,
+          status: "to_do",
+          related_type: "reward_redemption",
+          related_id: relatedId,
+          assignee_id: assigneeId,
+          creator_id: creatorId,
+          partner_id: partnerId,
+        };
+        state.tasks.push(task);
+        undoLog.push(() => {
+          state.tasks = state.tasks.filter((candidate) => candidate !== task);
+        });
+        return { rows: [], rowCount: 1 };
       }
       // --- reward_catalog_items lock (reject: id only) -------------------
       if (sql.startsWith("SELECT id FROM reward_catalog_items") && sql.includes("FOR UPDATE")) {
@@ -762,6 +864,8 @@ test("requestRewardRedemption rejects insufficient points without any side effec
         availability: "available",
         retired_at: null,
         retired_by: null,
+        requires_shipping: true,
+        fulfillment_assignee_id: null,
       },
     ],
   });
@@ -799,6 +903,8 @@ test("requestRewardRedemption rejects out-of-stock, retired, and unavailable ite
         availability: "available",
         retired_at: null,
         retired_by: null,
+        requires_shipping: true,
+        fulfillment_assignee_id: null,
       },
       {
         id: "reward-retired",
@@ -808,6 +914,8 @@ test("requestRewardRedemption rejects out-of-stock, retired, and unavailable ite
         availability: "retired",
         retired_at: "2026-07-01T00:00:00.000Z",
         retired_by: ADMIN_USER_ID,
+        requires_shipping: true,
+        fulfillment_assignee_id: null,
       },
     ],
   });
@@ -995,6 +1103,8 @@ test("two concurrent requests whose combined cost exceeds balance produce at mos
         availability: "available",
         retired_at: null,
         retired_by: null,
+        requires_shipping: true,
+        fulfillment_assignee_id: null,
       },
     ],
   });
@@ -1039,11 +1149,37 @@ test("two concurrent requests whose combined cost exceeds balance produce at mos
 // Review: approve / reject
 // ---------------------------------------------------------------------------
 
-function seedReservedRedemption(state: RewardHarnessState) {
-  state.catalog[0]!.stock = 0;
+/**
+ * Turns the GyFTR surface genuinely on for one test: the flag row AND the
+ * three credentials. resolveProductSurface() checks credentials before it
+ * queries, so setting only one of the two leaves the surface closed — which
+ * is the point of the "requires both" assertions in
+ * feature-gates.server.test.ts.
+ */
+function enableGyftrSurface(state: RewardHarnessState) {
+  state.enabledFlags = ["gyftr-fulfillment", "command-framework-write", "baseline-telemetry"];
+  const previous = {
+    GYFTR_API_URL: process.env.GYFTR_API_URL,
+    GYFTR_CLIENT_ID: process.env.GYFTR_CLIENT_ID,
+    GYFTR_SECRET_KEY: process.env.GYFTR_SECRET_KEY,
+  };
+  process.env.GYFTR_API_URL = "https://gyftr.test.invalid";
+  process.env.GYFTR_CLIENT_ID = "test-client";
+  process.env.GYFTR_SECRET_KEY = "test-secret";
+  return () => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+}
+
+function seedReservedRedemption(state: RewardHarnessState, rewardId = "reward-1") {
+  const item = state.catalog.find((candidate) => candidate.id === rewardId)!;
+  item.stock = 0;
   state.redemptions.push({
     id: "redemption-1",
-    reward_id: "reward-1",
+    reward_id: rewardId,
     user_id: PARTNER_USER_ID,
     partner_id: "partner-1",
     points_cost: 500,
@@ -1066,16 +1202,23 @@ function seedReservedRedemption(state: RewardHarnessState) {
     source_type: "redemption_reservation",
     source_id: "redemption-1",
     points_delta: -500,
-    reason: "Reserved for LIVEY Hoodie",
+    reason: `Reserved for ${item.title}`,
     idempotency_key: "seed-request:reservation",
     reversal_of: null,
   });
 }
 
-test("approveRewardRedemption advances to processing without a second debit, then auto-fulfills via the GyFTR stub when no credentials are configured", async () => {
+test("approveRewardRedemption advances a physical reward to processing, opens exactly one manual fulfilment task, and never calls the voucher provider", async () => {
   const state = createRewardState();
   seedReservedRedemption(state);
   const harness = await installFakePool(state)();
+  let providerCalls = 0;
+  mock.module("@/integrations/gyftr", () => ({
+    issueGyFTRVoucher: async () => {
+      providerCalls += 1;
+      return { ok: false, errorCode: "SHOULD_NOT_BE_CALLED", errorMessage: "physical reward" };
+    },
+  }));
   try {
     const { approveRewardRedemption } = await import("@/server/reward-commands.server");
     const result = await approveRewardRedemption({
@@ -1088,29 +1231,118 @@ test("approveRewardRedemption advances to processing without a second debit, the
     if (result.ok) expect(result.newVersion).toBe(2);
     expect(state.pointEvents.filter((event) => event.points_delta < 0)).toHaveLength(1);
 
-    // No GYFTR_* credentials are configured in this test environment, so
-    // issueGyFTRVoucher's own graceful stub fallback engages (see
-    // src/integrations/gyftr/gyftr-client.ts). attemptGyFTRFulfillment
-    // follows that honest ok:true stub result to Fulfilled — it does not
-    // leave the redemption stuck at Processing, and the STUB- prefix on
-    // the recorded voucher code is itself the honest signal that no real
-    // provider voucher was issued (never a fabricated success).
+    // A hoodie is not a voucher. reward-1 is requires_shipping = true, so
+    // the approval opens the human work item and the provider is never
+    // contacted — the previous behaviour called GyFTR for every reward and
+    // accepted its unconfigured STUB- response as a real fulfillment.
+    expect(providerCalls).toBe(0);
     const settled = state.redemptions[0];
-    expect(settled?.status).toBe("fulfilled");
-    expect(settled?.version).toBe(3);
-    expect(settled?.fulfillment_provider).toBe("gyftr");
-    expect(settled?.fulfillment_voucher_code?.startsWith("STUB-")).toBe(true);
-    expect(settled?.fulfilled_at).not.toBeNull();
-    expect(settled?.failure_reason).toBeNull();
+    expect(settled?.status).toBe("processing");
+    expect(settled?.version).toBe(2);
+    expect(settled?.fulfillment_provider).toBeNull();
+    expect(settled?.fulfillment_voucher_code).toBeNull();
+    expect(settled?.fulfilled_at).toBeNull();
+
+    const fulfilmentTasks = state.tasks.filter(
+      (task) => task.related_type === "reward_redemption" && task.related_id === "redemption-1",
+    );
+    expect(fulfilmentTasks).toHaveLength(1);
+    expect(fulfilmentTasks[0]?.title).toContain("LIVEY Hoodie");
+    expect(fulfilmentTasks[0]?.assignee_id).toBe(ADMIN_USER_ID);
+    expect(fulfilmentTasks[0]?.partner_id).toBe("partner-1");
   } finally {
+    mock.module("@/integrations/gyftr", () => realGyftrModule);
+    harness.restore();
+  }
+});
+
+test("a digital reward cannot be requested while GyFTR fulfillment is unconfigured", async () => {
+  const state = createRewardState();
+  const harness = await installFakePool(state)();
+  try {
+    const { requestRewardRedemption } = await import("@/server/reward-commands.server");
+    const result = await requestRewardRedemption({
+      actor: partnerActor(),
+      data: {
+        rewardId: "reward-digital-1",
+        shippingName: "Partner User",
+        shippingAddress: "1 Test Street",
+        idempotencyKey: "digital-request-1",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+    // No points reserved, no stock decremented, no redemption row.
+    expect(state.redemptions).toHaveLength(0);
+    expect(state.pointEvents.filter((event) => event.points_delta < 0)).toHaveLength(0);
+    expect(state.catalog.find((item) => item.id === "reward-digital-1")?.stock).toBe(5);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a digital reward cannot be approved while GyFTR fulfillment is unconfigured", async () => {
+  const state = createRewardState();
+  seedReservedRedemption(state, "reward-digital-1");
+  const harness = await installFakePool(state)();
+  try {
+    const { approveRewardRedemption } = await import("@/server/reward-commands.server");
+    const result = await approveRewardRedemption({
+      actor: adminActor(),
+      redemptionId: "redemption-1",
+      expectedVersion: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+    // Refused outright rather than parked at Processing with no way forward.
+    const settled = state.redemptions[0];
+    expect(settled?.status).toBe("points_reserved");
+    expect(settled?.version).toBe(1);
+    expect(state.tasks).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a stub voucher never settles a redemption as fulfilled", async () => {
+  const state = createRewardState();
+  seedReservedRedemption(state, "reward-digital-1");
+  const harness = await installFakePool(state)();
+  const restoreEnv = enableGyftrSurface(state);
+  mock.module("@/integrations/gyftr", () => ({
+    issueGyFTRVoucher: async () => ({
+      ok: true,
+      voucherCode: "STUB-ABCDEF12",
+      expiryDate: "2027-01-01T00:00:00.000Z",
+      fulfillmentRef: "stub-redemption-1",
+    }),
+  }));
+  try {
+    const { approveRewardRedemption } = await import("@/server/reward-commands.server");
+    const result = await approveRewardRedemption({
+      actor: adminActor(),
+      redemptionId: "redemption-1",
+      expectedVersion: 1,
+    });
+    expect(result.ok).toBe(true);
+
+    const settled = state.redemptions[0];
+    expect(settled?.status).toBe("failed");
+    expect(settled?.failure_reason).toContain("PROVIDER_NOT_CONFIGURED");
+    expect(settled?.fulfillment_voucher_code).toBeNull();
+    expect(settled?.fulfilled_at).toBeNull();
+  } finally {
+    mock.module("@/integrations/gyftr", () => realGyftrModule);
+    restoreEnv();
     harness.restore();
   }
 });
 
 test("approveRewardRedemption records the provider's own voucher reference when GyFTR issuance succeeds", async () => {
   const state = createRewardState();
-  seedReservedRedemption(state);
+  seedReservedRedemption(state, "reward-digital-1");
   const harness = await installFakePool(state)();
+  const restoreEnv = enableGyftrSurface(state);
   mock.module("@/integrations/gyftr", () => ({
     issueGyFTRVoucher: async () => ({
       ok: true,
@@ -1137,14 +1369,16 @@ test("approveRewardRedemption records the provider's own voucher reference when 
     expect(settled?.fulfilled_at).not.toBeNull();
   } finally {
     mock.module("@/integrations/gyftr", () => realGyftrModule);
+    restoreEnv();
     harness.restore();
   }
 });
 
 test("approveRewardRedemption records a real failure reason and never fabricates success when GyFTR issuance fails", async () => {
   const state = createRewardState();
-  seedReservedRedemption(state);
+  seedReservedRedemption(state, "reward-digital-1");
   const harness = await installFakePool(state)();
+  const restoreEnv = enableGyftrSurface(state);
   mock.module("@/integrations/gyftr", () => ({
     issueGyFTRVoucher: async () => ({
       ok: false,
@@ -1171,6 +1405,7 @@ test("approveRewardRedemption records a real failure reason and never fabricates
     expect(settled?.fulfillment_voucher_code).toBeNull();
   } finally {
     mock.module("@/integrations/gyftr", () => realGyftrModule);
+    restoreEnv();
     harness.restore();
   }
 });

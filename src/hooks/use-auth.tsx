@@ -5,6 +5,11 @@ import type { ActiveContextRecord, AssignmentRecord } from "@/domain/contracts/g
 import type { CrudOperation, FeatureKey } from "@/domain/contracts/features";
 import type { RoleKey } from "@/domain/contracts/taxonomy";
 import { getMyCapabilities } from "@/integrations/local/role-permission-commands";
+import {
+  ALL_SURFACES_OFF,
+  getProductSurfaces,
+  type ProductSurfaceSnapshot,
+} from "@/integrations/local/feature-gates";
 import type { PartnerStatus } from "@/lib/partner-status";
 
 type FeatureCapabilities = Record<FeatureKey, Record<CrudOperation, boolean>>;
@@ -42,6 +47,10 @@ type AuthContextValue = {
   loading: boolean;
   hasRole: (role: AppRole) => boolean;
   can: (featureKey: FeatureKey, operation: CrudOperation) => boolean;
+  /** Server-evaluated product-surface readiness. Always all-false until the
+   * snapshot lands and whenever the fetch fails, so navigation and routes
+   * fail closed rather than flashing a surface that is not ready. */
+  surfaces: ProductSurfaceSnapshot;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -98,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [assignment, setAssignment] = useState<AssignmentRecord | null>(null);
   const [activeContext, setActiveContext] = useState<ActiveContextRecord | null>(null);
   const [capabilities, setCapabilities] = useState<FeatureCapabilities | null>(null);
+  const [surfaces, setSurfaces] = useState<ProductSurfaceSnapshot>(ALL_SURFACES_OFF);
   const [loading, setLoading] = useState(true);
 
   const loadProfile = async (userId: string) => {
@@ -107,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       { data: assignmentRows },
       { data: contextRows },
       myCapabilities,
+      mySurfaces,
     ] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId),
@@ -122,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .order("issued_at", { ascending: false })
         .maybeSingle(),
       getMyCapabilities().catch(() => null),
+      getProductSurfaces().catch(() => ALL_SURFACES_OFF),
     ]);
     setProfile((prof as Profile | null) ?? null);
     const typedAssignments = ((assignmentRows ?? []) as Record<string, unknown>[]).map(
@@ -131,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const assignmentRow = typedAssignments[0] ?? null;
     setAssignment(assignmentRow);
     setCapabilities(myCapabilities);
+    setSurfaces(mySurfaces ?? ALL_SURFACES_OFF);
     const contextRow = (contextRows as Record<string, unknown> | null) ?? null;
     if (contextRow && assignmentRow) {
       setActiveContext({
@@ -175,6 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAssignment(null);
         setActiveContext(null);
         setCapabilities(null);
+        setSurfaces(ALL_SURFACES_OFF);
       }
     });
 
@@ -201,6 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     hasRole: (r) => roles.includes(r),
     can: (featureKey, operation) => capabilities?.[featureKey]?.[operation] ?? false,
+    surfaces,
     refresh: async () => {
       if (session?.user) await loadProfile(session.user.id);
     },

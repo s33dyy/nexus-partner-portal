@@ -70,7 +70,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { roles, hasRole, profile } = useAuth();
+  const { roles, hasRole, profile, surfaces } = useAuth();
   const access = usePartnerAccess();
 
   const visible = (items: Item[]) =>
@@ -122,7 +122,11 @@ export function AppSidebar() {
     ...(can("learning", "read")
       ? [{ title: "Learning", url: "/admin/learning", icon: GraduationCap }]
       : []),
-    ...(can("integrations", "read")
+    // Two gates, both required: the role permission matrix says who *may*
+    // see it, and the server-evaluated surface flag says whether the page is
+    // real yet. The Integration Operations Centre is not, so this is absent
+    // in every deployment until integration-operations-centre is enabled.
+    ...(can("integrations", "read") && surfaces.integrationOperationsCentre
       ? [{ title: "Integrations", url: "/admin/integrations", icon: Activity }]
       : []),
     ...(can("audit", "read") ? [{ title: "Audit Logs", url: "/admin/audit", icon: FileText }] : []),

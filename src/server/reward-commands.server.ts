@@ -13,6 +13,7 @@ import { evaluateActiveContextPolicy, type PolicyDecision } from "@/domain/contr
 import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { issueGyFTRVoucher } from "@/integrations/gyftr";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
+import { resolveProductSurface } from "@/server/feature-gates.server";
 import {
   resolveGovernedActor,
   type GovernedActor,
@@ -40,6 +41,25 @@ function validationFailure(message: string, field: string): CommandFailureContra
 
 function policyFailure(subjectId: string | null, reason: string): CommandFailureContract {
   return makePolicyDenial(subjectId, reason);
+}
+
+/** reward_catalog_items.requires_shipping defaults TRUE, so anything that
+ * has not explicitly opted out of shipping is physical. A NULL or missing
+ * column therefore reads as physical — the branch that never contacts a
+ * provider — rather than as a digital voucher. */
+function isDigitalReward(requiresShipping: boolean | null | undefined): boolean {
+  return requiresShipping === false;
+}
+
+/** Defence in depth against a provider result that is not a real voucher.
+ * `issueGyFTRVoucher` no longer manufactures one, but a stubbed adapter, a
+ * replayed sandbox response, or a hand-seeded row still must not be able to
+ * settle a redemption as Fulfilled. */
+function isStubVoucher(voucher: { voucherCode: string; fulfillmentRef: string }): boolean {
+  return (
+    voucher.voucherCode.trim().toUpperCase().startsWith("STUB-") ||
+    voucher.fulfillmentRef.trim().toLowerCase().startsWith("stub-")
+  );
 }
 
 function checkBasePolicy(actor: RewardCommandActor): PolicyDecision {
@@ -181,6 +201,11 @@ export async function requestRewardRedemption(input: {
     };
   }
 
+  // Resolved before the transaction opens: it is a flag/credential read,
+  // not part of the reservation's consistency boundary, and it must never
+  // hold the catalogue row lock while it runs.
+  const gyftrEnabled = await resolveProductSurface("gyftr-fulfillment");
+
   const runRequest = () =>
     withTransaction<CommandExecutionResult>(async (tx) => {
       const basePolicy = checkBasePolicy(input.actor);
@@ -221,7 +246,7 @@ export async function requestRewardRedemption(input: {
       }
 
       const itemRes = await tx.query(
-        `SELECT id, title, points_cost, stock, availability, retired_at
+        `SELECT id, title, points_cost, stock, availability, retired_at, requires_shipping
          FROM reward_catalog_items WHERE id = $1 FOR UPDATE`,
         [rewardId],
       );
@@ -233,6 +258,7 @@ export async function requestRewardRedemption(input: {
             stock: number;
             availability: string;
             retired_at: string | null;
+            requires_shipping?: boolean | null;
           }
         | undefined;
       if (
@@ -241,6 +267,20 @@ export async function requestRewardRedemption(input: {
         item.availability !== "available" ||
         Number(item.stock) <= 0
       ) {
+        return {
+          ok: false,
+          failure: validationFailure("This reward is not available for redemption", "rewardId"),
+          correlationId,
+        };
+      }
+
+      // A digital reward is fulfilled by GyFTR and by nothing else. With
+      // that surface off there is no path from "requested" to a voucher, so
+      // the honest answer is that the reward is unavailable — not to take
+      // the points and strand the redemption in Processing forever. The
+      // message is deliberately the same as any other unavailable reward:
+      // provider configuration is not partner-facing information.
+      if (isDigitalReward(item.requires_shipping) && !gyftrEnabled) {
         return {
           ok: false,
           failure: validationFailure("This reward is not available for redemption", "rewardId"),
@@ -389,6 +429,9 @@ export async function approveRewardRedemption(input: {
     };
   }
 
+  const gyftrEnabled = await resolveProductSurface("gyftr-fulfillment");
+  let digitalReward = false;
+
   const approvalResult = await withTransaction<CommandExecutionResult>(async (tx) => {
     const basePolicy = checkBasePolicy(input.actor);
     if (!basePolicy.allowed) {
@@ -425,6 +468,36 @@ export async function approveRewardRedemption(input: {
       };
     }
 
+    const fulfillmentRes = await tx.query(
+      `SELECT id, title, requires_shipping, fulfillment_assignee_id
+       FROM reward_catalog_items WHERE id = $1`,
+      [redemption.reward_id],
+    );
+    const catalogItem = fulfillmentRes.rows[0] as
+      | {
+          id: string;
+          title: string;
+          requires_shipping?: boolean | null;
+          fulfillment_assignee_id?: string | null;
+        }
+      | undefined;
+    digitalReward = isDigitalReward(catalogItem?.requires_shipping);
+
+    // Approving a digital reward is a promise to issue a voucher. With the
+    // provider surface off that promise cannot be kept, so the approval is
+    // refused outright rather than moving the redemption to Processing and
+    // leaving it there.
+    if (digitalReward && !gyftrEnabled) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          "Digital reward fulfillment is not available in this workspace",
+          "status",
+        ),
+        correlationId,
+      };
+    }
+
     const newVersion = Number(redemption.version) + 1;
     await tx.query(
       `UPDATE reward_redemptions
@@ -433,6 +506,37 @@ export async function approveRewardRedemption(input: {
        WHERE id = $1 AND version = $4`,
       [redemption.id, input.actor.userId, newVersion, input.expectedVersion],
     );
+
+    // A physical reward is picked, packed, and posted by a person. It has
+    // never had anything to do with GyFTR, and calling a voucher API for a
+    // hoodie was how an unconfigured provider ended up marking shipped
+    // goods Fulfilled. Instead the approval opens the real work item, in
+    // the same transaction, guarded so a replayed approval reuses the open
+    // Task rather than opening a second one.
+    if (!digitalReward) {
+      await tx.query(
+        `INSERT INTO tasks (
+           id, title, description, status, priority, related_type, related_id,
+           assignee_id, creator_id, partner_id, version
+         )
+         SELECT $1, $2, $3, 'to_do', 'medium', 'reward_redemption', $4, $5, $6, $7, 1
+         WHERE NOT EXISTS (
+           SELECT 1 FROM tasks
+           WHERE related_type = 'reward_redemption'
+             AND related_id = $4
+             AND status NOT IN ('completed', 'cancelled')
+         )`,
+        [
+          randomUUID(),
+          `Fulfil reward redemption: ${catalogItem?.title ?? "reward"}`,
+          "Pick, pack, and dispatch this approved reward, then complete this task.",
+          redemption.id,
+          catalogItem?.fulfillment_assignee_id ?? input.actor.userId,
+          input.actor.userId,
+          redemption.partner_id,
+        ],
+      );
+    }
 
     await recordRewardEvent({
       tx,
@@ -466,11 +570,13 @@ export async function approveRewardRedemption(input: {
   // the approval itself). A failure here never overturns the approval;
   // approveRewardRedemption already succeeded by moving the redemption to
   // Processing.
-  await attemptGyFTRFulfillment({
-    redemptionId: approvalResult.subjectId,
-    actor: input.actor,
-    correlationId,
-  });
+  if (digitalReward && gyftrEnabled) {
+    await attemptGyFTRFulfillment({
+      redemptionId: approvalResult.subjectId,
+      actor: input.actor,
+      correlationId,
+    });
+  }
 
   return approvalResult;
 }
@@ -541,6 +647,30 @@ async function attemptGyFTRFulfillment(input: {
       if (!currentRow || currentRow.status !== "processing") return;
 
       const newVersion = Number(currentRow.version) + 1;
+      if (voucher.ok && isStubVoucher(voucher)) {
+        await tx.query(
+          `UPDATE reward_redemptions
+           SET status = 'failed', failure_reason = $2, version = $3, updated_at = now()
+           WHERE id = $1 AND version = $4`,
+          [
+            redemption.id,
+            "PROVIDER_NOT_CONFIGURED: adapter returned a stub voucher, no real voucher was issued",
+            newVersion,
+            currentRow.version,
+          ],
+        );
+        await recordRewardEvent({
+          tx,
+          actor: input.actor,
+          correlationId: input.correlationId,
+          commandName: "reward.redemption.fulfill",
+          eventName: "reward.redemption.failed",
+          subjectType: "reward_redemption",
+          subjectId: redemption.id,
+          payload: { provider: "gyftr", errorCode: "PROVIDER_NOT_CONFIGURED" },
+        });
+        return;
+      }
       if (voucher.ok) {
         await tx.query(
           `UPDATE reward_redemptions

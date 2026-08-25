@@ -30,20 +30,22 @@ export type GyFTRVoucherResponse =
     };
 
 export async function issueGyFTRVoucher(
-  request: GyFTRVoucherRequest
+  request: GyFTRVoucherRequest,
 ): Promise<GyFTRVoucherResponse> {
   const apiUrl = process.env.GYFTR_API_URL;
   const clientId = process.env.GYFTR_CLIENT_ID;
   const secretKey = process.env.GYFTR_SECRET_KEY;
 
   if (!apiUrl || !clientId || !secretKey) {
-    // Return a stubbed response in dev/staging when credentials are absent
-    console.warn("[GyFTR] Missing credentials — returning stub voucher response");
+    // An unconfigured provider issued no voucher, so it must not report
+    // success. This previously returned ok:true with a STUB- code, which
+    // reward-commands.server.ts accepted as truth and used to mark the
+    // redemption Fulfilled — the product told a partner their voucher had
+    // been issued when nothing had been contacted at all.
     return {
-      ok: true,
-      voucherCode: `STUB-${request.referenceId.slice(0, 8).toUpperCase()}`,
-      expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      fulfillmentRef: `stub-${request.referenceId}`,
+      ok: false,
+      errorCode: "PROVIDER_NOT_CONFIGURED",
+      errorMessage: "GyFTR fulfillment is not configured",
     };
   }
 

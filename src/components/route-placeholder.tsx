@@ -1,72 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Lock, Sparkles } from "lucide-react";
+import { Lock, PackageOpen } from "lucide-react";
 
-import { EmptyState, PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-type RoutePlaceholderProps = {
-  eyebrow: string;
-  title: string;
-  description: string;
-  bullets: string[];
-  ctaLabel?: string;
-  ctaTo?: string;
-};
+import { Card } from "@/components/ui/card";
 
 type AccessDeniedProps = {
   title: string;
   roleLabel: string;
   description?: string;
 };
-
-export function RoutePlaceholderPage({
-  eyebrow,
-  title,
-  description,
-  bullets,
-  ctaLabel = "Back to dashboard",
-  ctaTo = "/dashboard",
-}: RoutePlaceholderProps) {
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        eyebrow={eyebrow}
-        icon={<Sparkles className="h-3.5 w-3.5" />}
-        title={title}
-        description={description}
-        actions={<Badge tone="neutral">MVP stub</Badge>}
-      />
-
-      <Card className="border-dashed">
-        <CardHeader>
-          <CardTitle>What this page will cover</CardTitle>
-          <CardDescription>
-            The nav is wired. This page is ready for the next round of product work.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {bullets.map((bullet) => (
-              <div key={bullet} className="rounded-md border bg-secondary/50 p-3 text-[13px]">
-                {bullet}
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to={ctaTo}>
-                {ctaLabel}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 export function AccessDeniedPage({
   title,
@@ -84,6 +27,44 @@ export function AccessDeniedPage({
             access to view this page.
           </>
         }
+        action={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/dashboard">Back to dashboard</Link>
+          </Button>
+        }
+      />
+    </Card>
+  );
+}
+
+/**
+ * The page a route renders when its product surface is not enabled here.
+ *
+ * Distinct from AccessDeniedPage on purpose. Access denied means "this
+ * exists and you may not see it"; this means "this is not switched on in
+ * this deployment", which is true for every role including Super Admin —
+ * see server/feature-gates.server.ts, which fails closed with no admin
+ * bypass. It shows no roadmap, no feature tour, and no action, because
+ * there is nothing here to act on: a route that advertises what it *will*
+ * do is the placeholder problem this component replaced.
+ *
+ * The route must render this *instead of* issuing its data queries, not
+ * alongside them — a hidden surface that still fetches is only hidden in
+ * the screenshot.
+ */
+export function FeatureUnavailablePage({
+  title,
+  description = "This capability is not enabled in this workspace.",
+}: {
+  title: string;
+  description?: string;
+}) {
+  return (
+    <Card>
+      <EmptyState
+        icon={<PackageOpen className="h-5 w-5" />}
+        title={title}
+        description={description}
         action={
           <Button asChild variant="outline" size="sm">
             <Link to="/dashboard">Back to dashboard</Link>

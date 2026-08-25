@@ -62,7 +62,7 @@ export function CommandPalette({
   onOpenChange: (open: boolean) => void;
 }) {
   const navigate = useNavigate();
-  const { can, hasRole } = useAuth();
+  const { can, hasRole, surfaces } = useAuth();
   const access = usePartnerAccess();
 
   useEffect(() => {
@@ -144,7 +144,7 @@ export function CommandPalette({
       ...(can("learning", "read")
         ? [{ title: "Learning", url: "/admin/learning", icon: GraduationCap }]
         : []),
-      ...(can("integrations", "read")
+      ...(can("integrations", "read") && surfaces.integrationOperationsCentre
         ? [{ title: "Integrations", url: "/admin/integrations", icon: Activity }]
         : []),
       ...(can("audit", "read")
@@ -165,7 +165,7 @@ export function CommandPalette({
       { heading: "Administration", items: administration },
       { heading: "Account", items: account },
     ].filter((group) => group.items.length > 0);
-  }, [access, can, hasRole]);
+  }, [access, can, hasRole, surfaces]);
 
   const go = (url: string) => {
     onOpenChange(false);

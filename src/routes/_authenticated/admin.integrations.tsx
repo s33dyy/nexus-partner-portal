@@ -1,339 +1,207 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Database,
-  Link as LinkIcon,
-  Mail,
-  MessageSquare,
-  Package,
-  Pause,
-  PauseCircle,
-  Play,
-  RefreshCw,
-  Settings,
-  Unplug,
-} from "lucide-react";
-import { toast } from "sonner";
+import { useCallback, useEffect, useState } from "react";
+import { Activity, Inbox, Send } from "lucide-react";
 
-import { PageHeader } from "@/components/page-header";
+import { EmptyState, PageHeader, StatTile } from "@/components/page-header";
+import { AccessDeniedPage, FeatureUnavailablePage } from "@/components/route-placeholder";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  getIntegrationDeliverySnapshot,
+  type IntegrationDeliverySnapshot,
+} from "@/integrations/local/integration-readiness";
+import { formatDateTimeLabel } from "@/lib/date-utils";
 
 export const Route = createFileRoute("/_authenticated/admin/integrations")({
   component: AdminIntegrationsPage,
 });
 
-type ConnectionState = "connected" | "attention_needed" | "paused" | "disconnected";
-
-type ProviderData = {
-  id: string;
-  name: string;
-  category: string;
-  icon: React.ElementType;
-  state: ConnectionState;
-  environment: "production" | "sandbox";
-  lastOutbound: string | null;
-  lastInbound: string | null;
-  queueDepth: number;
-  deadLetterCount: number;
-  conflicts: number;
+/**
+ * Integration Operations Centre (product.md §17.3).
+ *
+ * Reports the durable delivery spine that actually exists — command_outbox
+ * and command_inbox — and nothing else. It deliberately shows no provider
+ * connection states and offers no pause/resume/disconnect controls: this
+ * product has no adapter worker, so any such row or button would be a claim
+ * about a system that is not running. The previous version of this page
+ * asserted exactly that, with invented queue depths and a setTimeout
+ * standing in for a network call.
+ */
+const STATUS_TONE: Record<string, "neutral" | "brand" | "success" | "warning" | "danger"> = {
+  pending: "warning",
+  published: "success",
+  processed: "success",
+  failed: "danger",
+  dead_letter: "danger",
+  ignored: "neutral",
 };
 
-const INITIAL_PROVIDERS: ProviderData[] = [
-  {
-    id: "zoho_books",
-    name: "Zoho Books",
-    category: "Accounting & ERP",
-    icon: Database,
-    state: "connected",
-    environment: "production",
-    lastOutbound: "2 mins ago",
-    lastInbound: "1 hr ago",
-    queueDepth: 0,
-    deadLetterCount: 0,
-    conflicts: 2,
-  },
-  {
-    id: "zoho_sign",
-    name: "Zoho Sign",
-    category: "Agreement Execution",
-    icon: LinkIcon,
-    state: "connected",
-    environment: "production",
-    lastOutbound: "10 mins ago",
-    lastInbound: "Just now",
-    queueDepth: 0,
-    deadLetterCount: 0,
-    conflicts: 0,
-  },
-  {
-    id: "whatsapp",
-    name: "WhatsApp Business",
-    category: "Messaging",
-    icon: MessageSquare,
-    state: "attention_needed",
-    environment: "production",
-    lastOutbound: "4 hrs ago",
-    lastInbound: "4 hrs ago",
-    queueDepth: 45,
-    deadLetterCount: 12,
-    conflicts: 0,
-  },
-  {
-    id: "email",
-    name: "Postmark Email",
-    category: "Delivery",
-    icon: Mail,
-    state: "connected",
-    environment: "production",
-    lastOutbound: "Just now",
-    lastInbound: "5 mins ago",
-    queueDepth: 2,
-    deadLetterCount: 0,
-    conflicts: 0,
-  },
-  // GyFTR (rewards fulfilment) and DHL Express (logistics) are deliberately
-  // absent. Both are placeholders on the backend only — src/integrations/gyftr
-  // exists and returns a stub voucher response when unconfigured — and product
-  // direction is that neither is surfaced to operators until it is really
-  // wired. Showing a "paused" GyFTR row with a queue depth of 180 implied a
-  // live integration that does not exist. Do not re-add without a real
-  // connection behind it.
-];
-
-function StateBadge({ state }: { state: ConnectionState }) {
-  switch (state) {
-    case "connected":
-      return (
-        <Badge tone="success">
-          <CheckCircle2 className="mr-1 h-3 w-3" />
-          Connected
-        </Badge>
-      );
-    case "attention_needed":
-      return (
-        <Badge tone="danger">
-          <AlertTriangle className="mr-1 h-3 w-3" />
-          Attention Needed
-        </Badge>
-      );
-    case "paused":
-      return (
-        <Badge tone="warning">
-          <PauseCircle className="mr-1 h-3 w-3" />
-          Paused
-        </Badge>
-      );
-    case "disconnected":
-      return (
-        <Badge variant="secondary" className="text-muted-foreground">
-          <Unplug className="mr-1 h-3 w-3" />
-          Disconnected
-        </Badge>
-      );
+function StatusCounts({ counts }: { counts: Array<{ status: string; count: number }> }) {
+  if (counts.length === 0) {
+    return <p className="text-[13px] text-muted-foreground">No rows yet.</p>;
   }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {counts.map((entry) => (
+        <Badge key={entry.status} tone={STATUS_TONE[entry.status] ?? "neutral"}>
+          {entry.status} · {entry.count}
+        </Badge>
+      ))}
+    </div>
+  );
 }
 
 function AdminIntegrationsPage() {
-  const { hasRole } = useAuth();
-  const [providers, setProviders] = useState<ProviderData[]>(INITIAL_PROVIDERS);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const { hasRole, surfaces } = useAuth();
+  const [snapshot, setSnapshot] = useState<IntegrationDeliverySnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
-  if (!hasRole("super_admin")) {
+  const enabled = surfaces.integrationOperationsCentre;
+  const isSuperAdmin = hasRole("super_admin");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFailed(false);
+    try {
+      setSnapshot(await getIntegrationDeliverySnapshot());
+    } catch (error) {
+      console.error("Failed to load integration delivery snapshot", error);
+      setSnapshot(null);
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // No query is issued while the surface is off or the caller is not
+    // authorised, so a hidden page is hidden in the network tab too.
+    if (!enabled || !isSuperAdmin) {
+      setLoading(false);
+      return;
+    }
+    void load();
+  }, [enabled, isSuperAdmin, load]);
+
+  if (!enabled) {
     return (
-      <div className="flex h-[50vh] flex-col items-center justify-center gap-2 text-muted-foreground">
-        <AlertTriangle className="h-8 w-8 text-warning" />
-        <p>You must be a Super Admin to view the Integration Operations Centre.</p>
-      </div>
+      <FeatureUnavailablePage
+        title="Integration operations centre"
+        description="Integration operations are not enabled in this workspace."
+      />
     );
   }
 
-  const handleAction = async (
-    id: string,
-    action: "pause" | "resume" | "disconnect" | "reconnect",
-  ) => {
-    setProcessingId(id);
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    setProviders((current) =>
-      current.map((p) => {
-        if (p.id !== id) return p;
-
-        switch (action) {
-          case "pause":
-            toast.info(`${p.name} outbound processing paused`);
-            return { ...p, state: "paused" };
-          case "resume":
-            if (p.state === "attention_needed") {
-              toast.error(`Cannot resume ${p.name}. Resolve health issues first.`);
-              return p;
-            }
-            toast.success(`${p.name} processing resumed`);
-            return { ...p, state: "connected" };
-          case "disconnect":
-            toast.info(`${p.name} disconnected`);
-            return { ...p, state: "disconnected" };
-          case "reconnect":
-            toast.success(`${p.name} verified and connected`);
-            return { ...p, state: "connected" };
-        }
-      }),
-    );
-    setProcessingId(null);
-  };
+  if (!isSuperAdmin) {
+    return <AccessDeniedPage title="Integration operations centre" roleLabel="Super Admin" />;
+  }
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Operations Centre"
         icon={<Activity className="h-3.5 w-3.5" />}
-        title="External Integrations"
-        description="Monitor and control durable provider adapters. Never share secrets or leak payloads."
+        title="Integration delivery"
+        description="Outbound and inbound durable delivery state. Correlation and status only — never secrets or provider payloads."
       />
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {providers.map((provider) => {
-          const Icon = provider.icon;
-          const isProcessing = processingId === provider.id;
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Skeleton className="h-44 w-full" />
+          <Skeleton className="h-44 w-full" />
+        </div>
+      ) : failed || !snapshot ? (
+        <Card>
+          <EmptyState
+            title="Delivery state is unavailable"
+            description="The delivery tables could not be read. Nothing is inferred in their absence."
+          />
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatTile
+              label="Outbound envelopes"
+              value={snapshot.outbox.total}
+              icon={<Send className="h-4 w-4" />}
+            />
+            <StatTile
+              label="Oldest pending outbound"
+              value={
+                snapshot.outbox.oldestPendingAt
+                  ? formatDateTimeLabel(snapshot.outbox.oldestPendingAt)
+                  : "—"
+              }
+              tone={snapshot.outbox.oldestPendingAt ? "warning" : "neutral"}
+            />
+            <StatTile
+              label="Inbound envelopes"
+              value={snapshot.inbox.total}
+              icon={<Inbox className="h-4 w-4" />}
+            />
+            <StatTile
+              label="Highest attempt count"
+              value={snapshot.outbox.maxAttemptCount}
+              tone={snapshot.outbox.maxAttemptCount > 0 ? "warning" : "neutral"}
+            />
+          </div>
 
-          return (
-            <Card key={provider.id} className="flex flex-col">
-              <CardHeader className="pb-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-lg bg-muted p-2">
-                      <Icon className="h-5 w-5 text-foreground" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">{provider.name}</CardTitle>
-                      <CardDescription className="text-xs">{provider.category}</CardDescription>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="font-mono text-[10px] uppercase">
-                    {provider.environment}
-                  </Badge>
-                </div>
-                <div className="mt-4">
-                  <StateBadge state={provider.state} />
-                </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Outbound (command_outbox)</CardTitle>
+                <CardDescription>
+                  Envelopes written transactionally by domain commands, awaiting an adapter worker.
+                </CardDescription>
               </CardHeader>
-
-              <CardContent className="flex-1 space-y-4 text-sm">
-                <div className="grid grid-cols-2 gap-y-3">
-                  <div>
-                    <div className="text-muted-foreground text-xs">Last Outbound</div>
-                    <div className="font-medium">{provider.lastOutbound || "—"}</div>
+              <CardContent className="space-y-4">
+                <StatusCounts counts={snapshot.outbox.byStatus} />
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Emitting events
                   </div>
-                  <div>
-                    <div className="text-muted-foreground text-xs">Last Webhook</div>
-                    <div className="font-medium">{provider.lastInbound || "—"}</div>
-                  </div>
+                  {snapshot.recentEventNames.length === 0 ? (
+                    <p className="mt-1.5 text-[13px] text-muted-foreground">None recorded yet.</p>
+                  ) : (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {snapshot.recentEventNames.map((name) => (
+                        <Badge key={name} variant="outline" className="font-mono text-[10px]">
+                          {name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div>
-                      <div className="text-2xl font-semibold">{provider.queueDepth}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        Queued
-                      </div>
-                    </div>
-                    <div>
-                      <div
-                        className={`text-2xl font-semibold ${provider.deadLetterCount > 0 ? "text-destructive" : ""}`}
-                      >
-                        {provider.deadLetterCount}
-                      </div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        Failed
-                      </div>
-                    </div>
-                    <div>
-                      <div
-                        className={`text-2xl font-semibold ${provider.conflicts > 0 ? "text-warning" : ""}`}
-                      >
-                        {provider.conflicts}
-                      </div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        Conflicts
-                      </div>
-                    </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Inbound (command_inbox)</CardTitle>
+                <CardDescription>
+                  Verified provider events durably received before any domain processing.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <StatusCounts counts={snapshot.inbox.byStatus} />
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Oldest unprocessed
+                  </div>
+                  <div className="mt-1.5 text-[13px]">
+                    {snapshot.inbox.oldestUnprocessedAt
+                      ? formatDateTimeLabel(snapshot.inbox.oldestUnprocessedAt)
+                      : "—"}
                   </div>
                 </div>
               </CardContent>
-
-              <CardFooter className="border-t bg-muted/10 px-6 py-4">
-                <div className="flex w-full flex-wrap items-center justify-between gap-2">
-                  <div className="flex gap-2">
-                    {provider.state === "connected" && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={isProcessing}
-                        onClick={() => void handleAction(provider.id, "pause")}
-                      >
-                        <Pause className="mr-1.5 h-3.5 w-3.5" />
-                        Pause
-                      </Button>
-                    )}
-                    {(provider.state === "paused" || provider.state === "attention_needed") && (
-                      <Button
-                        size="sm"
-                        disabled={isProcessing}
-                        onClick={() => void handleAction(provider.id, "resume")}
-                      >
-                        <Play className="mr-1.5 h-3.5 w-3.5" />
-                        Resume
-                      </Button>
-                    )}
-                    {provider.state === "disconnected" && (
-                      <Button
-                        size="sm"
-                        disabled={isProcessing}
-                        onClick={() => void handleAction(provider.id, "reconnect")}
-                      >
-                        <LinkIcon className="mr-1.5 h-3.5 w-3.5" />
-                        Connect
-                      </Button>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button size="icon" variant="ghost" title="Settings">
-                      <Settings className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                    {provider.state !== "disconnected" && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        title="Disconnect"
-                        disabled={isProcessing}
-                        onClick={() => void handleAction(provider.id, "disconnect")}
-                      >
-                        <Unplug className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardFooter>
             </Card>
-          );
-        })}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
