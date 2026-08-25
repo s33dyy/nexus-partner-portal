@@ -5,6 +5,20 @@ import { pool } from "@/server/postgres.server";
 
 export type TransactionCallback<T> = (tx: PoolClient) => Promise<T>;
 
+/**
+ * Anything that can run one parameterised statement — a PoolClient, the pool
+ * itself, or a test double. Deliberately structural rather than
+ * `Pick<PoolClient, "query">`: PoolClient.query is a five-way overload, so
+ * the Pick form cannot be satisfied by a plain object and forces every
+ * caller and every test fake into a cast.
+ */
+export type QueryRunner = {
+  query: (
+    sql: string,
+    params?: unknown[],
+  ) => Promise<{ rows: unknown[]; rowCount?: number | null }>;
+};
+
 export async function withTransaction<T>(callback: TransactionCallback<T>) {
   const client = await pool.connect();
   try {
@@ -20,10 +34,7 @@ export async function withTransaction<T>(callback: TransactionCallback<T>) {
   }
 }
 
-export async function appendOutboxEnvelope(
-  tx: Pick<PoolClient, "query">,
-  envelope: OutboxEnvelope,
-) {
+export async function appendOutboxEnvelope(tx: QueryRunner, envelope: OutboxEnvelope) {
   await tx.query(
     `INSERT INTO command_outbox (
        outbox_id,
@@ -68,7 +79,7 @@ export async function appendOutboxEnvelope(
 
 export async function persistCommandMutationAndOutbox<T>(
   command: CommandEnvelope,
-  mutate: (tx: Pick<PoolClient, "query">) => Promise<T>,
+  mutate: (tx: QueryRunner) => Promise<T>,
   outbox: OutboxEnvelope[],
 ) {
   return withTransaction(async (tx) => {

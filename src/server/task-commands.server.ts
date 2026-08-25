@@ -45,7 +45,10 @@ const REASON_REQUIRED_TRANSITIONS = new Set<`${TaskStatus}->${TaskStatus}`>([
   "cancelled->to_do",
 ]);
 
-const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+/** Exported so workflow-automation.server.ts can close a generated Task
+ * through the same table a human transition uses, rather than keeping a
+ * second copy of the lifecycle that could drift from this one. */
+export const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   to_do: ["in_progress", "blocked", "completed", "cancelled"],
   in_progress: ["to_do", "blocked", "completed", "cancelled"],
   blocked: ["to_do", "in_progress", "cancelled"],
@@ -53,7 +56,7 @@ const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   cancelled: ["to_do"],
 };
 
-function isAllowedTaskTransition(from: TaskStatus, to: TaskStatus): boolean {
+export function isAllowedTaskTransition(from: TaskStatus, to: TaskStatus): boolean {
   return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
