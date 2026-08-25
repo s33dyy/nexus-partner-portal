@@ -398,3 +398,211 @@ export function describeSweep(summary: ReminderSweepSummary): string {
 
 /** Re-exported so callers don't need two imports to render a reminder date. */
 export { formatReminderDate, getReminderOffset };
+
+// ---------------------------------------------------------------------------
+// Distribution approval escalation (product.md §24.5.2)
+// ---------------------------------------------------------------------------
+//
+// Same safety argument as the reminder sweep above: no caller, no auth
+// context, and every message goes to someone the record itself names — the
+// snapped manager, that manager's own manager, or the configured Super Admin
+// fallback. It widens nobody's visibility.
+//
+// Idempotency is structural rather than claim-based here: the escalation
+// Task carries a stable automation_key and the Notifications carry stable
+// per-recipient event keys, so a second sweep over the same overdue approval
+// creates nothing and re-notifies nobody.
+
+export type DistributionEscalationSummary = {
+  ranAt: string;
+  overdue: number;
+  escalated: number;
+  toFallback: number;
+  unroutable: number;
+};
+
+type OverdueApproval = {
+  requestId: string;
+  humanId: string;
+  taskId: string;
+  managerAssignmentId: string;
+  managerUserId: string | null;
+  escalationAssignmentId: string | null;
+  escalationUserId: string | null;
+  priority: string;
+};
+
+async function loadOverdueApprovals(now: Date): Promise<OverdueApproval[]> {
+  const { rows } = await pool.query(
+    `SELECT t.id AS task_id,
+            r.id AS request_id,
+            r.human_id,
+            r.priority,
+            r.manager_assignment_id,
+            manager.user_id AS manager_user_id,
+            manager.manager_assignment_id AS escalation_assignment_id,
+            escalation.user_id AS escalation_user_id
+     FROM tasks t
+     JOIN stock_requests r
+       ON r.id = t.related_id AND t.related_type = 'stock_request'
+     JOIN assignments manager ON manager.assignment_id = r.manager_assignment_id
+     LEFT JOIN assignments escalation
+       ON escalation.assignment_id = manager.manager_assignment_id
+      AND escalation.status = 'active'
+     WHERE t.automation_source = 'stock_request'
+       AND t.automation_key LIKE '%:manager-approval:%'
+       AND t.status NOT IN ('completed', 'cancelled')
+       AND t.due_at IS NOT NULL
+       AND t.due_at < $1
+       AND r.status = 'submitted'`,
+    [now.toISOString()],
+  );
+
+  return (rows as Array<Record<string, unknown>>).map((row) => ({
+    requestId: String(row.request_id),
+    humanId: String(row.human_id),
+    taskId: String(row.task_id),
+    managerAssignmentId: String(row.manager_assignment_id),
+    managerUserId: row.manager_user_id == null ? null : String(row.manager_user_id),
+    escalationAssignmentId:
+      row.escalation_assignment_id == null ? null : String(row.escalation_assignment_id),
+    escalationUserId: row.escalation_user_id == null ? null : String(row.escalation_user_id),
+    priority: String(row.priority ?? "medium"),
+  }));
+}
+
+/**
+ * The Super Admin an escalation lands on when the hierarchy runs out.
+ *
+ * Configurable through app_settings so an organisation can name the person
+ * who actually watches this queue; falls back to the longest-standing Super
+ * Admin so an unconfigured deployment still routes the work somewhere rather
+ * than dropping it.
+ */
+async function resolveEscalationFallbackUserId(): Promise<string | null> {
+  const configured = await pool.query(
+    `SELECT value FROM app_settings WHERE key = 'distribution.escalation_fallback_user_id'`,
+  );
+  const configuredId = (configured.rows[0] as { value?: unknown } | undefined)?.value;
+  if (configuredId) {
+    const exists = await pool.query(`SELECT id FROM profiles WHERE id = $1`, [
+      String(configuredId),
+    ]);
+    if (exists.rows[0]) return String((exists.rows[0] as { id: unknown }).id);
+  }
+
+  const { rows } = await pool.query(
+    `SELECT ur.user_id
+     FROM user_roles ur
+     WHERE ur.role = 'super_admin'
+     ORDER BY ur.created_at ASC
+     LIMIT 1`,
+  );
+  const row = rows[0] as { user_id?: unknown } | undefined;
+  return row?.user_id ? String(row.user_id) : null;
+}
+
+export async function runDistributionEscalationSweep(options?: {
+  now?: Date;
+}): Promise<DistributionEscalationSummary> {
+  const now = options?.now ?? new Date();
+  const summary: DistributionEscalationSummary = {
+    ranAt: now.toISOString(),
+    overdue: 0,
+    escalated: 0,
+    toFallback: 0,
+    unroutable: 0,
+  };
+
+  const overdue = await loadOverdueApprovals(now);
+  summary.overdue = overdue.length;
+  if (overdue.length === 0) return summary;
+
+  const { ensureAutomatedTask, ensureNotification } =
+    await import("@/server/workflow-automation.server");
+  const { withTransaction } = await import("@/server/command-runtime.server");
+
+  let fallbackUserId: string | null | undefined;
+
+  for (const approval of overdue) {
+    const usesFallback = !approval.escalationAssignmentId || !approval.escalationUserId;
+    if (usesFallback && fallbackUserId === undefined) {
+      fallbackUserId = await resolveEscalationFallbackUserId();
+    }
+
+    const escalationUserId = usesFallback ? (fallbackUserId ?? null) : approval.escalationUserId;
+    const escalationKeySuffix = usesFallback
+      ? "super-admin-fallback"
+      : approval.escalationAssignmentId!;
+
+    if (!escalationUserId) {
+      // Nobody to escalate to at all. Recorded rather than silently skipped:
+      // an unroutable escalation is an operations problem, and pretending it
+      // was handled is how one goes unnoticed.
+      summary.unroutable += 1;
+      console.error(
+        `[distribution] approval for ${approval.humanId} is overdue with no escalation recipient`,
+      );
+      continue;
+    }
+
+    const actionUrl = `/distribution?tab=requests&requestId=${approval.requestId}`;
+    const reasonSuffix = usesFallback
+      ? " No active manager was found above the approving assignment, so this was routed to the Super Admin fallback."
+      : "";
+
+    await withTransaction(async (tx) => {
+      await ensureNotification(tx, {
+        userId: approval.managerUserId,
+        partnerId: null,
+        title: `Stock request ${approval.humanId} is past its approval deadline`,
+        message: "Approve or reject it, or it stays blocked with the requesting Distributor.",
+        type: "stock_request",
+        subjectType: "stock_request",
+        subjectId: approval.requestId,
+        actionUrl,
+        eventKey: `stock-request:${approval.requestId}:approval-overdue`,
+      });
+
+      await ensureAutomatedTask(tx, {
+        automationKey: `stock-request:${approval.requestId}:approval-escalation:${escalationKeySuffix}`,
+        automationSource: "stock_request",
+        templateVersion: 1,
+        assigneeId: escalationUserId,
+        // A sweep has no acting user; leaving the creator null is honest,
+        // and automation_source already says what opened it.
+        creatorId: null,
+        relatedType: "stock_request",
+        relatedId: approval.requestId,
+        title: `Escalated: stock request ${approval.humanId} is awaiting approval`,
+        description: `The approving manager has not decided within the ${approval.priority} priority SLA.${reasonSuffix}`,
+        priority: "high",
+        dueAt: null,
+        partnerId: null,
+      });
+
+      await ensureNotification(tx, {
+        userId: escalationUserId,
+        partnerId: null,
+        title: `Escalation: stock request ${approval.humanId} is awaiting approval`,
+        message: `The approving manager has not decided within the ${approval.priority} priority SLA.${reasonSuffix}`,
+        type: "stock_request",
+        subjectType: "stock_request",
+        subjectId: approval.requestId,
+        actionUrl,
+        eventKey: `stock-request:${approval.requestId}:approval-escalated`,
+      });
+    });
+
+    summary.escalated += 1;
+    if (usesFallback) summary.toFallback += 1;
+  }
+
+  return summary;
+}
+
+export function describeDistributionEscalationSweep(
+  summary: DistributionEscalationSummary,
+): string {
+  return `[distribution] ${summary.overdue} overdue approval(s), ${summary.escalated} escalated (${summary.toFallback} to fallback), ${summary.unroutable} unroutable`;
+}

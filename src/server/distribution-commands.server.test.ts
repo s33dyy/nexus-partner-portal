@@ -200,6 +200,11 @@ function installFakePool(state: HarnessState) {
     let undo: Array<() => void> = [];
 
     async function lock(key: string) {
+      // Postgres re-entrant locking: a transaction that already holds a row
+      // lock can SELECT ... FOR UPDATE the same row again without blocking.
+      // Without this the fake deadlocks against itself the moment a command
+      // reads a balance and then moves it.
+      if (heldKeys.includes(key)) return;
       await locks.acquire(key);
       heldKeys.push(key);
     }

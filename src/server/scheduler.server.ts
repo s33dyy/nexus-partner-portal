@@ -1,5 +1,10 @@
 import { describeDigestEmailSweep, runDigestEmailSweep } from "@/server/digest-email.server";
-import { describeSweep, runReminderSweep } from "@/server/reminders.server";
+import {
+  describeDistributionEscalationSweep,
+  describeSweep,
+  runDistributionEscalationSweep,
+  runReminderSweep,
+} from "@/server/reminders.server";
 
 // Background job scheduling.
 //
@@ -73,6 +78,17 @@ export async function runRemindersOnce(source: string): Promise<void> {
       console.log(`${describeDigestEmailSweep(summary)} (via ${source})`);
     } catch (error) {
       console.error("[scheduler] digest email sweep failed", error);
+    }
+
+    // Distribution approval SLA (product.md §24.5.2). Independently
+    // idempotent like the two above — the escalation Task and its
+    // Notifications carry stable keys — and wrapped so a failure here cannot
+    // stop the others from running on the next tick.
+    try {
+      const summary = await runDistributionEscalationSweep();
+      console.log(`${describeDistributionEscalationSweep(summary)} (via ${source})`);
+    } catch (error) {
+      console.error("[scheduler] distribution escalation sweep failed", error);
     }
   } finally {
     sweepInFlight = false;
