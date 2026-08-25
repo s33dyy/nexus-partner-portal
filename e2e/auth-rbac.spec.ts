@@ -37,9 +37,15 @@ test.describe("Super Admin can access all admin areas", () => {
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
   });
 
-  test("can navigate to /admin/integrations", async ({ page }) => {
+  // The Integration Operations Centre is behind the
+  // integration-operations-centre product-surface flag, which ships disabled
+  // and fails closed for every role including Super Admin (product.md §24.7).
+  // Reaching the route directly must therefore show the unavailable page,
+  // not the operations centre — see product-surface-gates.spec.ts for the
+  // full gate coverage.
+  test("/admin/integrations is unavailable while its surface flag is off", async ({ page }) => {
     await page.goto("/admin/integrations");
-    await expect(page.getByRole("heading", { name: /External Integrations/i })).toBeVisible();
+    await expect(page.getByText(/integration operations are not enabled/i)).toBeVisible();
   });
 
   test("can navigate to /admin/partners", async ({ page }) => {
