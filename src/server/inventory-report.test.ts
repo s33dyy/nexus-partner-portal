@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 
 import {
   analyzeInventoryTables,
+  emptyInventorySnapshot,
   formatInventoryReport,
+  listInventoryTables,
   type InventoryTables,
 } from "@/server/inventory-report";
 import { assertInventoryModeAllowed, parseArgs } from "../../scripts/inventory.ts";
@@ -37,8 +39,20 @@ test("inventory analyzer spots fixture issues and formats a summary", () => {
       },
     ],
     user_roles: [
-      { id: "role-1", user_id: "profile-1", role: "super_admin", is_seed: true, created_at: "2026-07-29T00:00:00Z" },
-      { id: "role-2", user_id: "profile-1", role: "super_admin", is_seed: true, created_at: "2026-07-29T00:01:00Z" },
+      {
+        id: "role-1",
+        user_id: "profile-1",
+        role: "super_admin",
+        is_seed: true,
+        created_at: "2026-07-29T00:00:00Z",
+      },
+      {
+        id: "role-2",
+        user_id: "profile-1",
+        role: "super_admin",
+        is_seed: true,
+        created_at: "2026-07-29T00:01:00Z",
+      },
     ],
     partners: [
       {
@@ -208,14 +222,18 @@ test("inventory analyzer spots fixture issues and formats a summary", () => {
 
   expect(report.summary.issueCount).toBeGreaterThan(0);
   expect(report.summary.demoTestRowCount).toBeGreaterThan(0);
-  expect(report.tables.find((table) => table.table === "lookup_values")?.unknownEnumValues).toEqual({});
+  expect(report.tables.find((table) => table.table === "lookup_values")?.unknownEnumValues).toEqual(
+    {},
+  );
   expect(
     report.issues.some(
       (issue) => issue.kind === "unknown-reference-field" && issue.table === "lookup_values",
     ),
   ).toBe(true);
   expect(
-    report.issues.some((issue) => issue.kind === "orphaned-relationship" && issue.table === "partner_documents"),
+    report.issues.some(
+      (issue) => issue.kind === "orphaned-relationship" && issue.table === "partner_documents",
+    ),
   ).toBe(true);
   expect(
     report.issues.some((issue) => issue.kind === "string-money" && issue.table === "partners"),
@@ -226,3 +244,144 @@ test("inventory analyzer spots fixture issues and formats a summary", () => {
   expect(formatInventoryReport(report)).toContain("Inventory report for fixture:test");
 });
 
+// ---------------------------------------------------------------------------
+// Distribution (DMS) coverage — product.md §24
+// ---------------------------------------------------------------------------
+
+const DMS_TABLES = [
+  "stock_locations",
+  "stock_requests",
+  "stock_request_lines",
+  "inventory_balances",
+  "inventory_movements",
+  "stock_request_transitions",
+] as const;
+
+test("the inventory analyzer covers every distribution table", () => {
+  const covered = listInventoryTables();
+  for (const table of DMS_TABLES) {
+    expect(covered).toContain(table);
+  }
+  // An empty snapshot must still name them, so a fresh database reports
+  // "0 rows" for stock rather than silently omitting the domain.
+  const empty = emptyInventorySnapshot();
+  for (const table of DMS_TABLES) {
+    expect(empty[table]).toEqual([]);
+  }
+});
+
+test("the inventory analyzer flags distribution enum, reference, and duplicate defects", () => {
+  const snapshot: InventoryTables = {
+    ...emptyInventorySnapshot(),
+    stock_locations: [
+      {
+        id: "loc-1",
+        location_code: "WH-MUM",
+        location_name: "Mumbai Warehouse",
+        // Not one of the two governed location types.
+        location_type: "third_party_depot",
+        tenant_id: "tenant-livey-org",
+        organization_tenant_id: "tenant-livey-org",
+        geography_node_id: "geo-in",
+        distributor_assignment_id: null,
+        custodian_assignment_id: null,
+        active: true,
+        version: 1,
+        created_at: "2026-08-25T00:00:00Z",
+        updated_at: "2026-08-25T00:00:00Z",
+      },
+    ],
+    stock_requests: [
+      {
+        id: "req-1",
+        human_id: "DMS-000001",
+        distributor_assignment_id: "assignment-missing",
+        requester_user_id: "profile-missing",
+        manager_assignment_id: "assignment-missing",
+        destination_location_id: "loc-1",
+        deal_id: null,
+        customer_id: null,
+        // Not one of the eleven governed statuses.
+        status: "in_limbo",
+        priority: "medium",
+        required_by: "2026-09-01",
+        reason: "Restock",
+        exception_reason: null,
+        version: 1,
+        idempotency_key: "key-1",
+        created_at: "2026-08-25T00:00:00Z",
+        updated_at: "2026-08-25T00:00:00Z",
+      },
+    ],
+    inventory_movements: [
+      {
+        id: "mv-1",
+        movement_type: "teleportation",
+        product_sku_id: "sku-missing",
+        source_location_id: null,
+        destination_location_id: "loc-1",
+        quantity: 5,
+        request_line_id: null,
+        actor_user_id: null,
+        assignment_id: null,
+        reason: "Opening",
+        correlation_id: "corr-1",
+        idempotency_key: "mv-key-1",
+        created_at: "2026-08-25T00:00:00Z",
+      },
+    ],
+    inventory_balances: [
+      {
+        id: "bal-1",
+        product_sku_id: "sku-1",
+        location_id: "loc-1",
+        on_hand_quantity: 10,
+        reserved_quantity: 0,
+        damaged_quantity: 0,
+        version: 1,
+        created_at: "2026-08-25T00:00:00Z",
+        updated_at: "2026-08-25T00:00:00Z",
+      },
+      {
+        // Same (SKU, location) pair twice — the projection must be unique.
+        id: "bal-2",
+        product_sku_id: "sku-1",
+        location_id: "loc-1",
+        on_hand_quantity: 4,
+        reserved_quantity: 0,
+        damaged_quantity: 0,
+        version: 1,
+        created_at: "2026-08-25T00:00:00Z",
+        updated_at: "2026-08-25T00:00:00Z",
+      },
+    ],
+  };
+
+  const report = analyzeInventoryTables(snapshot, "fixture:distribution");
+
+  expect(
+    report.issues.some(
+      (issue) => issue.kind === "invalid-enum" && issue.table === "stock_locations",
+    ),
+  ).toBe(true);
+  expect(
+    report.issues.some(
+      (issue) => issue.kind === "invalid-enum" && issue.table === "stock_requests",
+    ),
+  ).toBe(true);
+  expect(
+    report.issues.some(
+      (issue) => issue.kind === "invalid-enum" && issue.table === "inventory_movements",
+    ),
+  ).toBe(true);
+  expect(
+    report.issues.some(
+      (issue) => issue.kind === "orphaned-relationship" && issue.table === "stock_requests",
+    ),
+  ).toBe(true);
+  expect(
+    report.issues.some(
+      (issue) => issue.kind === "duplicate" && issue.table === "inventory_balances",
+    ),
+  ).toBe(true);
+});

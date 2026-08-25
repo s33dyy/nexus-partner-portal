@@ -2114,3 +2114,356 @@ CREATE INDEX IF NOT EXISTS portal_deals_loss_reason_category_idx
 -- than none, so the UI branches on null rather than rendering an empty box.
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS image_path TEXT;
 ALTER TABLE portal_catalog_items ADD COLUMN IF NOT EXISTS image_alt TEXT;
+
+-- ===========================================================================
+-- Distributor Management System (DMS) — product.md §24
+-- ===========================================================================
+--
+-- Every statement below is additive and idempotent: db:migrate re-runs this
+-- whole file against the already-bootstrapped production database on every
+-- deploy, so new columns on existing tables are ALTER ... ADD COLUMN IF NOT
+-- EXISTS, never inline CREATE TABLE columns (CREATE TABLE IF NOT EXISTS is a
+-- no-op on a table that already exists, and the inline column would never
+-- land). The six DMS tables themselves are brand new, so plain
+-- CREATE TABLE IF NOT EXISTS is correct for them.
+--
+-- None of these tables is registered in TABLE_COLUMNS (livey-service.server.ts)
+-- and all of them are denied on the generic queryTable()/supabase.from() path
+-- for every role including super_admin. Every legitimate access goes through a
+-- named server function in distribution-commands.server.ts /
+-- distribution-queries.server.ts using raw pool.query.
+
+CREATE SEQUENCE IF NOT EXISTS stock_request_seq START 1;
+
+-- A named physical place that holds stock. A 'distributor' location belongs
+-- to exactly one Distributor Assignment and a 'livey_warehouse' belongs to
+-- none — enforced by the CHECK below rather than left to convention, because
+-- a distributor location with no owner would be visible to nobody and a
+-- warehouse with one would be visible to the wrong person.
+CREATE TABLE IF NOT EXISTS stock_locations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_code TEXT NOT NULL UNIQUE,
+  location_name TEXT NOT NULL,
+  location_type TEXT NOT NULL CHECK (location_type IN ('livey_warehouse','distributor')),
+  tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  organization_tenant_id TEXT NOT NULL REFERENCES governed_tenants(tenant_id) ON DELETE RESTRICT,
+  geography_node_id TEXT NOT NULL REFERENCES geography_nodes(node_id) ON DELETE RESTRICT,
+  distributor_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  custodian_assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((location_type = 'distributor') = (distributor_assignment_id IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS stock_locations_distributor_idx
+  ON stock_locations (distributor_assignment_id)
+  WHERE distributor_assignment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS stock_locations_custodian_idx
+  ON stock_locations (custodian_assignment_id)
+  WHERE custodian_assignment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS stock_locations_type_idx ON stock_locations (location_type, active);
+
+DROP TRIGGER IF EXISTS stock_locations_updated_at ON stock_locations;
+CREATE TRIGGER stock_locations_updated_at
+BEFORE UPDATE ON stock_locations
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- distributor_assignment_id and manager_assignment_id are SNAPSHOTS taken at
+-- submission (§24.3), not live lookups. A later reorganisation must not move
+-- an in-flight request to a different approver, so approval authority is read
+-- from this row and never re-derived from the requester's current Assignment.
+CREATE TABLE IF NOT EXISTS stock_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  human_id TEXT NOT NULL UNIQUE DEFAULT 'DMS-' || LPAD(nextval('stock_request_seq')::text, 6, '0'),
+  distributor_assignment_id TEXT NOT NULL REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  requester_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  manager_assignment_id TEXT NOT NULL REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  destination_location_id UUID NOT NULL REFERENCES stock_locations(id) ON DELETE RESTRICT,
+  deal_id UUID REFERENCES portal_deals(id) ON DELETE RESTRICT,
+  customer_id UUID REFERENCES portal_customers(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  priority TEXT NOT NULL DEFAULT 'medium',
+  required_by DATE NOT NULL,
+  reason TEXT NOT NULL,
+  decision_reason TEXT,
+  exception_reason TEXT,
+  exception_from_status TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (status IN (
+    'submitted','approved','awaiting_stock','partially_allocated','allocated',
+    'dispatched','partially_received','received','exception','rejected','cancelled'
+  )),
+  CHECK (priority IN ('low','medium','high','urgent'))
+);
+
+CREATE INDEX IF NOT EXISTS stock_requests_distributor_idx
+  ON stock_requests (distributor_assignment_id, status);
+CREATE INDEX IF NOT EXISTS stock_requests_manager_idx
+  ON stock_requests (manager_assignment_id, status);
+CREATE INDEX IF NOT EXISTS stock_requests_destination_idx ON stock_requests (destination_location_id);
+CREATE INDEX IF NOT EXISTS stock_requests_deal_idx ON stock_requests (deal_id) WHERE deal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS stock_requests_customer_idx
+  ON stock_requests (customer_id) WHERE customer_id IS NOT NULL;
+
+DROP TRIGGER IF EXISTS stock_requests_updated_at ON stock_requests;
+CREATE TRIGGER stock_requests_updated_at
+BEFORE UPDATE ON stock_requests
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- The quantity ladder from §24.3. Each rung is bounded by the one above it,
+-- so the database refuses a line that claims more shipped than reserved or
+-- more arrived than shipped even if a command ever forgets to check.
+CREATE TABLE IF NOT EXISTS stock_request_lines (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES stock_requests(id) ON DELETE RESTRICT,
+  product_sku_id UUID NOT NULL REFERENCES product_skus(id) ON DELETE RESTRICT,
+  source_location_id UUID REFERENCES stock_locations(id) ON DELETE RESTRICT,
+  requested_quantity INTEGER NOT NULL CHECK (requested_quantity > 0),
+  approved_quantity INTEGER NOT NULL DEFAULT 0 CHECK (approved_quantity >= 0),
+  reserved_quantity INTEGER NOT NULL DEFAULT 0 CHECK (reserved_quantity >= 0),
+  dispatched_quantity INTEGER NOT NULL DEFAULT 0 CHECK (dispatched_quantity >= 0),
+  received_quantity INTEGER NOT NULL DEFAULT 0 CHECK (received_quantity >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (request_id, product_sku_id),
+  CHECK (approved_quantity <= requested_quantity),
+  CHECK (reserved_quantity <= approved_quantity),
+  CHECK (dispatched_quantity <= reserved_quantity),
+  CHECK (received_quantity <= dispatched_quantity)
+);
+
+CREATE INDEX IF NOT EXISTS stock_request_lines_request_idx ON stock_request_lines (request_id);
+CREATE INDEX IF NOT EXISTS stock_request_lines_sku_idx ON stock_request_lines (product_sku_id);
+CREATE INDEX IF NOT EXISTS stock_request_lines_source_idx
+  ON stock_request_lines (source_location_id) WHERE source_location_id IS NOT NULL;
+
+DROP TRIGGER IF EXISTS stock_request_lines_updated_at ON stock_request_lines;
+CREATE TRIGGER stock_request_lines_updated_at
+BEFORE UPDATE ON stock_request_lines
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- The balance PROJECTION: one row per (SKU, location), rebuildable at any
+-- time from inventory_movements below, which is the actual truth. Available
+-- is deliberately absent — it is computed as
+-- on_hand - reserved - damaged in SQL so it cannot drift from its inputs.
+CREATE TABLE IF NOT EXISTS inventory_balances (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_sku_id UUID NOT NULL REFERENCES product_skus(id) ON DELETE RESTRICT,
+  location_id UUID NOT NULL REFERENCES stock_locations(id) ON DELETE RESTRICT,
+  on_hand_quantity INTEGER NOT NULL DEFAULT 0 CHECK (on_hand_quantity >= 0),
+  reserved_quantity INTEGER NOT NULL DEFAULT 0 CHECK (reserved_quantity >= 0),
+  damaged_quantity INTEGER NOT NULL DEFAULT 0 CHECK (damaged_quantity >= 0),
+  in_transit_quantity INTEGER NOT NULL DEFAULT 0 CHECK (in_transit_quantity >= 0),
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (product_sku_id, location_id),
+  -- Committed and written-off units both come out of what is physically
+  -- present; together they can never exceed it.
+  CHECK (reserved_quantity + damaged_quantity <= on_hand_quantity)
+);
+
+CREATE INDEX IF NOT EXISTS inventory_balances_location_idx ON inventory_balances (location_id);
+
+DROP TRIGGER IF EXISTS inventory_balances_updated_at ON inventory_balances;
+CREATE TRIGGER inventory_balances_updated_at
+BEFORE UPDATE ON inventory_balances
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- Immutable ledger. Rows are never updated and never deleted; a mistake is
+-- corrected by posting a compensating movement with a reason. Every row
+-- carries who did it, under which Assignment, why, the correlation ID that
+-- ties it to the rest of the request's evidence, and the before/after
+-- quantities on both sides so a projection can be audited without replaying
+-- the whole table.
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  movement_type TEXT NOT NULL,
+  product_sku_id UUID NOT NULL REFERENCES product_skus(id) ON DELETE RESTRICT,
+  source_location_id UUID REFERENCES stock_locations(id) ON DELETE RESTRICT,
+  destination_location_id UUID REFERENCES stock_locations(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  request_id UUID REFERENCES stock_requests(id) ON DELETE RESTRICT,
+  request_line_id UUID REFERENCES stock_request_lines(id) ON DELETE RESTRICT,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE RESTRICT,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  reason TEXT,
+  correlation_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  source_on_hand_before INTEGER,
+  source_on_hand_after INTEGER,
+  source_reserved_before INTEGER,
+  source_reserved_after INTEGER,
+  source_damaged_before INTEGER,
+  source_damaged_after INTEGER,
+  destination_on_hand_before INTEGER,
+  destination_on_hand_after INTEGER,
+  destination_in_transit_before INTEGER,
+  destination_in_transit_after INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (movement_type IN (
+    'opening_balance','receipt','reservation','reservation_release','dispatch',
+    'delivery','transfer','damage','adjustment'
+  )),
+  CHECK (source_location_id IS NOT NULL OR destination_location_id IS NOT NULL),
+  CHECK (source_location_id IS DISTINCT FROM destination_location_id)
+);
+
+CREATE INDEX IF NOT EXISTS inventory_movements_sku_time_idx
+  ON inventory_movements (product_sku_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS inventory_movements_source_idx
+  ON inventory_movements (source_location_id, created_at DESC)
+  WHERE source_location_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS inventory_movements_destination_idx
+  ON inventory_movements (destination_location_id, created_at DESC)
+  WHERE destination_location_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS inventory_movements_request_idx
+  ON inventory_movements (request_id) WHERE request_id IS NOT NULL;
+
+-- Every state change a request ever made, including the reason and the
+-- Assignment the actor held at the time. There is no hard delete of a
+-- request, so this is the complete history.
+CREATE TABLE IF NOT EXISTS stock_request_transitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES stock_requests(id) ON DELETE RESTRICT,
+  command_name TEXT NOT NULL,
+  from_status TEXT NOT NULL,
+  to_status TEXT NOT NULL,
+  actor_user_id UUID REFERENCES profiles(id) ON DELETE RESTRICT,
+  assignment_id TEXT REFERENCES assignments(assignment_id) ON DELETE RESTRICT,
+  reason TEXT,
+  correlation_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS stock_request_transitions_request_idx
+  ON stock_request_transitions (request_id, created_at DESC);
+
+-- --- Workflow automation evidence on the existing Task/Notification tables --
+--
+-- Additive ALTERs, never inline CREATE TABLE columns: both tables exist on
+-- every previously-migrated database.
+--
+-- automation_key is what makes a replayed command converge instead of
+-- opening a second Task. The unique index is PARTIAL so the millions of
+-- hand-created Tasks that carry NULL are unaffected, and it excludes closed
+-- Tasks so the same automation key can legitimately recur on a later
+-- request cycle after the first one is done.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS automation_source TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS automation_template_version INTEGER;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS automation_key TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_automation_key_open_idx
+  ON tasks (automation_key)
+  WHERE automation_key IS NOT NULL AND status NOT IN ('completed', 'cancelled');
+
+CREATE INDEX IF NOT EXISTS tasks_automation_source_idx
+  ON tasks (automation_source) WHERE automation_source IS NOT NULL;
+
+-- event_key is scoped per recipient, not per event: one recipient gets one
+-- Notification per event, while different recipients each get their own.
+-- A single global unique key would have silently delivered a shortage
+-- notice to whichever of the three recipients happened to be inserted first.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subject_type TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subject_id TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_url TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS notifications_user_event_key_idx
+  ON notifications (user_id, event_key)
+  WHERE event_key IS NOT NULL AND user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS notifications_subject_idx
+  ON notifications (subject_type, subject_id)
+  WHERE subject_type IS NOT NULL;
+
+-- --- Distribution permission defaults (product.md §24.4.1) ------------------
+--
+-- Delete is FALSE for every role including super_admin: §24.2 forbids
+-- destroying inventory history, and a correction is a compensating movement,
+-- not a deletion. Roles absent from this list inherit the table's all-false
+-- column defaults through the rows below. Editable afterward from
+-- /admin/roles, like the rest of the matrix.
+INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_update, can_delete) VALUES
+  ('super_admin', 'distribution', true, true, true, false),
+  ('rm', 'distribution', false, true, true, false),
+  ('pam', 'distribution', false, true, true, false),
+  ('restricted_distributor', 'distribution', true, true, true, false),
+  ('kam', 'distribution', false, false, false, false),
+  ('isr', 'distribution', false, false, false, false),
+  ('livey_support', 'distribution', false, false, false, false),
+  ('partner_admin', 'distribution', false, false, false, false),
+  ('partner_user', 'distribution', false, false, false, false)
+ON CONFLICT (role_key, feature_key) DO NOTHING;
+
+-- --- Product-surface readiness flags ---------------------------------------
+--
+-- Seeded disabled so the row exists for an operator to flip, without the
+-- surface ever being on by default. DO NOTHING on conflict is deliberate: a
+-- re-run of this file must never flip a flag an operator has deliberately
+-- changed, in either direction.
+INSERT INTO feature_flags (
+  flag_key, label, enabled, owner, cohort, dependencies, metrics, expires_at, rollback, audit_required, is_seed
+) VALUES
+  (
+    'distribution-core',
+    'Distributor stock requests and inventory',
+    false,
+    'Distribution and Logistics',
+    'internal-only',
+    ARRAY['command-framework-write','baseline-telemetry'],
+    ARRAY['stock-request-throughput','distribution-denial-rate'],
+    NULL,
+    'Disable distribution-core first. Navigation, direct routes, and every DMS command fail closed; movement and request history is retained, never deleted.',
+    true,
+    true
+  ),
+  (
+    'integration-operations-centre',
+    'Integration operations centre',
+    false,
+    'Platform Integrations',
+    'internal-only',
+    ARRAY['baseline-telemetry'],
+    ARRAY['integration-readiness-reads'],
+    NULL,
+    'Disable the flag; /admin/integrations returns to the unavailable page.',
+    true,
+    true
+  ),
+  (
+    'learning-lesson-authoring',
+    'Insight Hub lesson authoring',
+    false,
+    'Enablement',
+    'internal-only',
+    ARRAY['command-framework-write'],
+    ARRAY['lesson-authoring-writes'],
+    NULL,
+    'Disable the flag; the lesson authoring action disappears from Learning admin.',
+    true,
+    true
+  ),
+  (
+    'gyftr-fulfillment',
+    'GyFTR digital reward fulfillment',
+    false,
+    'Rewards',
+    'internal-only',
+    ARRAY['command-framework-write'],
+    ARRAY['voucher-issue-success','voucher-issue-failure'],
+    NULL,
+    'Disable the flag; digital rewards become unrequestable and unapprovable, and no provider call is made.',
+    true,
+    true
+  )
+ON CONFLICT (flag_key) DO NOTHING;

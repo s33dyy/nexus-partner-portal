@@ -1,4 +1,10 @@
 import {
+  INVENTORY_MOVEMENT_TYPES,
+  STOCK_LOCATION_TYPES,
+  STOCK_REQUEST_PRIORITIES,
+  STOCK_REQUEST_STATUSES,
+} from "@/domain/contracts/distribution";
+import {
   ASSIGNMENT_STATUSES,
   DEAL_STAGES,
   DOCUMENT_PURPOSE_CATEGORIES,
@@ -385,6 +391,69 @@ const TABLE_SPECS: readonly TableSpec[] = [
     relationshipFields: [
       { field: "user_id", refTable: "profiles" },
       { field: "partner_id", refTable: "partners" },
+    ],
+  },
+  // --- Distribution (DMS), product.md §24 --------------------------------
+  {
+    table: "stock_locations",
+    uniqueKeySets: [["location_code"]],
+    enumFields: { location_type: STOCK_LOCATION_TYPES },
+    relationshipFields: [
+      { field: "tenant_id", refTable: "governed_tenants", refField: "tenant_id" },
+      { field: "organization_tenant_id", refTable: "governed_tenants", refField: "tenant_id" },
+      { field: "geography_node_id", refTable: "geography_nodes", refField: "node_id" },
+      { field: "distributor_assignment_id", refTable: "assignments", refField: "assignment_id" },
+      { field: "custodian_assignment_id", refTable: "assignments", refField: "assignment_id" },
+    ],
+  },
+  {
+    table: "stock_requests",
+    uniqueKeySets: [["human_id"], ["idempotency_key"]],
+    enumFields: { status: STOCK_REQUEST_STATUSES, priority: STOCK_REQUEST_PRIORITIES },
+    relationshipFields: [
+      { field: "distributor_assignment_id", refTable: "assignments", refField: "assignment_id" },
+      { field: "manager_assignment_id", refTable: "assignments", refField: "assignment_id" },
+      { field: "requester_user_id", refTable: "profiles" },
+      { field: "destination_location_id", refTable: "stock_locations" },
+      { field: "deal_id", refTable: "portal_deals" },
+      { field: "customer_id", refTable: "portal_customers" },
+    ],
+  },
+  {
+    table: "stock_request_lines",
+    // A SKU may appear at most once per request (§24.3).
+    uniqueKeySets: [["request_id", "product_sku_id"]],
+    relationshipFields: [
+      { field: "request_id", refTable: "stock_requests" },
+      { field: "source_location_id", refTable: "stock_locations" },
+    ],
+  },
+  {
+    table: "inventory_balances",
+    // The projection is one row per (SKU, location); a duplicate means two
+    // rows disagree about the same physical shelf.
+    uniqueKeySets: [["product_sku_id", "location_id"]],
+    relationshipFields: [{ field: "location_id", refTable: "stock_locations" }],
+  },
+  {
+    table: "inventory_movements",
+    uniqueKeySets: [["idempotency_key"]],
+    enumFields: { movement_type: INVENTORY_MOVEMENT_TYPES },
+    relationshipFields: [
+      { field: "source_location_id", refTable: "stock_locations" },
+      { field: "destination_location_id", refTable: "stock_locations" },
+      { field: "request_line_id", refTable: "stock_request_lines" },
+      { field: "actor_user_id", refTable: "profiles" },
+      { field: "assignment_id", refTable: "assignments", refField: "assignment_id" },
+    ],
+  },
+  {
+    table: "stock_request_transitions",
+    enumFields: { to_status: STOCK_REQUEST_STATUSES },
+    relationshipFields: [
+      { field: "request_id", refTable: "stock_requests" },
+      { field: "actor_user_id", refTable: "profiles" },
+      { field: "assignment_id", refTable: "assignments", refField: "assignment_id" },
     ],
   },
 ];

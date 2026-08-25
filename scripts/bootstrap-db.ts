@@ -41,6 +41,15 @@ const RESET_TABLES = [
   "reward_catalog_items",
   "reward_point_events",
   "reward_redemptions",
+  // Distribution (product.md §24). CASCADE from assignments/profiles would
+  // reach these anyway; naming them keeps the reset's blast radius visible
+  // rather than implied.
+  "stock_request_transitions",
+  "inventory_movements",
+  "inventory_balances",
+  "stock_request_lines",
+  "stock_requests",
+  "stock_locations",
 ] as const;
 
 async function resetDatabase() {
@@ -79,9 +88,14 @@ async function resetDatabase() {
            is_seed
          )
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         -- enabled is deliberately NOT in this SET list. The registry's
+         -- enabledByDefault is the value a flag is *created* with; once the
+         -- row exists, the operator who last flipped it owns it. Re-running
+         -- bootstrap must not silently switch a surface back on (or off)
+         -- behind whoever changed it, which is exactly what updating
+         -- enabled here used to do.
          ON CONFLICT (flag_key) DO UPDATE SET
            label = EXCLUDED.label,
-           enabled = EXCLUDED.enabled,
            owner = EXCLUDED.owner,
            cohort = EXCLUDED.cohort,
            dependencies = EXCLUDED.dependencies,
