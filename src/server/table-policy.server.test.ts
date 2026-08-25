@@ -1515,3 +1515,82 @@ test("generic Deal update still allows the neighbouring date columns through", a
     notes: "Updated",
   });
 });
+
+// ---------------------------------------------------------------------------
+// Distribution (DMS) tables are unreachable through the generic path
+// ---------------------------------------------------------------------------
+
+test("§24: every DMS table is denied on the generic table path, for every role", async () => {
+  const { isDistributionOnlyTable, DISTRIBUTION_ONLY_TABLES } =
+    await import("@/server/table-policy.server");
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+
+  const dmsTables = [
+    "stock_locations",
+    "stock_requests",
+    "stock_request_lines",
+    "inventory_balances",
+    "inventory_movements",
+    "stock_request_transitions",
+  ];
+  for (const table of dmsTables) {
+    expect(isDistributionOnlyTable(table)).toBe(true);
+    expect(DISTRIBUTION_ONLY_TABLES.has(table)).toBe(true);
+  }
+  expect(isDistributionOnlyTable("portal_deals")).toBe(false);
+
+  // Super Admin has the broadest generic-path access there is, and still
+  // cannot reach a DMS table: every legitimate access goes through a named
+  // server function that applies the §24.4 scope itself.
+  for (const table of dmsTables) {
+    const result = await queryTableWithAuthContext(
+      { table, operation: "select" },
+      {
+        userId: "11111111-1111-1111-1111-111111111111",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    expect(result.error?.message).toBe("Access denied");
+    expect(result.data).toBeNull();
+  }
+});
+
+test("§24: a DMS write through the generic path is denied without touching the database", async () => {
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+
+  let queries = 0;
+  const originalQuery = pool.query.bind(pool);
+  pool.query = (async () => {
+    queries += 1;
+    return { rows: [], rowCount: 0 };
+  }) as unknown as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      {
+        table: "inventory_balances",
+        operation: "update",
+        values: { on_hand_quantity: 9999 },
+      },
+      {
+        userId: "11111111-1111-1111-1111-111111111111",
+        roles: ["super_admin"],
+        partnerId: null,
+        companyName: null,
+        hasGovernedContext: true,
+        governedRoleKey: "super_admin",
+        geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+      },
+    );
+    expect(result.error?.message).toBe("Access denied");
+    expect(queries).toBe(0);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});

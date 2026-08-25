@@ -120,6 +120,35 @@ const GOVERNANCE_TABLES = new Set([
 //     to seize any account, including super_admin.
 const SERVER_ONLY_TABLES = new Set(["document_blobs", "password_reset_tokens"]);
 
+/**
+ * Distribution (DMS) tables — product.md §24.
+ *
+ * Never reachable through the generic queryTable()/supabase.from() path by
+ * anyone, including super_admin. Unlike SERVER_ONLY_TABLES above, these are
+ * deliberately NOT registered in TABLE_COLUMNS either, so the generic path
+ * has no column allowlist for them and could not build a statement even if
+ * this check were removed. Both guards exist because the two failure modes
+ * differ: an unregistered table throws "Unsupported table" (which names the
+ * table back to the caller), while this returns the same flat "Access
+ * denied" every other refused table returns.
+ *
+ * Every legitimate DMS read and write goes through a named server function
+ * in distribution-queries.server.ts / distribution-commands.server.ts, which
+ * resolves the governed actor and applies the §24.4 scope itself.
+ */
+export const DISTRIBUTION_ONLY_TABLES = new Set([
+  "stock_locations",
+  "stock_requests",
+  "stock_request_lines",
+  "inventory_balances",
+  "inventory_movements",
+  "stock_request_transitions",
+]);
+
+export function isDistributionOnlyTable(table: string): boolean {
+  return DISTRIBUTION_ONLY_TABLES.has(table);
+}
+
 // Tables reachable through the generic queryTable()/supabase.from() path
 // that are gated by the role permission matrix (admin.roles.tsx). Identity/
 // session tables (profiles, user_roles, assignments, active_contexts,

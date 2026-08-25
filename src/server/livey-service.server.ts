@@ -16,6 +16,7 @@ import {
 import { pool } from "@/server/postgres.server";
 import {
   applyTablePolicy,
+  isDistributionOnlyTable,
   type QueryFilter as TablePolicyQueryFilter,
   type TablePolicyAuthContext,
 } from "@/server/table-policy.server";
@@ -1220,6 +1221,17 @@ export async function queryTableWithAuthContext(
   query: TableQuery,
   authContext: TablePolicyAuthContext,
 ) {
+  // Checked before assertTable so a DMS table answers with the same flat
+  // "Access denied" as any other refused table, rather than the
+  // "Unsupported table: stock_requests" that assertTable would throw — which
+  // would confirm the name back to whoever probed for it.
+  if (isDistributionOnlyTable(query.table)) {
+    return {
+      data: null,
+      error: { message: "Access denied" },
+    };
+  }
+
   assertTable(query.table);
   const columns = TABLE_COLUMNS[query.table];
   let policyQuery: TableQuery;
