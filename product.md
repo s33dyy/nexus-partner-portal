@@ -6217,14 +6217,16 @@ Cancellation is permitted only while no unit has been dispatched. Once `dispatch
 
 #### 24.3.3 Derived status
 
-The header status is derived from line quantities, never written directly by a client. Given a request whose lines have been reviewed:
+The header status is derived from line quantities, never written directly by a client. Given a request whose lines have been reviewed, the first rule that matches wins:
 
-1. if every line's `received_quantity` equals its `dispatched_quantity` and at least one unit was dispatched, the status is `received`;
+1. if any unit was approved and every line's `received_quantity` equals its `approved_quantity`, the status is `received`;
 2. otherwise if any `received_quantity > 0`, the status is `partially_received`;
-3. otherwise if every line's `dispatched_quantity` equals its `reserved_quantity` and at least one unit was reserved, the status is `dispatched`;
-4. otherwise if every line's `reserved_quantity` equals its `approved_quantity` and at least one unit was approved, the status is `allocated`;
+3. otherwise if any `dispatched_quantity > 0`, the status is `dispatched`;
+4. otherwise if any unit was approved and every line's `reserved_quantity` equals its `approved_quantity`, the status is `allocated`;
 5. otherwise if any `reserved_quantity > 0`, the status is `partially_allocated`;
 6. otherwise the status is `awaiting_stock`.
+
+Two consequences are deliberate. `received` requires every approved unit to have arrived, not merely every dispatched unit, so a request whose second line was never fulfilled cannot close by shipping only its first line. And there is no `partially_dispatched` state: once any unit is in transit the header says `dispatched` and the line quantities carry the detail, because from that moment the only question anyone asks is what has arrived.
 
 `submitted`, `approved`, `exception`, `rejected`, and `cancelled` are set by their own explicit commands and are not derived.
 
