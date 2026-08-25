@@ -12,6 +12,7 @@
     "db:migrate": "bun scripts/apply-migrations.ts",
     "db:bootstrap": "bun scripts/bootstrap-db.ts",
     "inventory": "bun scripts/inventory.ts",
+    "audit:surfaces": "bun scripts/audit-product-surfaces.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:e2e": "playwright test",
