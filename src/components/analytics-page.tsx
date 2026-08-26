@@ -23,8 +23,10 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { AnalyticsBreakdownDialog } from "@/components/analytics-breakdown-dialog";
 import { ChartFrame, DonutLegend, KpiTile } from "@/components/analytics-primitives";
 import { formatCount, formatDays, formatPercent, formatUsd } from "@/lib/analytics-format";
+import type { WonMixDimension } from "@/lib/analytics-metrics";
 import { supabase } from "@/integrations/local/client";
 import { buildExportFilename } from "@/lib/export-files";
 import { applyPartnerScope } from "@/lib/partner-scope";
@@ -163,6 +165,14 @@ export function AnalyticsPage() {
   const comparison = useMemo(() => comparePeriods(deals, now, 30), [deals, now]);
   const businessSplit = useMemo(() => newVsExistingBusiness(deals), [deals]);
   const deltaLabel = `vs prior ${comparison.windowDays} days`;
+
+  // Which won-value chart is expanded, and which bar the user arrived on.
+  // Null means no dialog is open; the key is optional because the header's
+  // Expand button opens the same view with nothing pre-selected.
+  const [breakdown, setBreakdown] = useState<{
+    dimension: WonMixDimension;
+    key: string | null;
+  } | null>(null);
 
   // Repeat business is only a meaningful split once some customer has bought
   // twice. Below that the gauge is pinned at 100% and is decoration.
@@ -699,11 +709,13 @@ export function AnalyticsPage() {
           loading={loading}
           emptyLabel="No won deals to attribute to a product."
           thinThreshold={0}
+          onExpand={() => setBreakdown({ dimension: "product", key: null })}
         >
           <ChartContainer
             config={PRODUCT_CHART_CONFIG}
             className="aspect-auto h-[240px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
           >
+            {/* The card shows the top 7; the expanded view shows every row. */}
             <BarChart
               data={products.slice(0, 7)}
               layout="vertical"
@@ -730,6 +742,10 @@ export function AnalyticsPage() {
                 radius={[0, 4, 4, 0]}
                 maxBarSize={22}
                 isAnimationActive={false}
+                className="cursor-pointer"
+                onClick={(entry: { payload?: { key?: string } }) =>
+                  setBreakdown({ dimension: "product", key: entry?.payload?.key ?? null })
+                }
               />
             </BarChart>
           </ChartContainer>
@@ -850,11 +866,13 @@ export function AnalyticsPage() {
           loading={loading}
           emptyLabel="No won deals to attribute yet."
           thinThreshold={0}
+          onExpand={() => setBreakdown({ dimension: "owner", key: null })}
         >
           <ChartContainer
             config={OWNER_CHART_CONFIG}
             className="aspect-auto h-[220px] w-full [&_.recharts-cartesian-axis-tick_text]:text-[11px]"
           >
+            {/* The card shows the top 6; the expanded view shows every row. */}
             <BarChart
               data={owners.slice(0, 6)}
               layout="vertical"
@@ -875,11 +893,36 @@ export function AnalyticsPage() {
                 radius={[0, 4, 4, 0]}
                 maxBarSize={24}
                 isAnimationActive={false}
+                className="cursor-pointer"
+                onClick={(entry: { payload?: { key?: string } }) =>
+                  setBreakdown({ dimension: "owner", key: entry?.payload?.key ?? null })
+                }
               />
             </BarChart>
           </ChartContainer>
         </ChartFrame>
       </div>
+
+      <AnalyticsBreakdownDialog
+        open={breakdown !== null}
+        onOpenChange={(next) => {
+          if (!next) setBreakdown(null);
+        }}
+        title={
+          breakdown?.dimension === "owner" ? "Won value by deal owner" : "Won value by product"
+        }
+        description={
+          breakdown?.dimension === "owner"
+            ? "Every closer, and the deals behind each."
+            : "Every product, and the deals behind each."
+        }
+        dimension={breakdown?.dimension ?? "product"}
+        slices={breakdown?.dimension === "owner" ? owners : products}
+        deals={deals}
+        initialKey={breakdown?.key ?? null}
+        chartConfig={breakdown?.dimension === "owner" ? OWNER_CHART_CONFIG : PRODUCT_CHART_CONFIG}
+        formatValue={formatUsd}
+      />
     </div>
   );
 }

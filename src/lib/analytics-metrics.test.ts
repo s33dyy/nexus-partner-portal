@@ -7,13 +7,16 @@ import {
   dealUsd,
   lossReasonMix,
   newVsExistingBusiness,
+  ownerMix,
   percentChange,
   productMix,
+  sliceShares,
   projectedDealsByMonth,
   sourceMix,
   stageMix,
   winRateByMonth,
   wonDealsByMonth,
+  wonDealsInSlice,
 } from "@/lib/analytics-metrics";
 import type { DealRecord } from "@/lib/portal-records";
 
@@ -374,4 +377,83 @@ describe("productMix and sourceMix", () => {
     expect(mix[0]).toMatchObject({ label: "Referral", count: 2 });
     expect(mix[1]).toMatchObject({ label: "Inbound", count: 1 });
   });
+});
+
+// ---------------------------------------------------------------------------
+// Chart drill-down: the detail view must never disagree with the bar
+// ---------------------------------------------------------------------------
+
+function wonDeal(overrides: Partial<DealRecord> & { id: string }): DealRecord {
+  return deal({ stage: "won", ...overrides });
+}
+
+test("a slice's deals sum to exactly the slice's value, for both dimensions", () => {
+  const deals = [
+    wonDeal({ id: "1", product: "Cloud Suite", owner_name: "Sneha Iyer", amount_usd: 100 }),
+    wonDeal({ id: "2", product: "Cloud Suite", owner_name: "Asha Mehta", amount_usd: 250 }),
+    wonDeal({ id: "3", product: "Commerce Suite", owner_name: "Sneha Iyer", amount_usd: 40 }),
+    // Not won — must be excluded from both the bar and the drill-down.
+    wonDeal({
+      id: "4",
+      product: "Cloud Suite",
+      owner_name: "Sneha Iyer",
+      amount_usd: 9999,
+      stage: "lost",
+    }),
+  ];
+
+  for (const dimension of ["product", "owner"] as const) {
+    for (const slice of dimension === "product" ? productMix(deals) : ownerMix(deals)) {
+      const members = wonDealsInSlice(deals, dimension, slice.key);
+      const summed = members.reduce((total, deal) => total + dealUsd(deal), 0);
+      expect(summed).toBe(slice.value);
+      expect(members).toHaveLength(slice.count);
+      expect(members.every((deal) => deal.stage === "won")).toBe(true);
+    }
+  }
+});
+
+test("blank and whitespace labels fall into the same bucket the bar used", () => {
+  const deals = [
+    wonDeal({ id: "1", product: "   ", owner_name: "", amount_usd: 10 }),
+    wonDeal({ id: "2", product: "", owner_name: "   ", amount_usd: 20 }),
+  ];
+  // One "Unspecified" product bar and one "Unassigned" owner bar, each holding
+  // both deals — and the drill-down finds both by that same label.
+  const products = productMix(deals);
+  expect(products).toHaveLength(1);
+  expect(products[0]?.label).toBe("Unspecified");
+  expect(wonDealsInSlice(deals, "product", "Unspecified")).toHaveLength(2);
+
+  const owners = ownerMix(deals);
+  expect(owners).toHaveLength(1);
+  expect(owners[0]?.label).toBe("Unassigned");
+  expect(wonDealsInSlice(deals, "owner", "Unassigned")).toHaveLength(2);
+});
+
+test("a slice's deals come back highest value first", () => {
+  const deals = [
+    wonDeal({ id: "small", product: "P", owner_name: "O", amount_usd: 5 }),
+    wonDeal({ id: "big", product: "P", owner_name: "O", amount_usd: 500 }),
+    wonDeal({ id: "mid", product: "P", owner_name: "O", amount_usd: 50 }),
+  ];
+  expect(wonDealsInSlice(deals, "product", "P").map((d) => d.id)).toEqual(["big", "mid", "small"]);
+});
+
+test("an unknown slice key yields nothing rather than everything", () => {
+  const deals = [wonDeal({ id: "1", product: "P", owner_name: "O", amount_usd: 5 })];
+  expect(wonDealsInSlice(deals, "product", "Nope")).toEqual([]);
+});
+
+test("shares sum to 100 and are null when nothing has closed", () => {
+  const shares = sliceShares([
+    { key: "a", label: "a", value: 750, count: 1 },
+    { key: "b", label: "b", value: 250, count: 1 },
+  ]);
+  expect(shares.map((s) => s.share)).toEqual([75, 25]);
+
+  // Zero total: null, not 0%. A table of 0% against nothing reads as measured.
+  const empty = sliceShares([{ key: "a", label: "a", value: 0, count: 0 }]);
+  expect(empty[0]?.share).toBeNull();
+  expect(sliceShares([])).toEqual([]);
 });

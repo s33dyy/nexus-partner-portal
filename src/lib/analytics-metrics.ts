@@ -178,18 +178,68 @@ export function comparePeriods(
 
 /** Won value and count by product, largest first. */
 export function productMix(deals: DealRecord[]): Slice[] {
-  const byProduct = new Map<string, Slice>();
+  return wonMixBy(deals, "product");
+}
+
+/**
+ * The dimensions a won-value chart can be broken down by.
+ *
+ * Both charts that support drill-down are grouped through wonMixBy below, and
+ * the drill-down resolves its member deals through the SAME label function.
+ * That is the point: a detail view that grouped "Unspecified" or trimmed
+ * whitespace even slightly differently from the bar would show a total that
+ * disagrees with the bar the user just clicked.
+ */
+export type WonMixDimension = "product" | "owner";
+
+export function wonMixLabel(deal: DealRecord, dimension: WonMixDimension): string {
+  if (dimension === "product") return deal.product?.trim() || "Unspecified";
+  return deal.owner_name?.trim() || "Unassigned";
+}
+
+function wonMixBy(deals: DealRecord[], dimension: WonMixDimension): Slice[] {
+  const byLabel = new Map<string, Slice>();
   for (const deal of deals.filter((deal) => deal.stage === "won")) {
-    const label = deal.product?.trim() || "Unspecified";
-    const existing = byProduct.get(label);
+    const label = wonMixLabel(deal, dimension);
+    const existing = byLabel.get(label);
     if (existing) {
       existing.count += 1;
       existing.value += dealUsd(deal);
     } else {
-      byProduct.set(label, { key: label, label, count: 1, value: dealUsd(deal) });
+      byLabel.set(label, { key: label, label, count: 1, value: dealUsd(deal) });
     }
   }
-  return [...byProduct.values()].sort((a, b) => b.value - a.value);
+  return [...byLabel.values()].sort((a, b) => b.value - a.value);
+}
+
+/**
+ * The won deals behind one bar, highest value first.
+ *
+ * Returns the same rows the bar was summed from, so the detail view's total
+ * always reconciles with the chart.
+ */
+export function wonDealsInSlice(
+  deals: DealRecord[],
+  dimension: WonMixDimension,
+  key: string,
+): DealRecord[] {
+  return deals
+    .filter((deal) => deal.stage === "won" && wonMixLabel(deal, dimension) === key)
+    .sort((a, b) => dealUsd(b) - dealUsd(a));
+}
+
+/**
+ * Each slice's share of the total, as a percentage.
+ *
+ * Returns null shares when the total is zero rather than dividing by it — a
+ * table of "0%" against a zero total reads as measured, when nothing was.
+ */
+export function sliceShares(slices: Slice[]): Array<Slice & { share: number | null }> {
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
+  return slices.map((slice) => ({
+    ...slice,
+    share: total > 0 ? (slice.value / total) * 100 : null,
+  }));
 }
 
 /** Where open pipeline value sits by source, so channel mix is visible. */
@@ -377,18 +427,7 @@ export function regionMix(deals: DealRecord[]): Slice[] {
 
 /** Won value by deal owner, largest first — the leaderboard. */
 export function ownerMix(deals: DealRecord[]): Slice[] {
-  const byOwner = new Map<string, Slice>();
-  for (const deal of deals.filter((deal) => deal.stage === "won")) {
-    const label = deal.owner_name?.trim() || "Unassigned";
-    const existing = byOwner.get(label);
-    if (existing) {
-      existing.count += 1;
-      existing.value += dealUsd(deal);
-    } else {
-      byOwner.set(label, { key: label, label, count: 1, value: dealUsd(deal) });
-    }
-  }
-  return [...byOwner.values()].sort((a, b) => b.value - a.value);
+  return wonMixBy(deals, "owner");
 }
 
 /**

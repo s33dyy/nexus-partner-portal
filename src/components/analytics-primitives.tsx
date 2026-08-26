@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Maximize2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -140,6 +141,8 @@ export function ChartFrame({
   thinThreshold = 3,
   thinLabel,
   action,
+  onExpand,
+  expandLabel = "Expand",
   height = 260,
   children,
   className,
@@ -153,6 +156,12 @@ export function ChartFrame({
   thinThreshold?: number;
   thinLabel?: string;
   action?: React.ReactNode;
+  /** When supplied, the header gains an Expand control that opens the chart's
+   * detailed view. A real <button>, not a click handler on the card: the whole
+   * card is not the affordance, and a card-wide handler would swallow clicks
+   * meant for the bars themselves. */
+  onExpand?: () => void;
+  expandLabel?: string;
   height?: number;
   children: React.ReactNode;
   className?: string;
@@ -168,7 +177,21 @@ export function ChartFrame({
             <CardTitle className="text-base">{title}</CardTitle>
             {description ? <CardDescription>{description}</CardDescription> : null}
           </div>
-          {action}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {action}
+            {onExpand && !isEmpty ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onExpand}
+                aria-label={`${expandLabel}: ${title}`}
+              >
+                <Maximize2 className="mr-1.5 h-3.5 w-3.5" />
+                {expandLabel}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-6">
