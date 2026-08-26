@@ -30,6 +30,7 @@ import { NewsFeedCard } from "@/components/news-feed-card";
 import { formatDateLabel } from "@/lib/date-utils";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
+import { filterNewsPostsForViewer, resolveNewsViewer } from "@/lib/news-targeting";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
 import { rewardProgress, rewardTierForPoints, sumRewardPoints } from "@/lib/rewards";
 import { getDashboardMetricDestination } from "@/lib/global-search";
@@ -286,7 +287,20 @@ function DashboardPage() {
       const regionFilteredPartnerRows = partnerRows.filter((partner) =>
         matchesSelectedRegion(partner.country, selectedRegion),
       );
-      const newsRows = (newsResult.data as NewsPostRecord[] | null) ?? [];
+      // Audience targeting is enforced here, not merely displayed in admin:
+      // a post aimed at India + one partner must not reach anyone else, or the
+      // tags on the publish form would be decoration.
+      //
+      // partnerRows is already scoped to the viewer's own partner for
+      // non-admins (see partnerQuery above), so [0] is that partner.
+      const newsRows = filterNewsPostsForViewer(
+        (newsResult.data as NewsPostRecord[] | null) ?? [],
+        resolveNewsViewer({
+          partnerId: profile?.partner_id ?? partnerRows[0]?.id ?? null,
+          partnerCountry: partnerRows[0]?.country ?? null,
+        }),
+        { isSuperAdmin: hasRole("super_admin") },
+      );
       const notifRows = (notifResult.data as NotificationFeedRow[] | null) ?? [];
       const rewardRows =
         (rewardResult.data as Array<{

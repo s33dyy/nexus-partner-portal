@@ -566,6 +566,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "image_alt",
     "posted_by_name",
     "posted_by_role",
+    "target_region_keys",
+    "target_partner_ids",
     "updated_at",
     "is_seed",
     "created_at",

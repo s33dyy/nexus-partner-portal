@@ -44,3 +44,7 @@ dist-ssr
 # Local tool config/state — environment-specific, not shared
 /.claude/
 /.lovable/
+
+# Playwright run artifacts
+test-results/
+playwright-report/

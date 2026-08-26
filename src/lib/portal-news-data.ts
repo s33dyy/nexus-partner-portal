@@ -8,6 +8,9 @@ export type NewsPostRecord = {
   image_alt: string | null;
   posted_by_name: string;
   posted_by_role: string;
+  /** Audience targeting — empty means everyone. See lib/news-targeting.ts. */
+  target_region_keys: string[] | null;
+  target_partner_ids: string[] | null;
   created_at: string;
   updated_at: string;
   is_seed: boolean;

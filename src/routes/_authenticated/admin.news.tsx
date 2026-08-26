@@ -18,10 +18,31 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  NewsAudienceBadges,
+  NewsAudiencePicker,
+  type PartnerOption,
+} from "@/components/news-audience-picker";
+import { SALES_REGIONS, type SalesRegionKey } from "@/domain/contracts/world-geography";
 import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type CsvColumn } from "@/lib/csv-export";
+import {
+  EMPTY_NEWS_TARGETING,
+  describeNewsTargeting,
+  matchesNewsAudienceFilter,
+  readNewsTargeting,
+  writeNewsTargeting,
+  type NewsTargeting,
+} from "@/lib/news-targeting";
 import { hasNewsImage, type NewsPostRecord } from "@/lib/portal-news-data";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -32,6 +53,8 @@ type NewsForm = {
   image_alt: string;
   posted_by_name: string;
   posted_by_role: string;
+  /** Who the post is for. Empty arrays mean everyone. */
+  targeting: NewsTargeting;
 };
 
 const EMPTY_FORM: NewsForm = {
@@ -41,6 +64,7 @@ const EMPTY_FORM: NewsForm = {
   image_alt: "",
   posted_by_name: "LIVEY Admin",
   posted_by_role: "super_admin",
+  targeting: EMPTY_NEWS_TARGETING,
 };
 
 const NEWS_EXPORT_COLUMNS: CsvColumn[] = [
@@ -50,6 +74,8 @@ const NEWS_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "image_alt", header: "Image Alt" },
   { key: "posted_by_name", header: "Posted By" },
   { key: "posted_by_role", header: "Posted By Role" },
+  { key: "target_regions", header: "Audience Regions" },
+  { key: "target_partners", header: "Audience Partners" },
   { key: "created_at", header: "Created At" },
   { key: "updated_at", header: "Updated At" },
 ];
@@ -64,6 +90,10 @@ function AdminNewsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [partners, setPartners] = useState<PartnerOption[]>([]);
+  // Audience view filters — "all" means "do not filter on this dimension".
+  const [regionFilter, setRegionFilter] = useState<SalesRegionKey | "all">("all");
+  const [partnerFilter, setPartnerFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -78,12 +108,21 @@ function AdminNewsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("portal_news_posts")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const [postsRes, partnersRes] = await Promise.all([
+        supabase.from("portal_news_posts").select("*").order("created_at", { ascending: false }),
+        // Targetable partners. A failure here degrades to "no partner
+        // targeting available" rather than blocking the whole page — the
+        // region dimension and the posts themselves are still usable.
+        supabase.from("partners").select("id, company_name").order("company_name"),
+      ]);
+      const { data, error } = postsRes;
       if (error) throw error;
       const rows = (data as NewsPostRecord[] | null) ?? [];
+      setPartners(
+        ((partnersRes.data as Array<{ id: string; company_name: string }> | null) ?? []).map(
+          (partner) => ({ id: partner.id, name: partner.company_name }),
+        ),
+      );
       setPosts(rows);
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
@@ -102,17 +141,36 @@ function AdminNewsPage() {
     void load();
   }, []);
 
+  const partnerNameById = useMemo(
+    () => new Map(partners.map((partner) => [partner.id, partner.name])),
+    [partners],
+  );
+
   const filteredPosts = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return posts.filter((post) =>
-      !term
-        ? true
-        : [post.title, post.caption, post.posted_by_name, post.posted_by_role]
-            .join(" ")
-            .toLowerCase()
-            .includes(term),
-    );
-  }, [posts, query]);
+    return posts.filter((post) => {
+      const targeting = readNewsTargeting(post);
+      if (
+        !matchesNewsAudienceFilter(targeting, { regionKey: regionFilter, partnerId: partnerFilter })
+      )
+        return false;
+      if (!term) return true;
+      const described = describeNewsTargeting(targeting, partnerNameById);
+      // The audience is searchable too, so "Acme" finds posts aimed at Acme
+      // and not only posts that mention it in the caption.
+      return [
+        post.title,
+        post.caption,
+        post.posted_by_name,
+        post.posted_by_role,
+        described.regions,
+        described.partners,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [posts, query, regionFilter, partnerFilter, partnerNameById]);
 
   const selectedPost = useMemo(
     () => posts.find((post) => post.id === selectedId) ?? null,
@@ -128,6 +186,7 @@ function AdminNewsPage() {
       image_alt: selectedPost.image_alt ?? "",
       posted_by_name: selectedPost.posted_by_name,
       posted_by_role: selectedPost.posted_by_role,
+      targeting: readNewsTargeting(selectedPost),
     });
   }, [selectedPost]);
 
@@ -158,6 +217,7 @@ function AdminNewsPage() {
         image_alt: draft.image_alt.trim(),
         posted_by_name: draft.posted_by_name.trim() || "LIVEY Admin",
         posted_by_role: draft.posted_by_role.trim() || "super_admin",
+        ...writeNewsTargeting(draft.targeting),
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
         is_seed: false,
@@ -187,6 +247,7 @@ function AdminNewsPage() {
           image_alt: draft.image_alt.trim(),
           posted_by_name: draft.posted_by_name.trim() || "LIVEY Admin",
           posted_by_role: draft.posted_by_role.trim() || "super_admin",
+          ...writeNewsTargeting(draft.targeting),
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedPost.id);
@@ -278,6 +339,10 @@ function AdminNewsPage() {
                   image_alt: post.image_alt,
                   posted_by_name: post.posted_by_name,
                   posted_by_role: post.posted_by_role,
+                  target_regions: describeNewsTargeting(readNewsTargeting(post), partnerNameById)
+                    .regions,
+                  target_partners: describeNewsTargeting(readNewsTargeting(post), partnerNameById)
+                    .partners,
                   created_at: post.created_at,
                   updated_at: post.updated_at,
                 }))
@@ -298,6 +363,65 @@ function AdminNewsPage() {
                   Admin-authored posts that appear on partner dashboards.
                 </CardDescription>
               </div>
+              <div className="relative lg:w-64">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search title, caption, audience"
+                  className="pl-8"
+                />
+              </div>
+            </div>
+
+            {/* Audience view filters. Selecting a region or partner answers
+                "what would this reader see?", so untargeted posts stay in the
+                list — they genuinely do reach that reader. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Select
+                value={regionFilter}
+                onValueChange={(value) => setRegionFilter(value as SalesRegionKey | "all")}
+              >
+                <SelectTrigger className="sm:w-56" aria-label="Filter by sales region">
+                  <SelectValue placeholder="All regions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All regions</SelectItem>
+                  {SALES_REGIONS.map((region) => (
+                    <SelectItem key={region.key} value={region.key}>
+                      {region.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={partnerFilter} onValueChange={setPartnerFilter}>
+                <SelectTrigger className="sm:w-56" aria-label="Filter by partner">
+                  <SelectValue placeholder="All partners" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All partners</SelectItem>
+                  {partners.map((partner) => (
+                    <SelectItem key={partner.id} value={partner.id}>
+                      {partner.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {regionFilter === "all" && partnerFilter === "all" ? null : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setRegionFilter("all");
+                    setPartnerFilter("all");
+                  }}
+                >
+                  Clear audience filter
+                </Button>
+              )}
+              <span className="text-xs text-muted-foreground sm:ml-auto">
+                {filteredPosts.length} of {posts.length} shown
+              </span>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -351,6 +475,7 @@ function AdminNewsPage() {
                         <Badge variant="outline">{formatDateLabel(post.created_at)}</Badge>
                         <Badge>{post.posted_by_role.replace(/_/g, " ")}</Badge>
                       </div>
+                      <NewsAudienceBadges targeting={readNewsTargeting(post)} partners={partners} />
                       <div>
                         <div className="text-base font-medium">{post.title}</div>
                         <div className="mt-1 text-sm text-muted-foreground">{post.caption}</div>
@@ -499,6 +624,13 @@ function AdminNewsPage() {
                   />
                 </Field>
               </div>
+              <NewsAudiencePicker
+                className="rounded-lg border p-4"
+                value={draft.targeting}
+                onChange={(targeting) => setDraft((current) => ({ ...current, targeting }))}
+                partners={partners}
+                disabled={creating}
+              />
               <Button onClick={() => void createPost()} disabled={creating || uploadingImage}>
                 {creating ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -617,6 +749,13 @@ function AdminNewsPage() {
                   />
                 </Field>
               </div>
+              <NewsAudiencePicker
+                className="rounded-lg border p-4"
+                value={draft.targeting}
+                onChange={(targeting) => setDraft((current) => ({ ...current, targeting }))}
+                partners={partners}
+                disabled={saving}
+              />
               <div className="flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"
@@ -630,6 +769,7 @@ function AdminNewsPage() {
                       image_alt: selectedPost.image_alt ?? "",
                       posted_by_name: selectedPost.posted_by_name,
                       posted_by_role: selectedPost.posted_by_role,
+                      targeting: readNewsTargeting(selectedPost),
                     })
                   }
                 >

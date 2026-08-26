@@ -2480,3 +2480,29 @@ INSERT INTO feature_flags (
     true
   )
 ON CONFLICT (flag_key) DO NOTHING;
+
+-- --- News post audience targeting (product.md §11) --------------------------
+--
+-- Additive ALTERs, never inline CREATE TABLE columns: portal_news_posts
+-- exists on every previously-migrated database.
+--
+-- Empty array means EVERYONE, which is why the default is '{}' and not NULL
+-- semantics: every post written before targeting existed keeps reaching the
+-- whole audience. A migration that silently narrowed old posts to nobody
+-- would look like the partner feed had broken.
+--
+-- Region keys are the SALES_REGIONS vocabulary the header filter already uses
+-- (domain/contracts/world-geography.ts), not free text and not geography_nodes
+-- — the audience question is "which sales region", and that is the list the
+-- reader is already filtering the rest of the app by.
+ALTER TABLE portal_news_posts
+  ADD COLUMN IF NOT EXISTS target_region_keys TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE portal_news_posts
+  ADD COLUMN IF NOT EXISTS target_partner_ids UUID[] NOT NULL DEFAULT '{}';
+
+-- GIN indexes so "which posts reach this partner / this region" stays an
+-- index lookup rather than a scan once the feed grows.
+CREATE INDEX IF NOT EXISTS portal_news_posts_target_regions_idx
+  ON portal_news_posts USING GIN (target_region_keys);
+CREATE INDEX IF NOT EXISTS portal_news_posts_target_partners_idx
+  ON portal_news_posts USING GIN (target_partner_ids);

@@ -24,6 +24,7 @@ import {
 } from "@/server/app-time.server";
 import { loadDashboardPipelineMetrics } from "@/server/dashboard-metrics.server";
 import { getAuthContext, queryTableWithAuthContext } from "@/server/livey-service.server";
+import { fetchNewsPostsForViewer } from "@/server/news-audience.server";
 import {
   hasCapability,
   loadRoleCapabilities,
@@ -60,17 +61,10 @@ async function fetchNewsSection(
   capabilities: FeatureCapabilities,
 ): Promise<AssistantNewsSummary[]> {
   if (!hasCapability(capabilities, "news", "read")) return [];
-  const { data, error } = await queryTableWithAuthContext(
-    {
-      table: "portal_news_posts",
-      operation: "select",
-      filters: [],
-      order: { column: "created_at", ascending: false },
-    },
-    auth,
-  );
-  if (error || !Array.isArray(data)) return [];
-  return data.slice(0, 3).map((row: Record<string, unknown>) => ({
+  // Audience-aware: the briefing must not surface a post the reader is not in
+  // the audience for. See server/news-audience.server.ts.
+  const rows = await fetchNewsPostsForViewer(auth);
+  return rows.slice(0, 3).map((row: Record<string, unknown>) => ({
     id: String(row.id),
     title: String(row.title ?? ""),
     caption: String(row.caption ?? ""),

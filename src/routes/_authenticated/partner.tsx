@@ -31,6 +31,7 @@ import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateLabel } from "@/lib/date-utils";
 import { type NewsPostRecord } from "@/lib/portal-news-data";
+import { filterNewsPostsForViewer, resolveNewsViewer } from "@/lib/news-targeting";
 import { getStatusProgress } from "@/lib/partner-status";
 
 type Profile = {
@@ -157,7 +158,17 @@ function PartnerPage() {
       const partnerRow = (partnerResult.data as Partner | null) ?? null;
       const docRows = (docsResult.data as DocRow[] | null) ?? [];
       const noteRows = (notesResult.data as NoteRow[] | null) ?? [];
-      const newsRows = (newsResult.data as NewsPostRecord[] | null) ?? [];
+      // Same audience rule as the dashboard feed — this page renders the same
+      // posts, so a post targeted away from this partner must not appear here
+      // either. See lib/news-targeting.ts.
+      const newsRows = filterNewsPostsForViewer(
+        (newsResult.data as NewsPostRecord[] | null) ?? [],
+        resolveNewsViewer({
+          partnerId: authProfile?.partner_id ?? partnerRow?.id ?? null,
+          partnerCountry: partnerRow?.country ?? null,
+        }),
+        { isSuperAdmin: hasRole("super_admin") },
+      );
 
       setProfile(profileRow);
       setPartner(partnerRow);
@@ -218,7 +229,7 @@ function PartnerPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [authProfile?.id, authProfile?.partner_id]);
+  }, [authProfile?.id, authProfile?.partner_id, hasRole]);
 
   useEffect(() => {
     void load();

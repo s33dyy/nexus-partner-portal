@@ -32,6 +32,7 @@ import {
   type AuthContext,
   type QueryFilter,
 } from "@/server/livey-service.server";
+import { fetchNewsPostsForViewer } from "@/server/news-audience.server";
 import { runChatCompletion, type ChatCompletionResult } from "@/server/openrouter.server";
 import { pool } from "@/server/postgres.server";
 import { hasCapability, loadRoleCapabilities } from "@/server/rbac-policy.server";
@@ -537,16 +538,9 @@ export async function fetchScopedNews(
   extraFilters: AssistantFilter[],
   policyCtx: TablePolicyAuthContext,
 ): Promise<AssistantNewsSummary[]> {
-  const { data, error } = await queryTableWithAuthContext(
-    {
-      table: "portal_news_posts",
-      operation: "select",
-      filters: extraFilters,
-      order: { column: "created_at", ascending: false },
-    },
-    policyCtx,
-  );
-  if (error || !Array.isArray(data)) return [];
+  // Audience-aware: the Assistant must not read out a post the user is not in
+  // the audience for. See server/news-audience.server.ts.
+  const data = await fetchNewsPostsForViewer(policyCtx, extraFilters);
 
   return data
     .filter(

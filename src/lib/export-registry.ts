@@ -478,6 +478,8 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
       { key: "caption", header: "Caption" },
       { key: "image_path", header: "Image Path" },
       { key: "posted_by_name", header: "Posted By" },
+      { key: "target_region_keys", header: "Audience Regions" },
+      { key: "target_partner_ids", header: "Audience Partners" },
       { key: "created_at", header: "Created At" },
       { key: "updated_at", header: "Updated At" },
     ],
