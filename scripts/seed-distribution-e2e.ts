@@ -30,6 +30,19 @@ const PASSWORD = process.env.E2E_DISTRIBUTION_PASSWORD ?? "DistributionE2E!2026"
 const TENANT_ID = "tenant-livey-org";
 
 export const DISTRIBUTION_FIXTURE = {
+  /**
+   * A fixture Super Admin with this script's own password.
+   *
+   * Deliberately NOT the bootstrap Super Admin: that account's password is a
+   * real secret in .env, and a fixture should never need one. Delete this row
+   * when you are done demoing —
+   *   DELETE FROM user_roles WHERE user_id = (SELECT id FROM profiles WHERE email = 'dev.stockadmin@livey.tech');
+   */
+  admin: {
+    email: "dev.stockadmin@livey.tech",
+    fullName: "Dev Stock Admin",
+    assignmentId: "assignment-e2e-stock-admin",
+  },
   distributor: {
     email: "dev.distributor@livey.tech",
     fullName: "Dev Distributor",
@@ -112,6 +125,17 @@ async function ensureAssignment(
       input.partnerId,
       input.managerAssignmentId,
     ],
+  );
+
+  // The shell resolves its governing role from user_roles, not from the
+  // Assignment (see resolveAuthContextForProfile). Without a row here the
+  // fixture logs in with no governing role at all and falls through to the
+  // Partner-external journey, which is not what any of these people are.
+  await client.query(
+    `INSERT INTO user_roles (user_id, role, is_seed)
+     VALUES ($1, $2::app_role, TRUE)
+     ON CONFLICT DO NOTHING`,
+    [input.userId, input.roleKey],
   );
 
   // A governed actor needs a live Active Context as well as an Assignment;
@@ -198,7 +222,15 @@ async function findSuperAdmin(
   return row ? { userId: String(row.user_id), assignmentId: String(row.assignment_id) } : null;
 }
 
-export async function seedDistributionE2E(): Promise<void> {
+/**
+ * `identitiesOnly` stops after the people and the feature flag, leaving the
+ * locations and the opening stock to be created through the workspace UI.
+ * That is the mode to use when the point is to verify the interface actually
+ * works, rather than to hand a test a pre-built world.
+ */
+export async function seedDistributionE2E(
+  options: { identitiesOnly?: boolean } = {},
+): Promise<void> {
   const pool = createPool();
   const client = await pool.connect();
 
@@ -216,6 +248,16 @@ export async function seedDistributionE2E(): Promise<void> {
     await client.query(
       `UPDATE feature_flags SET enabled = TRUE, updated_at = now() WHERE flag_key = 'distribution-core'`,
     );
+
+    const adminUserId = await ensureProfile(client, DISTRIBUTION_FIXTURE.admin);
+    await ensureAssignment(client, {
+      assignmentId: DISTRIBUTION_FIXTURE.admin.assignmentId,
+      userId: adminUserId,
+      roleKey: "super_admin",
+      teamDomain: "identity",
+      managerAssignmentId: null,
+      partnerId: null,
+    });
 
     const managerUserId = await ensureProfile(client, DISTRIBUTION_FIXTURE.manager);
     const custodianUserId = await ensureProfile(client, DISTRIBUTION_FIXTURE.custodian);
@@ -264,6 +306,22 @@ export async function seedDistributionE2E(): Promise<void> {
     }
 
     client.release();
+
+    if (options.identitiesOnly) {
+      console.log(
+        [
+          "Distribution identities ready (no locations or stock — create those in the UI).",
+          `  super admin       ${DISTRIBUTION_FIXTURE.admin.email}`,
+          `  distributor       ${DISTRIBUTION_FIXTURE.distributor.email}`,
+          `  other distributor ${DISTRIBUTION_FIXTURE.otherDistributor.email}`,
+          `  manager           ${DISTRIBUTION_FIXTURE.manager.email}`,
+          `  custodian         ${DISTRIBUTION_FIXTURE.custodian.email}`,
+          "  password          set via E2E_DISTRIBUTION_PASSWORD",
+          "  distribution-core enabled",
+        ].join("\n"),
+      );
+      return;
+    }
 
     // Everything below goes through the named commands, so the fixture
     // exercises the same code path a real operator would.
@@ -414,7 +472,7 @@ async function buildSuperAdminActor(admin: { userId: string; assignmentId: strin
 }
 
 if (import.meta.main) {
-  seedDistributionE2E()
+  seedDistributionE2E({ identitiesOnly: process.argv.includes("--identities-only") })
     .then(() => process.exit(0))
     .catch((error) => {
       console.error(error);

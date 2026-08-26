@@ -120,6 +120,24 @@ const listStockLocationsFn = createServerFn({ method: "POST" })
     return listStockLocations(actor.actor, data);
   });
 
+const listDistributionAdminOptionsFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { EMPTY_ADMIN_OPTIONS, listDistributionAdminOptions } =
+    await import("@/server/distribution-queries.server");
+  const actor = await resolveActor();
+  if (!actor.ok) return { ok: false as const, options: EMPTY_ADMIN_OPTIONS };
+  const result = await listDistributionAdminOptions(actor.actor);
+  // The browser learns whether it may administer locations, and nothing about
+  // why not: a denial reason here would describe the caller's own governance
+  // state back to a page with no use for it.
+  return result.ok
+    ? { ok: true as const, options: result.options }
+    : { ok: false as const, options: EMPTY_ADMIN_OPTIONS };
+});
+
+export async function listDistributionAdminOptions() {
+  return listDistributionAdminOptionsFn();
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------

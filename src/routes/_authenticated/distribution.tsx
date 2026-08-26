@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { InventoryTable } from "@/components/distribution/inventory-table";
 import { MovementTable } from "@/components/distribution/movement-table";
+import { StockAdminPanel } from "@/components/distribution/stock-admin-panel";
 import { StockRequestDialog } from "@/components/distribution/stock-request-dialog";
 import { StockRequestTable } from "@/components/distribution/stock-request-table";
 import {
@@ -38,8 +39,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type {
-  DistributionExceptionView,
+import {
+  EMPTY_ADMIN_OPTIONS,
+  type DistributionAdminOptions,
+  type DistributionExceptionView,
   InventoryBalanceView,
   InventoryMovementView,
   RequestableProductSkuView,
@@ -52,14 +55,17 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   allocateStockRequest,
   cancelStockRequest,
+  createStockLocation,
   dispatchStockRequest,
   getStockRequest,
+  listDistributionAdminOptions,
   listDistributionExceptions,
   listInventoryBalances,
   listInventoryMovements,
   listRequestableProductSkus,
   listStockLocations,
   listStockRequests,
+  postManualStockMovement,
   receiveStockRequest,
   reportStockRequestException,
   resolveStockRequestException,
@@ -111,10 +117,14 @@ function DistributionPage() {
     () => parseDistributionSearch(rawSearch as Record<string, unknown>),
     [rawSearch],
   );
-  const { can, surfaces } = useAuth();
+  const { can, hasRole, surfaces } = useAuth();
 
   const enabled = surfaces.distributionCore;
   const canRead = can("distribution", "read");
+  // Location administration and manual corrections are Super Admin only
+  // (§24.4). The server enforces that on every command regardless; this only
+  // decides whether to draw the buttons.
+  const canAdminister = hasRole("super_admin");
 
   const [requests, setRequests] = useState<StockRequestListRow[]>([]);
   const [balances, setBalances] = useState<InventoryBalanceView[]>([]);
@@ -123,6 +133,7 @@ function DistributionPage() {
   const [skus, setSkus] = useState<RequestableProductSkuView[]>([]);
   const [destinations, setDestinations] = useState<StockLocationView[]>([]);
   const [sourceLocations, setSourceLocations] = useState<StockLocationView[]>([]);
+  const [adminOptions, setAdminOptions] = useState<DistributionAdminOptions>(EMPTY_ADMIN_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StockRequestStatusFilter>("open");
@@ -179,13 +190,23 @@ function DistributionPage() {
       setSkus(skuResult.ok ? skuResult.rows : []);
       setDestinations(destinationResult.ok ? destinationResult.rows : []);
       setSourceLocations(locationResult.ok ? locationResult.rows : []);
+
+      // Fetched separately and only for an administrator: the assignment and
+      // geography pickers are not part of what an ordinary Distributor's page
+      // needs, so they are not part of what it downloads.
+      if (canAdminister) {
+        const optionsResult = await listDistributionAdminOptions();
+        setAdminOptions(optionsResult.ok ? optionsResult.options : EMPTY_ADMIN_OPTIONS);
+      } else {
+        setAdminOptions(EMPTY_ADMIN_OPTIONS);
+      }
     } catch (error) {
       console.error("Failed to load distribution data", error);
       toast.error("Could not load distribution data");
     } finally {
       setLoading(false);
     }
-  }, [enabled, canRead, search, statusFilter, movementFilter]);
+  }, [enabled, canRead, canAdminister, search, statusFilter, movementFilter]);
 
   useEffect(() => {
     void load();
@@ -271,6 +292,38 @@ function DistributionPage() {
               <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
               Refresh
             </Button>
+            {canAdminister ? (
+              <StockAdminPanel
+                locations={sourceLocations}
+                skus={skus}
+                options={adminOptions}
+                busy={busy}
+                onCreateLocation={async (input) => {
+                  setBusy(true);
+                  try {
+                    const result = await createStockLocation(input);
+                    const ok = reportCommand(result, "Location created");
+                    if (ok) await load();
+                    return ok;
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onPostMovement={async (input) => {
+                  setBusy(true);
+                  try {
+                    const result = await postManualStockMovement(input);
+                    const ok = reportCommand(result, "Movement posted");
+                    if (ok) await load();
+                    return ok;
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              />
+            ) : null}
+            {/* No destination means this actor owns no location to receive
+                into, so a request form would have nothing to point at. */}
             {destinations.length > 0 ? (
               <Button size="sm" onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />

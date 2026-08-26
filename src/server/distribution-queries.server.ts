@@ -1,7 +1,9 @@
 import type { PolicyDenialErrorContract } from "@/domain/contracts/commands";
 import {
+  EMPTY_ADMIN_OPTIONS,
   computeAvailableQuantity,
   stockRequestProgress,
+  type DistributionAdminOptions,
   type DistributionExceptionView,
   type InventoryBalanceView,
   type InventoryMovementType,
@@ -825,3 +827,84 @@ export async function listStockLocations(
     total: totalFrom(typed, typed.length),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Administration options
+// ---------------------------------------------------------------------------
+
+/**
+ * The pickers the Super Admin location form needs.
+ *
+ * Super Admin only, and it returns a label plus an opaque id — never the
+ * assignment's tenant, partner, or geography ceiling. Without it the form
+ * would have to ask an operator to type an assignment id from memory, which
+ * is how a location ends up owned by the wrong Distributor.
+ */
+export async function listDistributionAdminOptions(
+  actor: DistributionActor,
+  deps: DistributionQueryDeps = {},
+): Promise<
+  | { ok: true; options: DistributionAdminOptions }
+  | { ok: false; failure: PolicyDenialErrorContract }
+> {
+  const authorized = await authorizeDistribution(actor, "create", deps);
+  if (!authorized.ok) return authorized;
+
+  const { makePolicyDenial } = await import("@/domain/contracts/commands");
+  if (actor.assignment.roleKey !== "super_admin") {
+    return {
+      ok: false,
+      failure: makePolicyDenial(null, "Only Super Admin can administer stock locations"),
+    };
+  }
+
+  const query = runner(deps);
+
+  const [geography, assignments] = await Promise.all([
+    query(
+      `SELECT node_id, display_name, node_type::text AS node_type
+       FROM geography_nodes
+       WHERE valid_to IS NULL AND node_type IN ('global', 'sales_region', 'country')
+       ORDER BY
+         CASE node_type::text
+           WHEN 'global' THEN 0
+           WHEN 'sales_region' THEN 1
+           ELSE 2
+         END,
+         display_name ASC
+       LIMIT 500`,
+    ),
+    query(
+      `SELECT a.assignment_id, a.role_key, p.full_name, p.email
+       FROM assignments a
+       JOIN profiles p ON p.id = a.user_id
+       WHERE a.status = 'active'
+         AND a.role_key IN ('restricted_distributor', 'rm', 'pam', 'super_admin')
+       ORDER BY p.full_name ASC
+       LIMIT 500`,
+    ),
+  ]);
+
+  const assignmentRows = assignments.rows as Array<Record<string, unknown>>;
+  const label = (row: Record<string, unknown>) =>
+    `${String(row.full_name ?? row.email ?? "Unnamed")} · ${String(row.role_key)}`;
+
+  return {
+    ok: true,
+    options: {
+      geographyNodes: (geography.rows as Array<Record<string, unknown>>).map((row) => ({
+        nodeId: String(row.node_id),
+        label: `${String(row.display_name)} (${String(row.node_type)})`,
+      })),
+      distributorAssignments: assignmentRows
+        .filter((row) => String(row.role_key) === "restricted_distributor")
+        .map((row) => ({ assignmentId: String(row.assignment_id), label: label(row) })),
+      custodianAssignments: assignmentRows
+        .filter((row) => String(row.role_key) !== "restricted_distributor")
+        .map((row) => ({ assignmentId: String(row.assignment_id), label: label(row) })),
+    },
+  };
+}
+
+export { EMPTY_ADMIN_OPTIONS };
+export type { DistributionAdminOptions };

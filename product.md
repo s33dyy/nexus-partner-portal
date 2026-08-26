@@ -6208,7 +6208,7 @@ Every quantity is a positive safe integer. Fractional, zero-line, negative, and 
 | `allocated` | `dispatched`, `cancelled`, `exception` |
 | `dispatched` | `partially_received`, `received`, `exception` |
 | `partially_received` | `received`, `exception` |
-| `exception` | `approved`, `awaiting_stock`, `partially_allocated`, `allocated`, `dispatched`, `partially_received`, `cancelled` |
+| `exception` | `submitted`, `approved`, `awaiting_stock`, `partially_allocated`, `allocated`, `dispatched`, `partially_received`, `cancelled` |
 | `received`, `rejected`, `cancelled` | — (terminal) |
 
 Any pair not listed above is rejected by the server, including a self-transition and any exit from a terminal state. There is no hard delete of a request, a line, a movement, or a transition row.

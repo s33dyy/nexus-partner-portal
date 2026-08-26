@@ -15,6 +15,7 @@ import {
   assertSubmitStockRequestInput,
   computeAvailableQuantity,
   deriveStockRequestStatus,
+  isAllowedStockRequestTransition,
   isInventoryMovementType,
   movementRequiresReason,
   type AllocateStockRequestInput,
@@ -1537,14 +1538,10 @@ export async function reviewStockRequest(input: {
         const sourceLocationId = decision?.sourceLocationId?.trim() || null;
 
         if (approved > 0 && !sourceLocationId) {
-          return {
-            ok: false,
-            failure: validationFailure(
-              `Choose a source location for ${line.skuCode}`,
-              "sourceLocationId",
-            ),
-            correlationId,
-          };
+          throw new DistributionCommandError(
+            `Choose a source location for ${line.skuCode}`,
+            "sourceLocationId",
+          );
         }
         if (sourceLocationId) {
           await assertActiveLocation(tx, sourceLocationId);
@@ -1564,15 +1561,13 @@ export async function reviewStockRequest(input: {
       if (approvedTotal === 0) {
         // Approving nothing is a rejection wearing an approval's clothes, and
         // it would leave the request permanently unfulfillable with no reason
-        // recorded against it. Say so instead.
-        return {
-          ok: false,
-          failure: validationFailure(
-            "Approve at least one unit, or reject the request with a reason",
-            "lines",
-          ),
-          correlationId,
-        };
+        // recorded against it. Say so instead — and throw rather than return,
+        // because the loop above has already written every line's approved
+        // quantity and a return would commit those writes.
+        throw new DistributionCommandError(
+          "Approve at least one unit, or reject the request with a reason",
+          "lines",
+        );
       }
 
       const change = await writeRequestStatus(tx, {
@@ -1698,14 +1693,10 @@ export async function allocateStockRequest(input: {
         const outstanding = line.approved - line.reserved;
         if (outstanding <= 0) continue;
         if (!line.sourceLocationId) {
-          return {
-            ok: false,
-            failure: validationFailure(
-              `Line ${line.skuCode} has no source location to reserve from`,
-              "sourceLocationId",
-            ),
-            correlationId,
-          };
+          throw new DistributionCommandError(
+            `Line ${line.skuCode} has no source location to reserve from`,
+            "sourceLocationId",
+          );
         }
 
         const balance = await readBalance(tx, line.productSkuId, line.sourceLocationId);
@@ -1716,27 +1707,20 @@ export async function allocateStockRequest(input: {
           quantity = explicit.get(line.id) ?? 0;
           if (quantity <= 0) continue;
           if (quantity > outstanding) {
-            return {
-              ok: false,
-              failure: validationFailure(
-                `Cannot reserve more than the approved quantity for ${line.skuCode}`,
-                "quantity",
-              ),
-              correlationId,
-            };
+            throw new DistributionCommandError(
+              `Cannot reserve more than the approved quantity for ${line.skuCode}`,
+              "quantity",
+            );
           }
           if (quantity > available) {
-            // No partial write: the whole transaction rolls back, so a
-            // custodian who asks for more than exists never half-commits a
-            // request.
-            return {
-              ok: false,
-              failure: validationFailure(
-                `Not enough available stock for ${line.skuCode} at the source location`,
-                "quantity",
-              ),
-              correlationId,
-            };
+            // Thrown, not returned: earlier lines in this loop may already
+            // have posted reservations, and withTransaction only rolls back on
+            // a throw. Returning here would commit those reservations against
+            // a request whose header still claims nothing is allocated.
+            throw new DistributionCommandError(
+              `Not enough available stock for ${line.skuCode} at the source location`,
+              "quantity",
+            );
           }
         } else {
           quantity = Math.min(outstanding, available);
@@ -1857,24 +1841,16 @@ export async function dispatchStockRequest(input: {
         const quantity = explicit ? (explicit.get(line.id) ?? 0) : outstanding;
         if (quantity <= 0) continue;
         if (quantity > outstanding) {
-          return {
-            ok: false,
-            failure: validationFailure(
-              `Cannot dispatch more than is reserved for ${line.skuCode}`,
-              "quantity",
-            ),
-            correlationId,
-          };
+          throw new DistributionCommandError(
+            `Cannot dispatch more than is reserved for ${line.skuCode}`,
+            "quantity",
+          );
         }
         if (!line.sourceLocationId) {
-          return {
-            ok: false,
-            failure: validationFailure(
-              `Line ${line.skuCode} has no source location to dispatch from`,
-              "sourceLocationId",
-            ),
-            correlationId,
-          };
+          throw new DistributionCommandError(
+            `Line ${line.skuCode} has no source location to dispatch from`,
+            "sourceLocationId",
+          );
         }
 
         await applyInventoryMovement(tx, {
@@ -2000,14 +1976,10 @@ export async function receiveStockRequest(input: {
         const quantity = explicit ? (explicit.get(line.id) ?? 0) : outstanding;
         if (quantity <= 0) continue;
         if (quantity > outstanding) {
-          return {
-            ok: false,
-            failure: validationFailure(
-              `Cannot receive more than was dispatched for ${line.skuCode}`,
-              "quantity",
-            ),
-            correlationId,
-          };
+          throw new DistributionCommandError(
+            `Cannot receive more than was dispatched for ${line.skuCode}`,
+            "quantity",
+          );
         }
 
         await applyInventoryMovement(tx, {
@@ -2309,8 +2281,17 @@ export async function resolveStockRequestException(input: {
       // ladder speak: if work happened while it was parked, the derived
       // status is the honest answer, and the transition table still has to
       // permit it.
+      //
+      // The stored status is checked against the transition table rather than
+      // trusted. A value the table forbids would make writeRequestStatus throw
+      // on every attempt, and since an actor cannot edit stored state that is
+      // an unrecoverable request rather than a fixable input — so fall back to
+      // the derived status instead of failing forever.
+      const stored = request.exceptionFromStatus;
       const recovered =
-        request.exceptionFromStatus ?? deriveStockRequestStatus(request.lines.map(lineQuantities));
+        stored && isAllowedStockRequestTransition("exception", stored)
+          ? stored
+          : deriveStockRequestStatus(request.lines.map(lineQuantities));
 
       const change = await writeRequestStatus(tx, {
         request,

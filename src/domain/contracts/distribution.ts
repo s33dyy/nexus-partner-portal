@@ -54,6 +54,12 @@ export const STOCK_REQUEST_TRANSITIONS: Record<StockRequestStatus, readonly Stoc
     dispatched: ["partially_received", "received", "exception"],
     partially_received: ["received", "exception"],
     exception: [
+      // "submitted" belongs here: a problem can be reported before the manager
+      // has decided anything, and recovery has to be able to put the request
+      // back where it was. Omitting it made that one case unrecoverable — the
+      // request could not be resolved (the assert threw), reviewed (wrong
+      // status), or progressed, leaving cancellation as the only exit.
+      "submitted",
       "approved",
       "awaiting_stock",
       "partially_allocated",
@@ -568,6 +574,28 @@ export type RequestableProductSkuView = {
   skuCode: string;
   productName: string;
   variantName: string | null;
+};
+
+/**
+ * The pickers the Super Admin location form needs.
+ *
+ * Lives in the contract rather than beside the query that produces it because
+ * the browser needs the empty value as a fail-closed default, and importing
+ * it from a `.server` module would drag the whole server graph — pool, policy,
+ * queries — into the client bundle. Vite's import protection rejects exactly
+ * that, which is how this landed here.
+ */
+export type DistributionAdminOptions = {
+  geographyNodes: Array<{ nodeId: string; label: string }>;
+  distributorAssignments: Array<{ assignmentId: string; label: string }>;
+  custodianAssignments: Array<{ assignmentId: string; label: string }>;
+};
+
+/** What an actor who may not administer locations gets: nothing to pick. */
+export const EMPTY_ADMIN_OPTIONS: DistributionAdminOptions = {
+  geographyNodes: [],
+  distributorAssignments: [],
+  custodianAssignments: [],
 };
 
 export type DistributionExceptionView = {

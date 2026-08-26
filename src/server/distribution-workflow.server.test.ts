@@ -765,7 +765,7 @@ function request(state: State) {
 function lineFor(state: State, skuId = SKU_A) {
   return state.lines.find((line) => line.product_sku_id === skuId)!;
 }
-function balance(state: State, locationId: string, skuId = SKU_A) {
+function balance(state: State, locationId: string, skuId: string = SKU_A) {
   return state.balances.find(
     (row) => row.location_id === locationId && row.product_sku_id === skuId,
   );
@@ -1789,6 +1789,197 @@ test("DMS-025: a disabled distribution surface denies every request command", as
 
     expect(state.requests).toHaveLength(1);
     expect(request(state).status).toBe("submitted");
+  } finally {
+    harness.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Regressions found by adversarial review, 2026-08-26
+// ---------------------------------------------------------------------------
+
+test("an exception reported before approval can still be resolved back to submitted", async () => {
+  const state = createState();
+  const harness = await installFakePool(state)();
+  try {
+    await submit(state);
+    expect(request(state).status).toBe("submitted");
+
+    const { reportStockRequestException, resolveStockRequestException } = await commands();
+    const reported = await reportStockRequestException({
+      actor: distributor(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        reason: "Wrong SKU on the order",
+      },
+      deps: DEPS,
+    });
+    expect(reported.ok).toBe(true);
+    expect(request(state).exception_from_status).toBe("submitted");
+
+    // Previously the transition table had no exception -> submitted edge, so
+    // this threw on every attempt and the request was unrecoverable: review
+    // was not offered (wrong status), resolve always failed, and cancelling
+    // was the only way out.
+    const resolved = await resolveStockRequestException({
+      actor: manager(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        reason: "Requester corrected the SKU",
+      },
+      deps: DEPS,
+    });
+    expect(resolved.ok).toBe(true);
+    expect(request(state).status).toBe("submitted");
+
+    // And the manager can now actually decide it.
+    const approved = await approveAll(state, 5);
+    expect(approved.ok).toBe(true);
+    expect(request(state).status).toBe("approved");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a stored recovery status the transition table forbids falls back instead of bricking", async () => {
+  const state = createState();
+  const harness = await installFakePool(state)();
+  try {
+    await seedStock(state, 20);
+    await submit(state);
+    await approveAll(state, 5);
+    const { reportStockRequestException, resolveStockRequestException } = await commands();
+    await reportStockRequestException({
+      actor: distributor(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        reason: "Something went wrong",
+      },
+      deps: DEPS,
+    });
+
+    // Simulate a stored value the table forbids from "exception" — the shape
+    // an older row, a hand-edit, or a future status rename would leave behind.
+    request(state).exception_from_status = "received";
+
+    const resolved = await resolveStockRequestException({
+      actor: manager(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        reason: "Recovered",
+      },
+      deps: DEPS,
+    });
+    expect(resolved.ok).toBe(true);
+    // Derived from the line quantities rather than trusting the stored value.
+    expect(request(state).status).toBe("awaiting_stock");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a mid-loop allocation failure rolls back every line, not just the failing one", async () => {
+  const state = createState();
+  const harness = await installFakePool(state)();
+  try {
+    // SKU-A is plentiful, SKU-B is short. Lines are ordered by sku_code, so
+    // SKU-A is reserved before SKU-B is found wanting.
+    await seedStock(state, 20, SKU_A);
+    await seedStock(state, 1, SKU_B);
+    await submit(state, {
+      lines: [
+        { productSkuId: SKU_A, quantity: 5 },
+        { productSkuId: SKU_B, quantity: 5 },
+      ],
+    });
+    await approveAll(state, 5);
+
+    const { allocateStockRequest } = await commands();
+    const result = await allocateStockRequest({
+      actor: custodian(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        lines: state.lines.map((line) => ({ lineId: String(line.id), quantity: 5 })),
+        idempotencyKey: "mixed-availability",
+      },
+      deps: DEPS,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+
+    // The whole transaction rolled back: SKU-A's reservation is gone, the
+    // warehouse committed nothing, no movement was written, and the header is
+    // still where it was. Previously SKU-A stayed reserved forever against a
+    // request whose status claimed nothing was allocated.
+    expect(state.lines.every((line) => line.reserved_quantity === 0)).toBe(true);
+    expect(balance(state, WAREHOUSE, SKU_A)?.reserved_quantity).toBe(0);
+    expect(state.movements.filter((m) => m.movement_type === "reservation")).toHaveLength(0);
+    expect(request(state).status).toBe("approved");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a mid-loop dispatch failure leaves no stock in transit", async () => {
+  const state = createState();
+  const harness = await installFakePool(state)();
+  try {
+    await seedStock(state, 20, SKU_A);
+    await seedStock(state, 20, SKU_B);
+    await submit(state, {
+      lines: [
+        { productSkuId: SKU_A, quantity: 5 },
+        { productSkuId: SKU_B, quantity: 5 },
+      ],
+    });
+    await approveAll(state, 5);
+    await allocateAll(state);
+
+    const { dispatchStockRequest } = await commands();
+    const result = await dispatchStockRequest({
+      actor: custodian(),
+      data: {
+        requestId: String(request(state).id),
+        expectedVersion: Number(request(state).version),
+        // First line fine, second line asks for more than is reserved.
+        lines: [
+          { lineId: String(state.lines[0]!.id), quantity: 5 },
+          { lineId: String(state.lines[1]!.id), quantity: 99 },
+        ],
+        idempotencyKey: "bad-dispatch",
+      },
+      deps: DEPS,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(state.lines.every((line) => line.dispatched_quantity === 0)).toBe(true);
+    expect(balance(state, STORE, SKU_A)?.in_transit_quantity ?? 0).toBe(0);
+    expect(state.movements.filter((m) => m.movement_type === "dispatch")).toHaveLength(0);
+    expect(request(state).status).toBe("allocated");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("approving zero on every line writes nothing at all", async () => {
+  const state = createState();
+  const harness = await installFakePool(state)();
+  try {
+    await seedStock(state, 20);
+    await submit(state);
+    const result = await approveAll(state, 0);
+    expect(result.ok).toBe(false);
+    // The loop had already written approved=0 to each line before the total
+    // was checked; the throw rolls those writes back with everything else.
+    expect(request(state).status).toBe("submitted");
+    expect(state.lines.every((line) => line.approved_quantity === 0)).toBe(true);
+    expect(state.transitions.filter((row) => row.to_status === "approved")).toHaveLength(0);
   } finally {
     harness.restore();
   }
