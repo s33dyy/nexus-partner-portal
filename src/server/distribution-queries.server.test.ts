@@ -385,10 +385,11 @@ test("available is computed from on hand, reserved, and damaged — in SQL and a
   }
 });
 
-test("a manager sees balances only for locations it holds", async () => {
+test("a manager sees its own locations and the LIVEY warehouses, never a Distributor's", async () => {
   const h = harness({ rowsFor: () => [] });
   await listInventoryBalances(manager(), {}, h.deps);
   expect(h.captured[0]?.sql).toContain("loc.custodian_assignment_id = $1");
+  expect(h.captured[0]?.sql).toContain("loc.location_type = 'livey_warehouse'");
   expect(h.captured[0]?.sql).not.toContain("loc.distributor_assignment_id");
 });
 
@@ -461,4 +462,20 @@ test("destination locations are the caller's own active locations only", async (
   await listStockLocations(manager(), { destinationsOnly: true }, asManager.deps);
   // Managers approve; they do not receive.
   expect(asManager.captured[0]?.sql).toContain("WHERE FALSE");
+});
+
+test("a required-by DATE keeps its calendar day east of UTC", async () => {
+  // pg hands a DATE back as a JS Date at LOCAL midnight. Routing that through
+  // toISOString().slice(0, 10) moved the day backwards for every timezone east
+  // of UTC: a request needed on the 15th displayed as the 14th in IST.
+  const localMidnight = new Date(2027, 0, 15, 0, 0, 0);
+  const h = harness({ rowsFor: () => [requestRow({ required_by: localMidnight })] });
+  const result = await listStockRequests(distributor(), {}, h.deps);
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.rows[0]?.requiredBy).toBe("2027-01-15");
+
+  // A plain ISO date string passes through untouched.
+  const asString = harness({ rowsFor: () => [requestRow({ required_by: "2027-01-15" })] });
+  const stringResult = await listStockRequests(distributor(), {}, asString.deps);
+  if (stringResult.ok) expect(stringResult.rows[0]?.requiredBy).toBe("2027-01-15");
 });

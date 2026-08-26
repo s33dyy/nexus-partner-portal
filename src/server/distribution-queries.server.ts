@@ -74,9 +74,24 @@ function toIso(value: unknown): string {
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
 }
 
+/**
+ * A `DATE` column has no time and no zone, and `pg` hands it back as a JS
+ * Date at LOCAL midnight. Going through toISOString() to slice the first ten
+ * characters therefore shifts the calendar day backwards for every timezone
+ * east of UTC — a request needed on the 15th displayed as the 14th in IST.
+ * Read the local components instead, which is what the column actually means.
+ */
 function toDateOnly(value: unknown): string {
-  const iso = toIso(value);
-  return iso ? iso.slice(0, 10) : "";
+  if (!value) return "";
+  if (typeof value === "string") {
+    const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+    if (match) return match[1]!;
+  }
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 function num(value: unknown): number {

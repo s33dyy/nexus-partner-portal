@@ -434,11 +434,14 @@ test("a manager's request scope covers what it decides and what it holds, and no
   expect(scope.params).toEqual(["assignment-manager"]);
 });
 
-test("a manager sees balances only for locations it is custodian of", () => {
+test("a manager sees its own custodied locations and every LIVEY warehouse", () => {
   const scope = stockLocationScopePredicate(manager(), "loc", 1);
-  expect(scope.clause).toBe("loc.custodian_assignment_id = $1");
-  // Never a distributor_assignment_id match: that would expose another
-  // Distributor's stock to whoever manages them.
+  expect(scope.clause).toContain("loc.custodian_assignment_id = $1");
+  // Approving means choosing the source location per line, so a manager that
+  // could see no warehouse would get an empty picker and be unable to approve.
+  expect(scope.clause).toContain("loc.location_type = 'livey_warehouse'");
+  // Still never a distributor_assignment_id match: that would expose another
+  // Distributor's own stock to whoever manages them.
   expect(scope.clause).not.toContain("distributor_assignment_id");
 });
 

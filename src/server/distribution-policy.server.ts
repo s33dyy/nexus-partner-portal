@@ -330,8 +330,17 @@ export function stockLocationScopePredicate(
     };
   }
   if (isDistributionManagerRole(actor)) {
+    // Locations this manager holds custody of, PLUS every LIVEY warehouse.
+    //
+    // The warehouse half is not a widening of §24.4's rule — that rule
+    // forbids seeing another *Distributor's* balances, and a LIVEY warehouse
+    // belongs to no Distributor. It is required: approving a request means
+    // choosing the source location each line is fulfilled from, and a manager
+    // who cannot see any warehouse gets an empty picker and cannot approve at
+    // all. Distributor-owned locations stay invisible unless this manager is
+    // their custodian.
     return {
-      clause: `${alias}.custodian_assignment_id = $${nextParamIndex}`,
+      clause: `(${alias}.custodian_assignment_id = $${nextParamIndex} OR ${alias}.location_type = 'livey_warehouse')`,
       params: [actor.assignment.assignmentId],
     };
   }

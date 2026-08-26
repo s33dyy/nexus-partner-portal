@@ -117,7 +117,7 @@ function DistributionPage() {
     () => parseDistributionSearch(rawSearch as Record<string, unknown>),
     [rawSearch],
   );
-  const { can, hasRole, surfaces } = useAuth();
+  const { can, hasRole, roleKey, surfaces } = useAuth();
 
   const enabled = surfaces.distributionCore;
   const canRead = can("distribution", "read");
@@ -125,6 +125,11 @@ function DistributionPage() {
   // (§24.4). The server enforces that on every command regardless; this only
   // decides whether to draw the buttons.
   const canAdminister = hasRole("super_admin");
+  // §24.4: only a Distributor submits, acting on its own active Assignment —
+  // Super Admin administers locations and posts corrections but is not a
+  // requester. Offering the button to anyone else would produce a form whose
+  // submit the server refuses, which is worse than no button.
+  const canSubmitRequests = roleKey === "restricted_distributor" && can("distribution", "create");
 
   const [requests, setRequests] = useState<StockRequestListRow[]>([]);
   const [balances, setBalances] = useState<InventoryBalanceView[]>([]);
@@ -322,9 +327,10 @@ function DistributionPage() {
                 }}
               />
             ) : null}
-            {/* No destination means this actor owns no location to receive
-                into, so a request form would have nothing to point at. */}
-            {destinations.length > 0 ? (
+            {/* Needs both: the authority to submit, and somewhere to receive
+                into — a request form with no destination has nothing to point
+                at. */}
+            {canSubmitRequests && destinations.length > 0 ? (
               <Button size="sm" onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 Request stock
