@@ -52,6 +52,7 @@ import {
   SubmitStockRequestInput,
 } from "@/domain/contracts/distribution";
 import { useAuth } from "@/hooks/use-auth";
+import { getStockRequestRecommendations } from "@/integrations/local/recommendations";
 import {
   allocateStockRequest,
   cancelStockRequest,
@@ -487,6 +488,13 @@ function DistributionPage() {
         dealId={search.dealId}
         customerId={search.customerId}
         busy={busy}
+        // Passed only when the surface is on, so a disabled flag means the
+        // panel is absent AND no recommendation request is made.
+        loadRecommendations={
+          surfaces.productRecommendations
+            ? (input) => getStockRequestRecommendations(input)
+            : undefined
+        }
         onSubmit={async (input: SubmitStockRequestInput) => {
           setBusy(true);
           try {

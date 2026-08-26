@@ -11,6 +11,7 @@ export const ALL_SURFACES_OFF: ProductSurfaceSnapshot = {
   integrationOperationsCentre: false,
   learningLessonAuthoring: false,
   gyftrFulfillment: false,
+  productRecommendations: false,
 };
 
 /**

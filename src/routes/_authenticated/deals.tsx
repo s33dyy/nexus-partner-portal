@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { contextualStockAction } from "@/components/distribution/distribution-navigation";
+import { DealProductSuggestions } from "@/components/recommendations/deal-product-suggestions";
 import {
   newRequestForDealUrl,
   trackStockForDealUrl,
@@ -2271,6 +2272,13 @@ function DealsPage() {
                 />
                 <Separator />
                 <DealLineItems dealId={selectedDeal.id} dealStage={selectedDeal.stage} />
+                {/* Cross-sell evidence sits directly under the line items it
+                    is about, so the reason and the thing it refers to are on
+                    the same screen. Absent entirely when the surface is off —
+                    and then nothing is fetched for it either. */}
+                {surfaces.productRecommendations ? (
+                  <DealProductSuggestions dealId={selectedDeal.id} />
+                ) : null}
                 <Separator />
                 <DealParticipantTags dealId={selectedDeal.id} />
                 <Separator />

@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { resolveStatusTone } from "@/lib/status-tone";
 import { Button } from "@/components/ui/button";
+import { CatalogueProductSuggestions } from "@/components/recommendations/catalogue-product-suggestions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -212,7 +213,7 @@ export const Route = createFileRoute("/_authenticated/admin/catalog")({
 });
 
 function AdminCatalogPage() {
-  const { hasRole } = useAuth();
+  const { hasRole, surfaces } = useAuth();
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<CatalogProjectionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -821,6 +822,13 @@ function AdminCatalogPage() {
           </Card>
         </div>
       </div>
+
+      {/* Related products for the item being edited, from the deals it has
+          actually appeared on. Read-only: the catalogue has nothing to add
+          the suggestion to. */}
+      {editOpen && surfaces.productRecommendations && selectedItem ? (
+        <CatalogueProductSuggestions sku={selectedItem.sku} />
+      ) : null}
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-3xl">

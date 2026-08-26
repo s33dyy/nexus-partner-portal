@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+
+import { ProductRecommendationList } from "@/components/recommendations/product-recommendation-list";
 
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, FormDialog } from "@/components/ui/form-dialog";
@@ -12,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { ProductRecommendation } from "@/domain/contracts/recommendations";
 import {
   STOCK_REQUEST_PRIORITIES,
   type RequestableProductSkuView,
@@ -48,6 +51,7 @@ export function StockRequestDialog({
   customerId,
   busy,
   onSubmit,
+  loadRecommendations,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +61,12 @@ export function StockRequestDialog({
   customerId?: string | null;
   busy: boolean;
   onSubmit: (input: SubmitStockRequestInput) => Promise<void>;
+  /** Omitted when the recommendation surface is off, in which case the panel
+   * is not rendered and no request is made for it. */
+  loadRecommendations?: (input: {
+    destinationLocationId: string;
+    chosenProductSkuIds: string[];
+  }) => Promise<{ recommendations: ProductRecommendation[]; insufficientHistory: boolean }>;
 }) {
   const [destinationLocationId, setDestinationLocationId] = useState("");
   const [requiredBy, setRequiredBy] = useState("");
@@ -65,6 +75,9 @@ export function StockRequestDialog({
   const [lines, setLines] = useState<StockRequestDraftLine[]>([{ ...EMPTY_LINE }]);
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<ProductRecommendation[]>([]);
+  const [suggestionsThin, setSuggestionsThin] = useState(true);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +95,51 @@ export function StockRequestDialog({
     () => new Set(lines.map((line) => line.productSkuId).filter(Boolean)),
     [lines],
   );
+
+  const chosenKey = [...usedSkuIds].sort().join(",");
+
+  const refreshSuggestions = useCallback(async () => {
+    if (!loadRecommendations || !destinationLocationId) {
+      setSuggestions([]);
+      setSuggestionsThin(true);
+      return;
+    }
+    setSuggestionsLoading(true);
+    try {
+      const result = await loadRecommendations({
+        destinationLocationId,
+        chosenProductSkuIds: chosenKey ? chosenKey.split(",") : [],
+      });
+      setSuggestions(result.recommendations);
+      setSuggestionsThin(result.insufficientHistory);
+    } catch (cause) {
+      // A failed suggestion fetch must never block the request the user came
+      // here to make, so it degrades to no panel rather than an error.
+      console.error("Failed to load stock suggestions", cause);
+      setSuggestions([]);
+      setSuggestionsThin(true);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, [loadRecommendations, destinationLocationId, chosenKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    void refreshSuggestions();
+  }, [open, refreshSuggestions]);
+
+  const addSuggestion = (recommendation: ProductRecommendation) => {
+    setLines((current) => {
+      // Reuse a blank row if the user left one, rather than stacking an empty
+      // line under every accepted suggestion.
+      const blankIndex = current.findIndex((line) => !line.productSkuId);
+      const next = [...current];
+      const added = { productSkuId: recommendation.itemId, quantity: "1" };
+      if (blankIndex >= 0) next[blankIndex] = added;
+      else next.push(added);
+      return next;
+    });
+  };
 
   const validationError = useMemo(() => {
     if (!destinationLocationId) return "Choose the location the stock should arrive at.";
@@ -266,6 +324,17 @@ export function StockRequestDialog({
           Add product
         </Button>
       </div>
+
+      {loadRecommendations && destinationLocationId ? (
+        <ProductRecommendationList
+          surface="stock_request"
+          recommendations={suggestions}
+          insufficientHistory={suggestionsThin}
+          loading={suggestionsLoading}
+          onAdd={addSuggestion}
+          className="border-t pt-3"
+        />
+      ) : null}
     </FormDialog>
   );
 }

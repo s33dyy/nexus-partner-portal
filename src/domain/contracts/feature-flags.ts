@@ -12,7 +12,8 @@ export type FeatureFlagKey =
   | "distribution-core"
   | "integration-operations-centre"
   | "learning-lesson-authoring"
-  | "gyftr-fulfillment";
+  | "gyftr-fulfillment"
+  | "product-recommendations";
 
 export type FeatureFlagRegistryEntry = {
   key: FeatureFlagKey;
@@ -123,6 +124,19 @@ export const FEATURE_FLAG_REGISTRY: readonly FeatureFlagRegistryEntry[] = [
     metrics: ["lesson-authoring-writes"],
     expiresAt: null,
     rollback: "Disable the flag; the lesson authoring action disappears from Learning admin.",
+    auditRequired: true,
+  },
+  {
+    key: "product-recommendations",
+    label: "Product recommendations",
+    enabledByDefault: false,
+    owner: "Distribution and Logistics",
+    cohort: "internal-only",
+    dependencies: ["baseline-telemetry"],
+    metrics: ["recommendation-impressions", "recommendation-accepts"],
+    expiresAt: null,
+    rollback:
+      "Disable the flag; every recommendation panel disappears and no recommendation query runs. Nothing else changes — recommendations are read-only and derive from history that stays put.",
     auditRequired: true,
   },
   {

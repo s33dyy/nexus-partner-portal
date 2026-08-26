@@ -2465,5 +2465,18 @@ INSERT INTO feature_flags (
     'Disable the flag; digital rewards become unrequestable and unapprovable, and no provider call is made.',
     true,
     true
+  ),
+  (
+    'product-recommendations',
+    'Product recommendations',
+    false,
+    'Distribution and Logistics',
+    'internal-only',
+    ARRAY['baseline-telemetry'],
+    ARRAY['recommendation-impressions','recommendation-accepts'],
+    NULL,
+    'Disable the flag; every recommendation panel disappears and no recommendation query runs. Nothing else changes — recommendations are read-only and derive from history that stays put.',
+    true,
+    true
   )
 ON CONFLICT (flag_key) DO NOTHING;

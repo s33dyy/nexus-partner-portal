@@ -6356,3 +6356,79 @@ These IDs extend Section 21 and are additive to it.
 | DMS-023 | `queryTable` is called for any DMS table through the generic client path | Access denied for every role, including Super Admin |
 | DMS-024 | Balance projection is compared with the movement ledger for every fixture pair | The projection equals the ledger sum exactly |
 | DMS-025 | `distribution-core` is disabled | Navigation hides Distribution, the direct route renders the unavailable page without issuing a DMS query, and every DMS command is denied for every role |
+
+---
+
+## 25. Product Recommendations
+
+Chapter 25 is additive to Blueprint v1.0. It defines how the product suggests products: in the stock request form, on a Deal, and on a catalogue item.
+
+### 25.1 The governing rule
+
+**A recommendation is a claim, and every claim must carry the evidence that produced it.**
+
+Every suggestion is the sum of named reasons. Each reason states the real numbers behind it — "On 4 of your last 6 requests", not "frequently" — and a candidate left with no admissible reason is dropped rather than shown. There is no model, no learned weight, and no score the reader cannot reconstruct from the sentence beside it.
+
+Consequences that are not negotiable:
+
+- No score, star rating, or percentage match is ever rendered. Summing five round weights does not produce a "97% match", and displaying one would imply a precision this has none of.
+- An empty result says so, in words, per surface. A recommendation panel that renders a blank box reads as broken; one that pads itself with arbitrary catalogue entries to look populated is the fabrication this rule exists to prevent.
+- No recommendation may be the only way to reach a product. They shorten a path; they never become the path.
+
+### 25.2 Reasons and weights
+
+| Reason | Weight | Evidence | Aggregate |
+| --- | ---: | --- | --- |
+| `ordered_together` | 40 | Appears on the same past request or won deal as something already chosen | yes |
+| `won_deal_attach` | 35 | Appears on won deals generally | yes |
+| `frequently_reordered` | 30 | On N of the viewer's own last M requests | no |
+| `running_low` | 25 | Available at the destination is below what the viewer typically orders | no |
+| `category_peer` | 10 | Same catalogue category | yes |
+
+The weights are a declared editorial ordering, not a fitted parameter: direct evidence about this buyer's own behaviour outranks aggregate market-basket evidence, which outranks category adjacency. A candidate must clear at least `running_low`'s weight to surface, so a lone category match never appears on its own — that is a fact about the catalogue, not a recommendation.
+
+`running_low` is measured relative to the viewer's own typical order quantity. With no order history there is no "low", and the signal stays silent rather than calling every small number a shortage.
+
+### 25.3 Aggregate evidence and disclosure
+
+Aggregate reasons are computed across requests and deals the viewer cannot see. That is sound as a statistic and unsound as a disclosure: with a cohort of one, "commonly ordered with X" reports precisely what one other Distributor did.
+
+Every aggregate reason therefore carries its cohort size, and any reason drawing on fewer than **three** distinct requests, deals, or locations is dropped before it can be rendered. The floor is applied twice — in SQL, so a below-floor pair is never loaded, and again in the contract on the way out.
+
+Signals derived from the viewer's own history carry no floor. They are already theirs, and suppressing them would hide a Distributor's own behaviour from them.
+
+### 25.4 Surfaces
+
+| Surface | Vocabulary | Evidence | Action |
+| --- | --- | --- | --- |
+| Stock request | `product_skus` | The Distributor's own reorder cadence, their destination's stock level, market basket across requests | Add to the draft request |
+| Deal | `portal_catalog_items` | Won deals only | Read-only |
+| Catalogue item | `portal_catalog_items` | Deals the item has appeared on, plus category | Read-only |
+
+The two vocabularies are not merged. Stock requests move governed SKUs; deals and the catalogue reference the commercial catalogue. Pretending one id space existed would silently mis-attribute every signal.
+
+Deal evidence comes from **won** deals only: an open deal's line items are a proposal and a lost deal's are a counter-example, and neither is evidence of what sells. The deal and catalogue surfaces are read-only because attaching a product to a deal snapshots MSRP, PTP, discount, and DTP at that moment — a shortcut that inserted a line without that snapshot would produce a line item with no pricing provenance.
+
+### 25.5 Access and readiness
+
+Recommendations are a view of data the viewer may already read, and they never widen it:
+
+- The whole capability sits behind a `product-recommendations` surface flag that ships disabled and fails closed. When it is off, no panel renders and no recommendation query is issued.
+- Stock suggestions inherit the Distribution gate of §24.4 rather than inventing a second one, and read only the viewer's own history and their own locations' balances.
+- A deal suggestion first confirms the deal is one the viewer can already see, using the same participant clause the table policy uses. A deal outside their scope returns the same denial as one that does not exist — a recommendation must never become a side channel that confirms a record.
+- A failed suggestion fetch degrades to no panel. It never blocks the request, deal, or catalogue work the reader came to do.
+
+### 25.6 Acceptance and test catalogue
+
+| Test ID | Scenario | Expected result |
+| --- | --- | --- |
+| REC-001 | A suggestion is rendered | It shows its reason with the real numbers in it, and no score or percentage |
+| REC-002 | A candidate's only reason is an aggregate one below the cohort floor | The candidate is not shown |
+| REC-003 | A candidate's only reason is `category_peer` | The candidate is not shown |
+| REC-004 | Category is combined with a real signal | Shown, led by the stronger reason |
+| REC-005 | The same candidates arrive in a different order | The rendered order is identical |
+| REC-006 | A SKU already on the draft | Never suggested back |
+| REC-007 | The viewer has no order history and stock is low | Nothing is called low |
+| REC-008 | `product-recommendations` is disabled | No panel renders and no recommendation query is issued |
+| REC-009 | A deal outside the viewer's scope | Denied identically to a deal that does not exist, with no evidence gathered |
+| REC-010 | History is too thin to say anything | The panel says so in words, and suggests nothing |

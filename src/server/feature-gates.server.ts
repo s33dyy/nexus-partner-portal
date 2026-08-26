@@ -27,6 +27,7 @@ export const PRODUCT_SURFACE_KEYS = [
   "integration-operations-centre",
   "learning-lesson-authoring",
   "gyftr-fulfillment",
+  "product-recommendations",
 ] as const satisfies readonly FeatureFlagKey[];
 
 export type ProductSurfaceKey = (typeof PRODUCT_SURFACE_KEYS)[number];
@@ -36,6 +37,7 @@ export type ProductSurfaceSnapshot = {
   integrationOperationsCentre: boolean;
   learningLessonAuthoring: boolean;
   gyftrFulfillment: boolean;
+  productRecommendations: boolean;
 };
 
 const SNAPSHOT_FIELD_BY_KEY: Record<ProductSurfaceKey, keyof ProductSurfaceSnapshot> = {
@@ -43,6 +45,7 @@ const SNAPSHOT_FIELD_BY_KEY: Record<ProductSurfaceKey, keyof ProductSurfaceSnaps
   "integration-operations-centre": "integrationOperationsCentre",
   "learning-lesson-authoring": "learningLessonAuthoring",
   "gyftr-fulfillment": "gyftrFulfillment",
+  "product-recommendations": "productRecommendations",
 };
 
 export const ALL_PRODUCT_SURFACES_DISABLED: ProductSurfaceSnapshot = {
@@ -50,6 +53,7 @@ export const ALL_PRODUCT_SURFACES_DISABLED: ProductSurfaceSnapshot = {
   integrationOperationsCentre: false,
   learningLessonAuthoring: false,
   gyftrFulfillment: false,
+  productRecommendations: false,
 };
 
 export type ProductSurfaceQuery = (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
