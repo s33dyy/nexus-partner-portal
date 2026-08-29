@@ -391,7 +391,7 @@ function RewardsPage() {
                 <select
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value)}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-11 rounded-md border border-input bg-background px-3 text-sm lg:h-10"
                 >
                   {categories.map((category) => (
                     <option key={category} value={category}>

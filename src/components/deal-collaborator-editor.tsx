@@ -169,7 +169,7 @@ export function DealCollaboratorEditor({
             <div className="flex flex-col gap-3 md:flex-row md:items-end">
               <Field className="flex-1" label="Add collaborator">
                 <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm lg:h-10"
                   value={selectedMemberId}
                   onChange={(event) => setSelectedMemberId(event.target.value)}
                   disabled={disabled || maxReached}

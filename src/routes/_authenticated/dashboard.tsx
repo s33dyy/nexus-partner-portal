@@ -847,7 +847,7 @@ function QuickAction({
   return (
     <Link
       to={to}
-      className="flex items-center justify-between rounded-md border bg-card px-3 py-2 text-[13px] transition-colors hover:border-ring/40 hover:bg-secondary"
+      className="flex min-h-11 items-center justify-between rounded-md border bg-card px-3 py-2 text-[13px] transition-colors hover:border-ring/40 hover:bg-secondary lg:min-h-0"
     >
       <span className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-muted-foreground" />

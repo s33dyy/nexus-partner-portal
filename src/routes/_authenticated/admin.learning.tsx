@@ -372,7 +372,7 @@ function AdminLearningPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2 text-xs"
+                        className="h-11 px-2 text-xs lg:h-7"
                         onClick={() => openEditTrack(track)}
                       >
                         <Edit2 className="mr-1 h-3 w-3" />
@@ -381,7 +381,7 @@ function AdminLearningPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2 text-xs"
+                        className="h-11 px-2 text-xs lg:h-7"
                         onClick={() => void toggleTrackPublish(track)}
                       >
                         {track.is_published ? (
@@ -456,7 +456,7 @@ function AdminLearningPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2 text-xs"
+                        className="h-11 px-2 text-xs lg:h-7"
                         onClick={() => openEditSubject(subject)}
                       >
                         <Edit2 className="mr-1 h-3 w-3" />
@@ -566,7 +566,7 @@ function AdminLearningPage() {
                 id="track-tier"
                 value={trackDraft.tier_requirement}
                 onChange={(e) => setTrackDraft((d) => ({ ...d, tier_requirement: e.target.value }))}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm lg:h-10"
               >
                 {TIER_OPTIONS.map((t) => (
                   <option key={t} value={t}>
@@ -583,7 +583,12 @@ function AdminLearningPage() {
                 onChange={(e) => setTrackDraft((d) => ({ ...d, is_published: e.target.checked }))}
                 className="h-4 w-4 rounded border-input"
               />
-              <Label htmlFor="track-published" className="cursor-pointer">
+              {/* The 16px box can't be the target; the label forwards the tap,
+                  so it is the label that has to clear 44px on touch. */}
+              <Label
+                htmlFor="track-published"
+                className="flex min-h-11 cursor-pointer items-center lg:min-h-0"
+              >
                 Publish immediately (visible to learners)
               </Label>
             </div>

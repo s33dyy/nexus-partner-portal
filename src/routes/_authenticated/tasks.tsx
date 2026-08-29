@@ -473,7 +473,10 @@ function TasksPage() {
                       </span>
                       <button
                         type="button"
-                        className="inline-flex items-center gap-1 rounded-sm underline-offset-2 hover:text-foreground hover:underline"
+                        // An inline text button is still a tap target: give it
+                        // 44px of height on touch without changing the inline
+                        // look on desktop.
+                        className="inline-flex min-h-11 items-center gap-1 rounded-sm underline-offset-2 hover:text-foreground hover:underline lg:min-h-0"
                         onClick={() =>
                           setDateEdit({
                             task,

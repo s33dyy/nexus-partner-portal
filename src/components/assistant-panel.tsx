@@ -213,7 +213,7 @@ export function AssistantPanel({ open: openProp, onOpenChange }: AssistantPanelP
           className="gap-2 border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
         >
           <Sparkles className="h-4 w-4" />
-          <span className="hidden md:inline">Assistant</span>
+          <span className="hidden 2xl:inline">Assistant</span>
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">

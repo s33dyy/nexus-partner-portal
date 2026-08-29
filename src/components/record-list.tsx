@@ -354,7 +354,9 @@ export function BoardCard({
         aria-expanded={hasMore ? pinned : undefined}
         onClick={() => hasMore && setPinned((value) => !value)}
         className={cn(
-          "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors",
+          // min-h-11 on touch: this collapsed pill is the only way to open a
+          // board card's detail, and at py-1.5 it was a 32px target.
+          "flex min-h-11 w-full items-center gap-2 px-3 py-1.5 text-left transition-colors lg:min-h-0",
           TONE_TINT[tone],
           hasMore && "cursor-pointer",
         )}

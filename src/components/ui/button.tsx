@@ -20,12 +20,20 @@ const buttonVariants = cva(
         ghost: "hover:bg-secondary hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
+      // Mobile-first: below lg every button clears the 44x44 CSS-pixel tap
+      // target product.md section 4.3 requires, then drops back to the denser
+      // desktop sizes at lg — the same boundary where the sidebar stops being
+      // a drawer (hooks/use-mobile.tsx). Touch density and pointer density are
+      // different problems; this is the one place to solve both at once.
+      //
+      // `sm` is 44 tall on touch just like `default`: a smaller *label* is a
+      // legitimate hierarchy choice, a smaller *target* is not.
       size: {
-        default: "h-9 px-3.5 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-6",
-        icon: "h-9 w-9",
-        "icon-sm": "h-8 w-8",
+        default: "h-11 px-4 py-2 lg:h-9 lg:px-3.5",
+        sm: "h-11 rounded-md px-3.5 text-xs lg:h-8 lg:px-3",
+        lg: "h-11 rounded-md px-6 lg:h-10",
+        icon: "size-11 lg:size-9",
+        "icon-sm": "size-11 lg:size-8",
       },
     },
     defaultVariants: {

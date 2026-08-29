@@ -128,7 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 type="button"
                 aria-live="polite"
                 className={cn(
-                  "flex min-w-0 shrink items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary",
+                  "flex h-11 min-w-0 shrink items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary lg:h-auto",
                   contextSummary.state === "ready"
                     ? "border-border text-muted-foreground"
                     : "border-transparent tint-warning text-warning-foreground",
@@ -169,35 +169,55 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <CommandPaletteHint onClick={() => setPaletteOpen(true)} />
 
-          <div className="ml-auto flex min-w-0 items-center gap-1">
+          {/* shrink-0: the children are fixed 44px tap targets, so letting this
+              wrapper shrink does not shrink them — it just lets them spill past
+              the right edge. The context chip to the left is the shrinkable
+              one, and truncating a role label is the graceful degradation here.
+              What makes shrink-0 affordable is that the optional chrome below
+              is deferred to xl/2xl; revealing all of it at lg is what once made
+              every page scroll sideways between 1024 and 1440. */}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Region scoping is a desktop affordance — on a phone it ate a
-                third of the bar. Reachable from the context popover instead. */}
-            <div className="hidden md:block">
+                third of the bar. Reachable from the context popover instead.
+                xl, not lg: at 1024-1279 the 256px rail is back but the window
+                is not much wider, and this control plus the status badge were
+                what tipped the header past the viewport. */}
+            <div className="hidden shrink-0 xl:block">
               <RegionFilterSelect />
             </div>
             <Badge
               tone={
                 status === "approved" ? "success" : status === "rejected" ? "danger" : "warning"
               }
-              className="hidden lg:inline-flex"
+              className="hidden shrink-0 2xl:inline-flex"
             >
               {statusLabel[status]}
             </Badge>
-            <span className="mx-0.5 hidden h-5 w-px bg-border md:block" />
+            <span className="mx-0.5 hidden h-5 w-px shrink-0 bg-border xl:block" />
+            {/* Six 44px targets do not fit in a 375px header. The briefing is
+                the one that moves: it opens itself once per slot anyway, so
+                this button is only ever a manual re-open — and it stays
+                reachable from the account menu below. */}
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
               aria-label="Open briefing"
-              className="xl:h-9 xl:w-auto xl:gap-1.5 xl:px-2"
+              className="hidden shrink-0 lg:inline-flex 2xl:h-9 2xl:w-auto 2xl:gap-1.5 2xl:px-2"
               onClick={() => setDigestOpen(true)}
             >
               <AudioLines className="h-4 w-4" />
-              <span className="hidden xl:inline">Briefing</span>
+              <span className="hidden 2xl:inline">Briefing</span>
             </Button>
             <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
             {can("calls", "read") && <SoftphonePanel />}
-            <Button asChild variant="ghost" size="icon" aria-label="Notifications">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              aria-label="Notifications"
+            >
               <Link to="/notifications" className="relative">
                 <Bell className="h-4 w-4" />
                 {unreadCount > 0 && (
@@ -209,13 +229,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 shrink-0 gap-2 px-1 sm:px-2">
+                <Button
+                  variant="ghost"
+                  className="h-11 min-w-11 shrink-0 gap-2 px-1 sm:px-2 lg:h-9 lg:min-w-0"
+                >
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="text-xs bg-primary text-primary-foreground">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden md:inline text-sm font-medium">
+                  <span className="hidden max-w-[14ch] truncate text-sm font-medium xl:inline">
                     {profile?.full_name ?? user?.email}
                   </span>
                 </Button>
@@ -235,6 +258,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Link to="/settings">
                     <User className="mr-2 h-4 w-4" /> Profile & settings
                   </Link>
+                </DropdownMenuItem>
+                {/* Mirrors the header button, which is hidden below lg so the
+                    remaining controls can each hold a 44px target. */}
+                <DropdownMenuItem className="lg:hidden" onClick={() => setDigestOpen(true)}>
+                  <AudioLines className="mr-2 h-4 w-4" /> Briefing
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>

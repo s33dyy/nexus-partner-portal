@@ -574,7 +574,7 @@ function SupportPage() {
                               priority: event.target.value,
                             }))
                           }
-                          className="flex h-9 w-full rounded-md border border-input bg-card px-3 text-sm shadow-card focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25"
+                          className="flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm shadow-card focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 lg:h-9"
                         >
                           <option value="low">Low</option>
                           <option value="medium">Medium</option>
@@ -680,12 +680,12 @@ function SupportPage() {
                       Post reply
                     </Button>
                     {(hasRole("super_admin") || hasRole("livey_support")) && (
-                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <label className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground lg:min-h-0">
                         <input
                           type="checkbox"
                           checked={replyIsInternal}
                           onChange={(e) => setReplyIsInternal(e.target.checked)}
-                          className="rounded border-input text-primary"
+                          className="size-4 rounded border-input text-primary"
                         />
                         Mark as internal note (hidden from partner)
                       </label>

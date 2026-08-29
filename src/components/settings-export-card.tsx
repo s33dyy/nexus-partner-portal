@@ -45,7 +45,7 @@ export function SettingsExportCard({
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="outline">{countLabel}</Badge>
           {dataset.routePath ? (
-            <Button asChild variant="ghost" size="sm" className="h-8 gap-1 px-2">
+            <Button asChild variant="ghost" size="sm" className="h-11 gap-1 px-2 lg:h-8">
               <Link to={dataset.routePath}>
                 Open source
                 <ExternalLink className="h-3.5 w-3.5" />

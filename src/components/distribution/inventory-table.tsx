@@ -51,58 +51,131 @@ export function InventoryTable({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Product</TableHead>
-            <TableHead>SKU</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead className="text-right">On hand</TableHead>
-            <TableHead className="text-right">Reserved</TableHead>
-            <TableHead className="text-right">Available</TableHead>
-            <TableHead className="text-right">In transit</TableHead>
-            <TableHead className="text-right">Damaged</TableHead>
-            <TableHead>Updated</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={`${row.productSkuId}:${row.locationId}`}>
-              <TableCell className="text-[13px] font-medium">{row.productName}</TableCell>
-              <TableCell className="font-mono text-[12px]">{row.skuCode}</TableCell>
-              <TableCell className="text-[13px]">
-                {row.locationName}
-                <Badge tone="neutral" className="ml-2 text-[10px]">
+    <>
+      {/* Cards below lg, the balance table above it (product.md 4.3). The five
+          quantity columns are the reason this table is 1000px wide, so on a
+          phone they become a labelled row of figures instead — Available
+          first and largest, because it is the number anyone is here to read.
+          available = on hand - reserved - damaged, so the parts stay beside
+          it rather than a scroll away. */}
+      <div className="divide-y lg:hidden">
+        {rows.map((row) => (
+          <article key={`${row.productSkuId}:${row.locationId}`} className="space-y-3 p-4">
+            <div className="space-y-1">
+              <div className="text-[13px] font-medium">{row.productName}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[12px] text-muted-foreground">{row.skuCode}</span>
+                <Badge tone="neutral" className="text-[10px]">
                   {row.locationType === "distributor" ? "Distributor" : "Warehouse"}
                 </Badge>
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{row.onHandQuantity}</TableCell>
-              <TableCell className="text-right tabular-nums">{row.reservedQuantity}</TableCell>
-              <TableCell className="text-right font-medium tabular-nums">
-                {row.availableQuantity}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{row.inTransitQuantity}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {row.damagedQuantity > 0 ? (
-                  <span className="text-destructive">{row.damagedQuantity}</span>
-                ) : (
-                  0
-                )}
-              </TableCell>
-              <TableCell className="text-[13px] text-muted-foreground">
-                {formatDateTimeLabel(row.updatedAt)}
-              </TableCell>
-              <TableCell className="text-right">
-                <Button size="sm" variant="ghost" onClick={() => onTrack(row)}>
-                  Track stock
-                </Button>
-              </TableCell>
+              </div>
+              <div className="text-[13px]">{row.locationName}</div>
+            </div>
+
+            <dl className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Available
+                </dt>
+                <dd className="text-lg font-medium tabular-nums">{row.availableQuantity}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  On hand
+                </dt>
+                <dd className="tabular-nums">{row.onHandQuantity}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Reserved
+                </dt>
+                <dd className="tabular-nums">{row.reservedQuantity}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  In transit
+                </dt>
+                <dd className="tabular-nums">{row.inTransitQuantity}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Damaged
+                </dt>
+                <dd className="tabular-nums">
+                  {row.damagedQuantity > 0 ? (
+                    <span className="text-destructive">{row.damagedQuantity}</span>
+                  ) : (
+                    0
+                  )}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[12px] text-muted-foreground">
+                Updated {formatDateTimeLabel(row.updatedAt)}
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => onTrack(row)}>
+                Track stock
+              </Button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="hidden overflow-x-auto lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Product</TableHead>
+              <TableHead>SKU</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead className="text-right">On hand</TableHead>
+              <TableHead className="text-right">Reserved</TableHead>
+              <TableHead className="text-right">Available</TableHead>
+              <TableHead className="text-right">In transit</TableHead>
+              <TableHead className="text-right">Damaged</TableHead>
+              <TableHead>Updated</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${row.productSkuId}:${row.locationId}`}>
+                <TableCell className="text-[13px] font-medium">{row.productName}</TableCell>
+                <TableCell className="font-mono text-[12px]">{row.skuCode}</TableCell>
+                <TableCell className="text-[13px]">
+                  {row.locationName}
+                  <Badge tone="neutral" className="ml-2 text-[10px]">
+                    {row.locationType === "distributor" ? "Distributor" : "Warehouse"}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{row.onHandQuantity}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.reservedQuantity}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">
+                  {row.availableQuantity}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{row.inTransitQuantity}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {row.damagedQuantity > 0 ? (
+                    <span className="text-destructive">{row.damagedQuantity}</span>
+                  ) : (
+                    0
+                  )}
+                </TableCell>
+                <TableCell className="text-[13px] text-muted-foreground">
+                  {formatDateTimeLabel(row.updatedAt)}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button size="sm" variant="ghost" onClick={() => onTrack(row)}>
+                    Track stock
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

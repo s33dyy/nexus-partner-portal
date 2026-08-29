@@ -894,7 +894,7 @@ function AdminRewardsPage() {
                           userId: event.target.value,
                         }))
                       }
-                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      className="h-11 rounded-md border border-input bg-background px-3 text-sm lg:h-10"
                     >
                       <option value="">Select a user</option>
                       {users.map((user) => (

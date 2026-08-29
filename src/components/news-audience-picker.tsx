@@ -80,7 +80,7 @@ export function NewsAudiencePicker({
           {SALES_REGIONS.map((region) => (
             <label
               key={region.key}
-              className="flex cursor-pointer items-center gap-2 text-[13px]"
+              className="flex min-h-11 cursor-pointer items-center gap-2 text-[13px] lg:min-h-0"
               htmlFor={`news-region-${region.key}`}
             >
               <Checkbox
@@ -105,11 +105,11 @@ export function NewsAudiencePicker({
             No partners to target — the post will reach everyone.
           </p>
         ) : (
-          <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border p-2.5">
+          <div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-2.5 lg:max-h-40">
             {partners.map((partner) => (
               <label
                 key={partner.id}
-                className="flex cursor-pointer items-center gap-2 text-[13px]"
+                className="flex min-h-11 cursor-pointer items-center gap-2 text-[13px] lg:min-h-0"
                 htmlFor={`news-partner-${partner.id}`}
               >
                 <Checkbox

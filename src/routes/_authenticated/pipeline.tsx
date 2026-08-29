@@ -695,7 +695,7 @@ function PipelinePage() {
                                 of a terminal stage. */}
                             {isTerminalDealStage(deal.stage) ? null : (
                               <Button
-                                className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                                className="h-11 gap-1 px-2 text-[11px] [&_svg]:size-3.5 lg:h-7"
                                 size="sm"
                                 variant="outline"
                                 onClick={() => void moveDeal(deal)}
@@ -709,7 +709,7 @@ function PipelinePage() {
                             )}
                             {getValidBackwardStages(deal.stage).length > 0 ? (
                               <Button
-                                className="h-7 gap-1 px-2 text-[11px] [&_svg]:size-3.5"
+                                className="h-11 gap-1 px-2 text-[11px] [&_svg]:size-3.5 lg:h-7"
                                 size="sm"
                                 variant="outline"
                                 onClick={() => openBackward(deal)}
@@ -719,7 +719,7 @@ function PipelinePage() {
                               </Button>
                             ) : null}
                             <Button
-                              className="h-7 px-2 text-[11px]"
+                              className="h-11 px-2 text-[11px] lg:h-7"
                               size="sm"
                               variant="ghost"
                               onClick={() => openNote(deal)}

@@ -367,7 +367,7 @@ function DealDocumentsPage() {
               <select
                 value={dealFilter}
                 onChange={(e) => setDealFilter(e.target.value)}
-                className="h-10 rounded-md border bg-background px-3 text-sm"
+                className="h-11 rounded-md border bg-background px-3 text-sm lg:h-10"
               >
                 <option value="all">All deals</option>
                 {deals.map((deal) => (
@@ -379,7 +379,7 @@ function DealDocumentsPage() {
               <select
                 value={docTypeFilter}
                 onChange={(e) => setDocTypeFilter(e.target.value)}
-                className="h-10 rounded-md border bg-background px-3 text-sm"
+                className="h-11 rounded-md border bg-background px-3 text-sm lg:h-10"
               >
                 {docTypes.map((type) => (
                   <option key={type} value={type}>
@@ -397,7 +397,7 @@ function DealDocumentsPage() {
               <select
                 value={selectedDealId ?? ""}
                 onChange={(e) => setSelectedDealId(e.target.value || null)}
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                className="h-11 w-full rounded-md border bg-background px-3 text-sm lg:h-10"
               >
                 <option value="" disabled>
                   Select a deal
