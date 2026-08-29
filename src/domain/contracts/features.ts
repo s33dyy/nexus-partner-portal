@@ -21,6 +21,7 @@ export const FEATURE_KEYS = [
   "assistant",
   "calls",
   "distribution",
+  "outreach",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -41,6 +42,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   assistant: "Assistant",
   calls: "Calls",
   distribution: "Distribution",
+  outreach: "Outreach sequences",
 };
 
 export type CrudOperation = "create" | "read" | "update" | "delete";

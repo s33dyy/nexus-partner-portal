@@ -17,6 +17,12 @@
 // email provider must degrade to "in-app and WhatsApp still worked", never to
 // a crashed sweep that silently stops reminding anyone about anything.
 
+import {
+  resolveEmailCredentials,
+  type EmailSettingsDeps,
+  type ResolvedEmailCredentials,
+} from "@/server/email-settings.server";
+
 type EmailProvider = "resend" | "sendgrid" | "none";
 
 export type SendEmailInput = {
@@ -31,27 +37,32 @@ export type SendEmailResult =
   | { ok: false; skipped: true; reason: string }
   | { ok: false; skipped: false; reason: string };
 
-function resendApiKey(): string {
-  return process.env.RESEND_API_KEY ?? "";
+/**
+ * Which provider will actually be used, and with what credentials.
+ *
+ * Async because the credentials are no longer environment-only: an admin can
+ * save them from Settings (see email-settings.server.ts), and a saved key
+ * takes precedence over the environment variable. The lookup is cached there,
+ * so this stays cheap enough to call per message.
+ */
+export async function resolveEmailDelivery(
+  deps?: EmailSettingsDeps,
+): Promise<ResolvedEmailCredentials> {
+  const credentials = await resolveEmailCredentials(deps);
+  // A provider with no from-address cannot send, whichever source it came
+  // from — the providers reject the POST outright.
+  if (!credentials.fromAddress) {
+    return { ...credentials, provider: "none" };
+  }
+  return credentials;
 }
 
-function sendgridApiKey(): string {
-  return process.env.SENDGRID_API_KEY ?? "";
+export async function resolveEmailProvider(deps?: EmailSettingsDeps): Promise<EmailProvider> {
+  return (await resolveEmailDelivery(deps)).provider;
 }
 
-function fromAddress(): string {
-  return process.env.EMAIL_FROM ?? "";
-}
-
-export function resolveEmailProvider(): EmailProvider {
-  if (!fromAddress()) return "none";
-  if (resendApiKey()) return "resend";
-  if (sendgridApiKey()) return "sendgrid";
-  return "none";
-}
-
-export function isEmailConfigured(): boolean {
-  return resolveEmailProvider() !== "none";
+export async function isEmailConfigured(deps?: EmailSettingsDeps): Promise<boolean> {
+  return (await resolveEmailProvider(deps)) !== "none";
 }
 
 let warnedUnconfigured = false;
@@ -64,13 +75,17 @@ export function isPlausibleEmail(value: string): boolean {
   return EMAIL_RE.test(value.trim());
 }
 
-export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  const provider = resolveEmailProvider();
+export async function sendEmail(
+  input: SendEmailInput,
+  deps?: EmailSettingsDeps,
+): Promise<SendEmailResult> {
+  const delivery = await resolveEmailDelivery(deps);
+  const provider = delivery.provider;
   if (provider === "none") {
     if (!warnedUnconfigured) {
       warnedUnconfigured = true;
       console.warn(
-        "[email] no provider configured (set EMAIL_FROM plus RESEND_API_KEY or SENDGRID_API_KEY) — email delivery is disabled",
+        "[email] no provider configured (save one in Settings, or set EMAIL_FROM plus RESEND_API_KEY or SENDGRID_API_KEY) — email delivery is disabled",
       );
     }
     return { ok: false, skipped: true, reason: "Email provider is not configured" };
@@ -83,8 +98,8 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   try {
     return provider === "resend"
-      ? await sendViaResend({ ...input, to })
-      : await sendViaSendgrid({ ...input, to });
+      ? await sendViaResend({ ...input, to }, delivery)
+      : await sendViaSendgrid({ ...input, to }, delivery);
   } catch (error) {
     // Network-level failure. Callers record this as a failed dispatch and
     // move on to the next recipient rather than aborting the whole sweep.
@@ -96,15 +111,18 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   }
 }
 
-async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
+async function sendViaResend(
+  input: SendEmailInput,
+  delivery: ResolvedEmailCredentials,
+): Promise<SendEmailResult> {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${resendApiKey()}`,
+      Authorization: `Bearer ${delivery.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: fromAddress(),
+      from: delivery.fromAddress,
       to: [input.to],
       subject: input.subject,
       text: input.text,
@@ -124,19 +142,22 @@ async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
   return { ok: true, provider: "resend", id: payload?.id ?? null };
 }
 
-async function sendViaSendgrid(input: SendEmailInput): Promise<SendEmailResult> {
+async function sendViaSendgrid(
+  input: SendEmailInput,
+  delivery: ResolvedEmailCredentials,
+): Promise<SendEmailResult> {
   const content = [{ type: "text/plain", value: input.text }];
   if (input.html) content.push({ type: "text/html", value: input.html });
 
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${sendgridApiKey()}`,
+      Authorization: `Bearer ${delivery.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       personalizations: [{ to: [{ email: input.to }] }],
-      from: { email: fromAddress() },
+      from: { email: delivery.fromAddress },
       subject: input.subject,
       content,
     }),

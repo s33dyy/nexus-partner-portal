@@ -2506,3 +2506,240 @@ CREATE INDEX IF NOT EXISTS portal_news_posts_target_regions_idx
   ON portal_news_posts USING GIN (target_region_keys);
 CREATE INDEX IF NOT EXISTS portal_news_posts_target_partners_idx
   ON portal_news_posts USING GIN (target_partner_ids);
+
+-- --- Outreach sequences (automated follow-up cadences) ----------------------
+--
+-- A Sequence is an ordered list of Steps. An email step is sent unattended by
+-- the sweep in outreach-sweep.server.ts; a task step opens a Task for the
+-- owner through the same ensureAutomatedTask() path every other workflow
+-- uses, so a generated "call them" reminder lives in /tasks beside the rest
+-- of a rep's work rather than in a parallel to-do list nobody checks.
+--
+-- All four tables are new, so plain CREATE TABLE IF NOT EXISTS is safe here
+-- (unlike the ALTERs above, which extend tables that already exist on
+-- previously-migrated databases).
+
+CREATE TABLE IF NOT EXISTS outreach_sequences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  owner_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  -- Weekends are skipped when set, so a four-day cadence started on a
+  -- Thursday finishes the following Wednesday instead of mailing somebody on
+  -- a Sunday.
+  business_days_only BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Later emails carry "Re: <first subject>" so the thread reads as one
+  -- conversation in the recipient's client.
+  thread_as_reply BOOLEAN NOT NULL DEFAULT TRUE,
+  -- When a Deal is opened for an enrolled Customer the cadence stops: the
+  -- sequence has done its job and continuing to prospect somebody who is
+  -- already in a live deal is the single most embarrassing thing an
+  -- automation can do.
+  unenroll_on_deal_created BOOLEAN NOT NULL DEFAULT TRUE,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS outreach_sequences_partner_idx ON outreach_sequences (partner_id);
+CREATE INDEX IF NOT EXISTS outreach_sequences_owner_idx ON outreach_sequences (owner_id);
+CREATE INDEX IF NOT EXISTS outreach_sequences_status_idx ON outreach_sequences (status);
+
+DROP TRIGGER IF EXISTS outreach_sequences_updated_at ON outreach_sequences;
+CREATE TRIGGER outreach_sequences_updated_at
+BEFORE UPDATE ON outreach_sequences
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS outreach_sequence_steps (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sequence_id UUID NOT NULL REFERENCES outreach_sequences(id) ON DELETE CASCADE,
+  step_index INTEGER NOT NULL,
+  step_type TEXT NOT NULL,
+  -- Days from the enrolment date, counted in business days when the parent
+  -- sequence says so. Two steps may share an offset (send the email, then
+  -- open the "connect on LinkedIn" task the same day).
+  day_offset INTEGER NOT NULL DEFAULT 0,
+  subject TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  task_title TEXT NOT NULL DEFAULT '',
+  task_priority TEXT NOT NULL DEFAULT 'medium',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (sequence_id, step_index)
+);
+
+CREATE INDEX IF NOT EXISTS outreach_sequence_steps_sequence_idx
+  ON outreach_sequence_steps (sequence_id, step_index);
+
+CREATE TABLE IF NOT EXISTS outreach_enrollments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sequence_id UUID NOT NULL REFERENCES outreach_sequences(id) ON DELETE CASCADE,
+  -- Optional: an enrolment can target a bare address, but linking a Customer
+  -- is what gives {{company}}/{{country}}/{{segment}} something to resolve to
+  -- and what lets "a Deal opened" unenrol the contact automatically.
+  customer_id UUID REFERENCES portal_customers(id) ON DELETE SET NULL,
+  contact_name TEXT NOT NULL DEFAULT '',
+  contact_email TEXT NOT NULL,
+  contact_email_normalized TEXT NOT NULL,
+  -- The one-off line a rep adds for this person only ("hope Jake's game went
+  -- well") — merged into the first email above the template body.
+  personal_note TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  enrolled_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  partner_id UUID REFERENCES partners(id) ON DELETE CASCADE,
+  start_date DATE NOT NULL,
+  unenroll_reason TEXT,
+  unenrolled_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One live enrolment per address per sequence. Enrolling the same person
+-- twice is always a mistake — usually a double-click on the enrol button —
+-- and the partial index lets them be re-enrolled later, once the first run
+-- has finished or been stopped.
+CREATE UNIQUE INDEX IF NOT EXISTS outreach_enrollments_active_contact_idx
+  ON outreach_enrollments (sequence_id, contact_email_normalized)
+  WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS outreach_enrollments_sequence_idx
+  ON outreach_enrollments (sequence_id, status);
+CREATE INDEX IF NOT EXISTS outreach_enrollments_customer_idx
+  ON outreach_enrollments (customer_id) WHERE customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS outreach_enrollments_partner_idx ON outreach_enrollments (partner_id);
+
+DROP TRIGGER IF EXISTS outreach_enrollments_updated_at ON outreach_enrollments;
+CREATE TRIGGER outreach_enrollments_updated_at
+BEFORE UPDATE ON outreach_enrollments
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- One row per (enrolment, step), materialised at enrolment time. Computing
+-- the whole timeline up front is what makes the sweep a plain
+-- "WHERE scheduled_for <= now() AND status = 'pending'" scan, makes an
+-- enrolment's future visible in the UI, and stops a sequence edited tomorrow
+-- from silently rewriting a cadence somebody is halfway through.
+CREATE TABLE IF NOT EXISTS outreach_step_executions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID NOT NULL REFERENCES outreach_enrollments(id) ON DELETE CASCADE,
+  step_id UUID NOT NULL REFERENCES outreach_sequence_steps(id) ON DELETE CASCADE,
+  step_index INTEGER NOT NULL,
+  step_type TEXT NOT NULL,
+  scheduled_for TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  -- Set by the claiming UPDATE. A row stuck in 'sending' past
+  -- STALE_CLAIM_MINUTES is reclaimed on a later sweep — that only happens if
+  -- the process died mid-step.
+  claimed_at TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  detail TEXT,
+  -- Task steps record the Task they opened so the timeline can link to it.
+  task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+  -- Open tracking: the pixel URL carries this token, so a token leak reveals
+  -- nothing but the fact that one anonymous message was opened.
+  tracking_token TEXT UNIQUE,
+  open_count INTEGER NOT NULL DEFAULT 0,
+  first_opened_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (enrollment_id, step_id)
+);
+
+CREATE INDEX IF NOT EXISTS outreach_step_executions_due_idx
+  ON outreach_step_executions (scheduled_for)
+  WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS outreach_step_executions_enrollment_idx
+  ON outreach_step_executions (enrollment_id, step_index);
+
+-- Channel-level suppression (product.md §19.6, ACR-016). Keyed by address
+-- rather than by contact or profile because the person who clicks
+-- "unsubscribe" is an external recipient with no account here, and the only
+-- durable identifier we hold for them is the mailbox we wrote to. Checked
+-- before every send AND at enrolment, so a suppressed address can neither be
+-- enrolled nor mailed by an enrolment that predates the opt-out.
+CREATE TABLE IF NOT EXISTS outreach_suppressions (
+  email_normalized TEXT PRIMARY KEY,
+  reason TEXT NOT NULL DEFAULT 'unsubscribed',
+  source TEXT NOT NULL DEFAULT 'recipient',
+  enrollment_id UUID REFERENCES outreach_enrollments(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- The rep's own scheduling link, substituted into {{meeting_link}}. Lives on
+-- the profile rather than in one shared setting because every rep books into
+-- their own calendar.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS meeting_link TEXT;
+
+-- --- Outreach permission defaults ------------------------------------------
+--
+-- Read-leaning for the internal roles that do the prospecting, and closed for
+-- the partner roles: a sequence mails LIVEY's own customers from LIVEY's
+-- domain, so authoring one is not a partner-side capability. Editable
+-- afterward from /admin/roles like the rest of the matrix.
+INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_update, can_delete) VALUES
+  ('super_admin', 'outreach', true, true, true, true),
+  ('rm', 'outreach', true, true, true, false),
+  ('pam', 'outreach', true, true, true, false),
+  ('kam', 'outreach', true, true, true, false),
+  ('isr', 'outreach', true, true, true, false),
+  ('livey_support', 'outreach', false, false, false, false),
+  ('restricted_distributor', 'outreach', false, false, false, false),
+  ('partner_admin', 'outreach', false, false, false, false),
+  ('partner_user', 'outreach', false, false, false, false)
+ON CONFLICT (role_key, feature_key) DO NOTHING;
+
+-- --- Outreach: keep delivery history when a sequence is re-cut -------------
+--
+-- outreach_step_executions.step_id started life as ON DELETE CASCADE, which
+-- quietly made "edit the steps" mean "erase this sequence's whole track
+-- record". saveSequenceSteps() DELETEs and re-inserts the step rows, and it
+-- only guards against enrolments that are still ACTIVE — so every finished
+-- and unenrolled contact's executions cascaded away with them, taking
+-- emails-sent, opens, and the per-contact timeline with them. Analytics are
+-- computed from these rows (outreach-queries.server.ts), so a single edit
+-- reset a sequence's reported performance to zero.
+--
+-- The row already snapshots step_index and step_type precisely so it can
+-- describe itself without the step. These two columns finish that job, and
+-- the FK becomes SET NULL: history survives, and a live enrolment (which is
+-- the only thing that still needs the step's body) is unaffected, because
+-- editing is refused while any enrolment is active.
+ALTER TABLE outreach_step_executions
+  ADD COLUMN IF NOT EXISTS step_subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE outreach_step_executions
+  ADD COLUMN IF NOT EXISTS step_task_title TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE outreach_step_executions ALTER COLUMN step_id DROP NOT NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE outreach_step_executions
+    DROP CONSTRAINT IF EXISTS outreach_step_executions_step_id_fkey;
+  ALTER TABLE outreach_step_executions
+    ADD CONSTRAINT outreach_step_executions_step_id_fkey
+    FOREIGN KEY (step_id) REFERENCES outreach_sequence_steps(id) ON DELETE SET NULL;
+END
+$$;
+
+-- Backfill the snapshot for any execution written before those columns
+-- existed, so old rows describe themselves too.
+UPDATE outreach_step_executions x
+   SET step_subject = COALESCE(st.subject, ''),
+       step_task_title = COALESCE(st.task_title, '')
+  FROM outreach_sequence_steps st
+ WHERE st.id = x.step_id
+   AND x.step_subject = ''
+   AND x.step_task_title = '';
+
+-- The unsubscribe handler looks an address up across every sequence
+-- (WHERE contact_email_normalized = $1 AND status = 'active'). The unique
+-- index above leads with sequence_id, so it cannot serve that lookup — this
+-- one can.
+CREATE INDEX IF NOT EXISTS outreach_enrollments_email_active_idx
+  ON outreach_enrollments (contact_email_normalized)
+  WHERE status = 'active';

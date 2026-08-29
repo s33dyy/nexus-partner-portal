@@ -18,6 +18,7 @@ import {
   handleVoiceStatusCallback,
 } from "./server/twilio-voice.server";
 import { handleReminderJobRequest, startBackgroundJobs } from "./server/scheduler.server";
+import { handleOutreachOpenPixel, handleOutreachUnsubscribe } from "./server/outreach-sweep.server";
 import { CORRELATION_ID_HEADER, normalizeCorrelationId } from "@/domain/contracts/telemetry";
 
 // Module scope, not inside fetch(): the reminder interval should start once
@@ -108,6 +109,24 @@ export default {
       }
       if (url.pathname === "/api/integrations/twilio/voice/status" && request.method === "POST") {
         return attachCorrelationHeader(await handleVoiceStatusCallback(request), correlationId);
+      }
+      // Recipient-facing outreach endpoints. Unauthenticated by necessity —
+      // the person clicking has no account here — and safe because the
+      // capability-style token in the path is the only thing either accepts,
+      // and neither reveals anything about the record behind it.
+      if (url.pathname.startsWith("/api/outreach/open/")) {
+        const token = decodeURIComponent(url.pathname.slice("/api/outreach/open/".length));
+        return attachCorrelationHeader(await handleOutreachOpenPixel(token), correlationId);
+      }
+      if (
+        url.pathname.startsWith("/api/outreach/unsubscribe/") &&
+        (request.method === "GET" || request.method === "POST")
+      ) {
+        const token = decodeURIComponent(url.pathname.slice("/api/outreach/unsubscribe/".length));
+        return attachCorrelationHeader(
+          await handleOutreachUnsubscribe(request, token),
+          correlationId,
+        );
       }
       if (url.pathname === "/api/jobs/reminders" && request.method === "POST") {
         return attachCorrelationHeader(await handleReminderJobRequest(request), correlationId);

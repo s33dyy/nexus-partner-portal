@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   Phone,
+  Send,
   Settings,
   ShieldCheck,
   ShieldQuestion,
@@ -101,6 +102,16 @@ export function CommandPalette({
                 ]
               : []),
             { title: "Customers", url: "/customers", icon: Users, keywords: "accounts clients" },
+            ...(can("outreach", "read")
+              ? [
+                  {
+                    title: "Sequences",
+                    url: "/sequences",
+                    icon: Send,
+                    keywords: "outreach cadence automated email follow-up drip enrol",
+                  },
+                ]
+              : []),
             { title: "Analytics", url: "/analytics", icon: BarChart3, keywords: "reports charts" },
             {
               title: "Insight Hub",

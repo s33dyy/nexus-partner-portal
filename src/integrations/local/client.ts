@@ -280,13 +280,19 @@ export async function disconnectGoogleAccount() {
 }
 
 const updateProfileFn = createServerFn({ method: "POST" })
-  .validator((input: { full_name: string; phone: string | null }) => input)
+  .validator(
+    (input: { full_name: string; phone: string | null; meeting_link?: string | null }) => input,
+  )
   .handler(async ({ data }) => {
     const { updateProfileFromSession } = await import("@/server/livey-service.server");
     return updateProfileFromSession(data);
   });
 
-export async function updateProfile(input: { full_name: string; phone: string | null }) {
+export async function updateProfile(input: {
+  full_name: string;
+  phone: string | null;
+  meeting_link?: string | null;
+}) {
   return updateProfileFn({ data: input });
 }
 

@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
 import { Route as AuthenticatedSupportRouteImport } from './routes/_authenticated/support'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedSequencesRouteImport } from './routes/_authenticated/sequences'
 import { Route as AuthenticatedRewardsRouteImport } from './routes/_authenticated/rewards'
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
 import { Route as AuthenticatedPartnerRouteImport } from './routes/_authenticated/partner'
@@ -75,6 +76,11 @@ const AuthenticatedSupportRoute = AuthenticatedSupportRouteImport.update({
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedSequencesRoute = AuthenticatedSequencesRouteImport.update({
+  id: '/sequences',
+  path: '/sequences',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedRewardsRoute = AuthenticatedRewardsRouteImport.update({
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
   '/rewards': typeof AuthenticatedRewardsRoute
+  '/sequences': typeof AuthenticatedSequencesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/support': typeof AuthenticatedSupportRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -270,6 +277,7 @@ export interface FileRoutesByTo {
   '/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/pipeline': typeof AuthenticatedPipelineRoute
   '/rewards': typeof AuthenticatedRewardsRoute
+  '/sequences': typeof AuthenticatedSequencesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/support': typeof AuthenticatedSupportRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/_authenticated/partner': typeof AuthenticatedPartnerRouteWithChildren
   '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
   '/_authenticated/rewards': typeof AuthenticatedRewardsRoute
+  '/_authenticated/sequences': typeof AuthenticatedSequencesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/support': typeof AuthenticatedSupportRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
@@ -342,6 +351,7 @@ export interface FileRouteTypes {
     | '/partner'
     | '/pipeline'
     | '/rewards'
+    | '/sequences'
     | '/settings'
     | '/support'
     | '/tasks'
@@ -376,6 +386,7 @@ export interface FileRouteTypes {
     | '/partner'
     | '/pipeline'
     | '/rewards'
+    | '/sequences'
     | '/settings'
     | '/support'
     | '/tasks'
@@ -411,6 +422,7 @@ export interface FileRouteTypes {
     | '/_authenticated/partner'
     | '/_authenticated/pipeline'
     | '/_authenticated/rewards'
+    | '/_authenticated/sequences'
     | '/_authenticated/settings'
     | '/_authenticated/support'
     | '/_authenticated/tasks'
@@ -485,6 +497,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/sequences': {
+      id: '/_authenticated/sequences'
+      path: '/sequences'
+      fullPath: '/sequences'
+      preLoaderRoute: typeof AuthenticatedSequencesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/rewards': {
@@ -701,6 +720,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedPartnerRoute: typeof AuthenticatedPartnerRouteWithChildren
   AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
   AuthenticatedRewardsRoute: typeof AuthenticatedRewardsRoute
+  AuthenticatedSequencesRoute: typeof AuthenticatedSequencesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedSupportRoute: typeof AuthenticatedSupportRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
@@ -730,6 +750,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedPartnerRoute: AuthenticatedPartnerRouteWithChildren,
   AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
   AuthenticatedRewardsRoute: AuthenticatedRewardsRoute,
+  AuthenticatedSequencesRoute: AuthenticatedSequencesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedSupportRoute: AuthenticatedSupportRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,

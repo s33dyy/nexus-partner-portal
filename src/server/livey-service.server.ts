@@ -117,6 +117,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "whatsapp_verified_at",
     "reminder_opt_out",
     "digest_email_opt_out",
+    "meeting_link",
     "call_ready",
     "is_seed",
     "created_at",
@@ -2254,7 +2255,11 @@ export async function updatePasswordFromSession(password: string) {
   return { ok: true };
 }
 
-export async function updateProfileFromSession(input: { full_name: string; phone: string | null }) {
+export async function updateProfileFromSession(input: {
+  full_name: string;
+  phone: string | null;
+  meeting_link?: string | null;
+}) {
   const session = await findSessionFromRequest();
   if (!session) {
     throw new Error("Unauthorized");
@@ -2263,9 +2268,31 @@ export async function updateProfileFromSession(input: { full_name: string; phone
   if (!fullName) {
     throw new Error("Full name is required");
   }
+
+  // The meeting link is substituted into outreach emails, so it has to be a
+  // URL a recipient's mail client will actually follow. Anything else —
+  // including a javascript: or data: scheme someone pasted in — is rejected
+  // rather than stored and mailed out later.
+  const meetingLink = input.meeting_link?.trim() || null;
+  if (meetingLink && !/^https?:\/\/\S+$/i.test(meetingLink)) {
+    throw new Error("A meeting link must be a full http(s) URL");
+  }
+
+  // COALESCE keeps the column untouched when the caller omits the field, so
+  // a client that predates this parameter cannot blank an existing link.
   await pool.query(
-    `UPDATE profiles SET full_name = $1, phone = $2, updated_at = now() WHERE id = $3`,
-    [fullName, input.phone?.trim() || null, session.user.id],
+    `UPDATE profiles
+     SET full_name = $1, phone = $2,
+         meeting_link = CASE WHEN $4::boolean THEN $3 ELSE meeting_link END,
+         updated_at = now()
+     WHERE id = $5`,
+    [
+      fullName,
+      input.phone?.trim() || null,
+      meetingLink,
+      input.meeting_link !== undefined,
+      session.user.id,
+    ],
   );
   return { ok: true as const };
 }

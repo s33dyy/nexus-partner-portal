@@ -33,6 +33,7 @@ export type Profile = {
   whatsapp_verified_at: string | null;
   reminder_opt_out: boolean;
   digest_email_opt_out: boolean;
+  meeting_link: string | null;
   call_ready: boolean;
 };
 

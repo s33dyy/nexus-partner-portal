@@ -22,31 +22,36 @@ function clearEnv() {
   for (const key of ENV_KEYS) delete process.env[key];
 }
 
+/** Reports "no saved credentials", so these tests exercise the environment
+ * path in isolation. Passing a runner also bypasses the module-level cache,
+ * so one test's resolution cannot leak into the next. */
+const noStoredSettings = { query: async () => ({ rows: [] as unknown[], rowCount: 0 }) };
+
 describe("resolveEmailProvider", () => {
-  test("is 'none' until both a from-address and an API key exist", () => {
+  test("is 'none' until both a from-address and an API key exist", async () => {
     clearEnv();
-    expect(resolveEmailProvider()).toBe("none");
+    expect(await resolveEmailProvider(noStoredSettings)).toBe("none");
 
     process.env.EMAIL_FROM = "portal@livey.test";
-    expect(resolveEmailProvider()).toBe("none");
+    expect(await resolveEmailProvider(noStoredSettings)).toBe("none");
 
     process.env.RESEND_API_KEY = "re_test";
-    expect(resolveEmailProvider()).toBe("resend");
+    expect(await resolveEmailProvider(noStoredSettings)).toBe("resend");
   });
 
-  test("an API key without a from-address is still 'none'", () => {
+  test("an API key without a from-address is still 'none'", async () => {
     clearEnv();
     process.env.SENDGRID_API_KEY = "SG.test";
-    expect(resolveEmailProvider()).toBe("none");
-    expect(isEmailConfigured()).toBe(false);
+    expect(await resolveEmailProvider(noStoredSettings)).toBe("none");
+    expect(await isEmailConfigured(noStoredSettings)).toBe(false);
   });
 
-  test("prefers Resend when both providers are configured", () => {
+  test("prefers Resend when both providers are configured", async () => {
     clearEnv();
     process.env.EMAIL_FROM = "portal@livey.test";
     process.env.RESEND_API_KEY = "re_test";
     process.env.SENDGRID_API_KEY = "SG.test";
-    expect(resolveEmailProvider()).toBe("resend");
+    expect(await resolveEmailProvider(noStoredSettings)).toBe("resend");
   });
 });
 
@@ -56,11 +61,10 @@ describe("sendEmail", () => {
   // worked", never to a thrown error that aborts the sweep mid-run.
   test("skips instead of throwing when no provider is configured", async () => {
     clearEnv();
-    const result = await sendEmail({
-      to: "someone@livey.test",
-      subject: "Due today",
-      text: "body",
-    });
+    const result = await sendEmail(
+      { to: "someone@livey.test", subject: "Due today", text: "body" },
+      noStoredSettings,
+    );
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ skipped: true });
   });
@@ -70,7 +74,10 @@ describe("sendEmail", () => {
     process.env.EMAIL_FROM = "portal@livey.test";
     process.env.RESEND_API_KEY = "re_test";
 
-    const result = await sendEmail({ to: "not-an-address", subject: "s", text: "t" });
+    const result = await sendEmail(
+      { to: "not-an-address", subject: "s", text: "t" },
+      noStoredSettings,
+    );
     expect(result).toMatchObject({ ok: false, skipped: true });
   });
 });

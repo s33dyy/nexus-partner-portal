@@ -273,7 +273,7 @@ async function deliverEmail(input: {
   recipient: Recipient;
   copy: { title: string; body: string };
 }): Promise<{ status: "sent" | "skipped" | "failed"; detail: string | null }> {
-  if (!isEmailConfigured()) {
+  if (!(await isEmailConfigured())) {
     return { status: "skipped", detail: "Email provider is not configured" };
   }
   if (!input.recipient.email) {

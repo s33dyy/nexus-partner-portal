@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
   Database,
@@ -8,6 +8,7 @@ import {
   Layers3,
   Link2,
   Loader2,
+  Mail,
   MessageCircle,
   ShieldCheck,
   User as UserIcon,
@@ -21,6 +22,22 @@ import { resolveStatusTone } from "@/lib/status-tone";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
+import { Field, FieldGrid } from "@/components/ui/form-dialog";
+import { formatDateTimeLabel } from "@/lib/date-utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  clearEmailSettings,
+  getEmailSettings,
+  saveEmailSettings,
+  type EmailProviderChoice,
+  type EmailSettingsStatus,
+} from "@/integrations/local/email-settings";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
@@ -75,6 +92,207 @@ const SECTION_META: Record<
   },
 };
 
+/**
+ * Email delivery credentials — Super Admin only.
+ *
+ * Before this card, giving the deployment a mail provider meant setting a
+ * Railway environment variable and redeploying. Reminders, the daily digest,
+ * and outreach sequences all degrade to "skipped: provider not configured"
+ * without one, which is a silent, invisible failure to everybody who cannot
+ * reach the platform dashboard.
+ *
+ * The key is write-only by design. It is never sent to the browser — the
+ * status carries only its last four characters — so the field is left blank
+ * on load and an empty submit means "keep the key you already have".
+ */
+function EmailDeliveryCard() {
+  const [status, setStatus] = useState<EmailSettingsStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [provider, setProvider] = useState<EmailProviderChoice>("resend");
+  const [apiKey, setApiKey] = useState("");
+  const [fromAddress, setFromAddress] = useState("");
+
+  const applyStatus = useCallback((next: EmailSettingsStatus) => {
+    setStatus(next);
+    if (next.provider) setProvider(next.provider);
+    setFromAddress(next.fromAddress ?? "");
+    // Always cleared: there is nothing to prefill it with, and leaving a
+    // stale value would suggest the box holds the saved key.
+    setApiKey("");
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getEmailSettings().then((result) => {
+      if (cancelled) return;
+      if (result.ok && result.status) applyStatus(result.status);
+      else if (result.error) toast.error(result.error);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyStatus]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const result = await saveEmailSettings({
+        provider,
+        apiKey: apiKey.trim() || null,
+        fromAddress: fromAddress.trim(),
+      });
+      if (result.ok && result.status) {
+        applyStatus(result.status);
+        toast.success("Email delivery updated");
+      } else {
+        toast.error(result.error || "Could not save those settings");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clear = async () => {
+    setSaving(true);
+    try {
+      const result = await clearEmailSettings();
+      if (result.ok && result.status) {
+        applyStatus(result.status);
+        toast.success(
+          result.status.configured
+            ? "Saved key removed — delivery fell back to the environment variable"
+            : "Saved key removed — email delivery is now off",
+        );
+      } else {
+        toast.error(result.error || "Could not clear those settings");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sourceLabel =
+    status?.source === "database"
+      ? "Saved here"
+      : status?.source === "environment"
+        ? "From environment variable"
+        : "Not configured";
+
+  return (
+    <Card className="border-border/70 shadow-sm">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Email delivery</CardTitle>
+          {status ? (
+            <Badge tone={status.configured ? "success" : "warning"}>
+              {status.configured ? "Active" : "Not configured"}
+            </Badge>
+          ) : null}
+        </div>
+        <CardDescription>
+          Reminders, the daily digest, and outreach sequences all send through this provider.
+          Without it they run normally and skip every message.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 py-5">
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Checking current settings…
+          </div>
+        ) : (
+          <>
+            <div className="rounded-md border border-border/70 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{sourceLabel}</span>
+              {status?.keyHint ? (
+                <>
+                  {" · key ending "}
+                  <code className="font-mono">…{status.keyHint}</code>
+                </>
+              ) : null}
+              {status?.updatedAt ? ` · saved ${formatDateTimeLabel(status.updatedAt)}` : null}
+            </div>
+
+            <FieldGrid columns={2}>
+              <Field label="Provider" htmlFor="email-provider">
+                <Select
+                  value={provider}
+                  disabled={saving}
+                  onValueChange={(value) => setProvider(value as EmailProviderChoice)}
+                >
+                  <SelectTrigger id="email-provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="resend">Resend</SelectItem>
+                    <SelectItem value="sendgrid">SendGrid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Send from" htmlFor="email-from">
+                <Input
+                  id="email-from"
+                  type="email"
+                  value={fromAddress}
+                  disabled={saving}
+                  placeholder="portal@yourdomain.com"
+                  onChange={(event) => setFromAddress(event.target.value)}
+                />
+              </Field>
+            </FieldGrid>
+
+            <Field label="API key" htmlFor="email-api-key">
+              <Input
+                id="email-api-key"
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                disabled={saving}
+                placeholder={
+                  status?.source === "database"
+                    ? "Leave blank to keep the saved key"
+                    : provider === "resend"
+                      ? "re_xxxxxxxxxxxxxxxxxxxx"
+                      : "SG.xxxxxxxxxxxxxxxxxxxx"
+                }
+                onChange={(event) => setApiKey(event.target.value)}
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Stored server-side and never shown again — only the last four characters are ever
+                read back. A key saved here takes precedence over the{" "}
+                <code className="font-mono">
+                  {provider === "resend" ? "RESEND_API_KEY" : "SENDGRID_API_KEY"}
+                </code>{" "}
+                environment variable.
+              </p>
+            </Field>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={saving} onClick={() => void save()}>
+                {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                Save
+              </Button>
+              {status?.source === "database" ? (
+                <Button variant="outline" size="sm" disabled={saving} onClick={() => void clear()}>
+                  Remove saved key
+                </Button>
+              ) : null}
+              {status?.source === "database" && status.environmentFallbackAvailable ? (
+                <span className="text-xs text-muted-foreground">
+                  Removing it falls back to the environment variable.
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SettingsPage() {
   const { hasRole, profile, refresh } = useAuth();
   const role = hasRole("super_admin")
@@ -121,7 +339,11 @@ function SettingsPage() {
   });
   const [updatingPassword, setUpdatingPassword] = useState(false);
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
-  const [profileDraft, setProfileDraft] = useState({ full_name: "", phone: "" });
+  const [profileDraft, setProfileDraft] = useState({
+    full_name: "",
+    phone: "",
+    meeting_link: "",
+  });
   const [updatingProfile, setUpdatingProfile] = useState(false);
   const [whatsappPhoneDraft, setWhatsappPhoneDraft] = useState("");
   const [whatsappCodeDraft, setWhatsappCodeDraft] = useState("");
@@ -134,7 +356,11 @@ function SettingsPage() {
 
   useEffect(() => {
     if (!profile) return;
-    setProfileDraft({ full_name: profile.full_name ?? "", phone: profile.phone ?? "" });
+    setProfileDraft({
+      full_name: profile.full_name ?? "",
+      phone: profile.phone ?? "",
+      meeting_link: profile.meeting_link ?? "",
+    });
   }, [profile]);
 
   const initials =
@@ -148,7 +374,8 @@ function SettingsPage() {
   const profileDirty = Boolean(
     profile &&
     (profileDraft.full_name !== (profile.full_name ?? "") ||
-      profileDraft.phone !== (profile.phone ?? "")),
+      profileDraft.phone !== (profile.phone ?? "") ||
+      profileDraft.meeting_link !== (profile.meeting_link ?? "")),
   );
 
   const submitProfileChange = async () => {
@@ -161,6 +388,7 @@ function SettingsPage() {
       await updateProfile({
         full_name: profileDraft.full_name.trim(),
         phone: profileDraft.phone.trim() || null,
+        meeting_link: profileDraft.meeting_link.trim() || null,
       });
       await refresh();
       toast.success("Profile updated.");
@@ -456,6 +684,23 @@ function SettingsPage() {
                   }
                 />
               </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="profile-meeting-link">Meeting link</Label>
+                <Input
+                  id="profile-meeting-link"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://calendar.app.google/your-booking-page"
+                  value={profileDraft.meeting_link}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, meeting_link: event.target.value }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Substituted into outreach sequence emails wherever you use the{" "}
+                  <code className="font-mono">{"{{meeting_link}}"}</code> token.
+                </p>
+              </div>
             </div>
             <Button
               onClick={() => void submitProfileChange()}
@@ -507,6 +752,8 @@ function SettingsPage() {
           />
         </CardContent>
       </Card>
+
+      {role === "super_admin" ? <EmailDeliveryCard /> : null}
 
       <Card className="border-border/70 shadow-sm">
         <CardHeader className="border-b">

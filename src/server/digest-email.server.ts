@@ -161,7 +161,7 @@ export async function runDigestEmailSweep(options?: {
   if (!digestEmailEnabled()) {
     return { ...summary, idleReason: "DIGEST_EMAIL_ENABLED=false" };
   }
-  if (!isEmailConfigured()) {
+  if (!(await isEmailConfigured())) {
     // Claiming rows we cannot act on would burn the day's slot and mean the
     // digest never arrives once email IS configured.
     return { ...summary, idleReason: "Email provider is not configured" };

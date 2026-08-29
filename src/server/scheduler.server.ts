@@ -1,4 +1,5 @@
 import { describeDigestEmailSweep, runDigestEmailSweep } from "@/server/digest-email.server";
+import { describeOutreachSweep, runOutreachSweep } from "@/server/outreach-sweep.server";
 import {
   describeDistributionEscalationSweep,
   describeSweep,
@@ -80,6 +81,16 @@ export async function runRemindersOnce(source: string): Promise<void> {
       console.error("[scheduler] digest email sweep failed", error);
     }
 
+    // Outreach sequence delivery. Independently idempotent like the sweeps
+    // above — every step is claimed by an atomic status UPDATE before it is
+    // sent — and wrapped so a mail-provider outage cannot stop the others.
+    try {
+      const summary = await runOutreachSweep();
+      console.log(`${describeOutreachSweep(summary)} (via ${source})`);
+    } catch (error) {
+      console.error("[scheduler] outreach sweep failed", error);
+    }
+
     // Distribution approval SLA (product.md §24.5.2). Independently
     // idempotent like the two above — the escalation Task and its
     // Notifications carry stable keys — and wrapped so a failure here cannot
@@ -106,7 +117,9 @@ export function startBackgroundJobs(): void {
   }
 
   const period = intervalMs();
-  console.log(`[scheduler] reminder + digest-email sweep every ${Math.round(period / 60_000)}m`);
+  console.log(
+    `[scheduler] reminder + digest-email + outreach sweep every ${Math.round(period / 60_000)}m`,
+  );
 
   setTimeout(() => {
     void runRemindersOnce("boot");
@@ -160,7 +173,9 @@ export async function handleReminderJobRequest(request: Request): Promise<Respon
     console.log(`${describeSweep(reminders)} (via api)`);
     const digestEmail = await runDigestEmailSweep();
     console.log(`${describeDigestEmailSweep(digestEmail)} (via api)`);
-    return json({ ok: true, summary: reminders, digestEmail }, 200);
+    const outreach = await runOutreachSweep();
+    console.log(`${describeOutreachSweep(outreach)} (via api)`);
+    return json({ ok: true, summary: reminders, digestEmail, outreach }, 200);
   } catch (error) {
     console.error("[scheduler] job sweep failed (api)", error);
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);

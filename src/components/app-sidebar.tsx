@@ -20,6 +20,7 @@ import {
   Boxes,
   ShieldQuestion,
   Phone,
+  Send,
 } from "lucide-react";
 
 import {
@@ -61,11 +62,20 @@ const workspace: Item[] = [
 
 /** Distribution sits beside Tasks. The two gates it needs live in
  * distribution-navigation.ts so the sidebar, the palette, Deals, and
- * Customers all read the same rule. */
-function workspaceItemsFor(access: DistributionAccess): Item[] {
-  if (!showDistributionNavigation(access)) return workspace;
+ * Customers all read the same rule.
+ *
+ * Sequences follows Customers, because that is the record you enrol from,
+ * and is gated on the outreach capability alone — it has no surface flag of
+ * its own, unlike Distribution. */
+function workspaceItemsFor(access: DistributionAccess, canReadOutreach: boolean): Item[] {
   const items = [...workspace];
-  items.splice(3, 0, { title: "Distribution", url: "/distribution", icon: Boxes });
+  if (canReadOutreach) {
+    const afterCustomers = items.findIndex((item) => item.url === "/customers") + 1;
+    items.splice(afterCustomers, 0, { title: "Sequences", url: "/sequences", icon: Send });
+  }
+  if (showDistributionNavigation(access)) {
+    items.splice(3, 0, { title: "Distribution", url: "/distribution", icon: Boxes });
+  }
   return items;
 }
 
@@ -208,11 +218,14 @@ export function AppSidebar() {
         {canSeeWorkspace
           ? renderGroup(
               "Workspace",
-              workspaceItemsFor({
-                canRead: can("distribution", "read"),
-                canCreate: can("distribution", "create"),
-                surfaceEnabled: surfaces.distributionCore,
-              }),
+              workspaceItemsFor(
+                {
+                  canRead: can("distribution", "read"),
+                  canCreate: can("distribution", "create"),
+                  surfaceEnabled: surfaces.distributionCore,
+                },
+                can("outreach", "read"),
+              ),
             )
           : null}
         {isPartnerAdmin &&
