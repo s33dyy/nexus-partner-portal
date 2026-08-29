@@ -265,7 +265,10 @@ function SignInForm({ redirect }: { redirect?: string }) {
         <Link
           to="/auth"
           search={{ mode: "forgot" }}
-          className="font-medium text-primary hover:underline"
+          // Inline prose links, but still the only route to password
+          // recovery and signup — 44px on touch (product.md 4.3), and
+          // visually unchanged inline once a pointer is doing the aiming.
+          className="inline-flex min-h-11 items-center lg:min-h-0 font-medium text-primary hover:underline"
         >
           Forgot password?
         </Link>
@@ -275,7 +278,7 @@ function SignInForm({ redirect }: { redirect?: string }) {
         <Link
           to="/auth"
           search={{ mode: "signup" }}
-          className="font-medium text-primary hover:underline"
+          className="inline-flex min-h-11 items-center lg:min-h-0 font-medium text-primary hover:underline"
         >
           Create a partner account
         </Link>
@@ -428,7 +431,7 @@ function SignUpForm() {
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <button
             type="button"
-            className="font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+            className="inline-flex min-h-11 items-center lg:min-h-0 font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
             onClick={() => void resend()}
             disabled={loading || resendCooldown > 0}
           >
@@ -436,7 +439,7 @@ function SignUpForm() {
           </button>
           <button
             type="button"
-            className="font-medium text-primary hover:underline"
+            className="inline-flex min-h-11 items-center lg:min-h-0 font-medium text-primary hover:underline"
             onClick={() => setStep("details")}
             disabled={loading}
           >
@@ -575,7 +578,7 @@ function ForgotForm() {
         <Link
           to="/auth"
           search={{ mode: "signin" }}
-          className="font-medium text-primary hover:underline"
+          className="inline-flex min-h-11 items-center lg:min-h-0 font-medium text-primary hover:underline"
         >
           Back to sign in
         </Link>
