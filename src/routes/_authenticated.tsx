@@ -31,6 +31,7 @@ function AuthenticatedLayout() {
 function Gate({ children }: { children: React.ReactNode }) {
   const { loading, session, profile, hasRole, roles, activeContext, assignment, refresh, signOut } =
     useAuth();
+  const isSuperAdmin = hasRole("super_admin");
   const location = useLocation();
   const navigate = useNavigate();
   const status = profile?.partner_status ?? "pending_partner_registration";
@@ -128,7 +129,7 @@ function Gate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!assignment) {
+  if (!assignment && !isSuperAdmin) {
     return (
       <AuthStatePage
         title="Assignment pending"
@@ -148,7 +149,7 @@ function Gate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (gateState === "context-pending") {
+  if (gateState === "context-pending" && !isSuperAdmin) {
     return (
       <AuthStatePage
         title="Active context unavailable"

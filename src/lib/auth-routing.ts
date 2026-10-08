@@ -94,6 +94,10 @@ export function getAuthenticatedGateState({
     return "onboarding";
   }
 
+  if (isSuperAdmin) {
+    return "ready";
+  }
+
   if (!hasGovernedContext) {
     return "context-pending";
   }

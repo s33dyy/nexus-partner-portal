@@ -73,3 +73,18 @@ test("gate state treats a governed super-admin session as ready", () => {
     }),
   ).toBe("ready");
 });
+
+test("treats a super-admin session as ready without a governed context", () => {
+  expect(
+    getAuthenticatedGateState({
+      hasSession: true,
+      pathname: "/dashboard",
+      roles: ["super_admin"],
+      profile: {
+        partner_status: "approved",
+        must_reset_password: false,
+      },
+      hasGovernedContext: false,
+    }),
+  ).toBe("ready");
+});

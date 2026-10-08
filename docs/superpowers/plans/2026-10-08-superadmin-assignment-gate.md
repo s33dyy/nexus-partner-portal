@@ -4,7 +4,7 @@
 
 **Goal:** Allow authenticated `super_admin` users into the application shell without an assignment or active context while preserving governed-access gates for partner accounts.
 
-**Architecture:** Keep authorization data and server policy unchanged. Add one role-derived boolean in the authenticated route gate and use it only for the two UI provisioning branches; extend the existing auth-routing regression tests to assert that a superadmin is ready without governed context while a partner remains context-pending.
+**Architecture:** Keep authorization data and server policy unchanged. Add one role-derived boolean in the authenticated route gate and use it only for the two UI provisioning branches; make the shared auth-routing gate state report a superadmin as ready without governed context; extend the existing auth-routing regression tests while preserving partner context-pending behavior.
 
 **Tech Stack:** TanStack Start, React, TypeScript, Bun test, ESLint, Vite production build.
 
@@ -51,6 +51,7 @@ Expected: FAIL because `getAuthenticatedGateState` currently returns `"context-p
 
 **Files:**
 - Modify: `src/routes/_authenticated.tsx:28-137`
+- Modify: `src/lib/auth-routing.ts:75-105`
 
 - [ ] **Step 1: Derive the existing role in `Gate`**
 
@@ -90,11 +91,24 @@ if (gateState === "context-pending" && !isSuperAdmin) {
 
 Do not synthesize `assignment` or `activeContext`; the shell renders with the existing null values and existing downstream role checks remain responsible for authorization.
 
+- [ ] **Step 4: Keep shared gate state consistent with the route gate**
+
+In `getAuthenticatedGateState`, after the onboarding check and before the existing `if (!hasGovernedContext)` branch, return `"ready"` for `isSuperAdmin`:
+
+```ts
+if (isSuperAdmin) {
+  return "ready";
+}
+```
+
+This keeps the pure routing helper aligned with the component behavior and leaves non-superadmin sessions on `"context-pending"`.
+
 ### Task 3: Verify and commit the implementation
 
 **Files:**
 - Modify: `src/lib/auth-routing.test.ts`
 - Modify: `src/routes/_authenticated.tsx`
+- Modify: `src/lib/auth-routing.ts`
 
 - [ ] **Step 1: Run focused auth tests**
 
