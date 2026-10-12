@@ -39,6 +39,22 @@ export async function loadRoleCapabilities(roleKey: RoleKey | null): Promise<Fea
   const capabilities = emptyCapabilities();
   if (!roleKey) return capabilities;
 
+  // Super-admin authority is structural, not seed-data-dependent. Keeping it
+  // explicit prevents a missing or edited role_permissions row from hiding
+  // administration modules from the account responsible for repairing them.
+  if (roleKey === "super_admin") {
+    for (const feature of FEATURE_KEYS) {
+      capabilities[feature] = {
+        create: true,
+        read: true,
+        update: true,
+        // Distribution history is intentionally non-destructive.
+        delete: feature !== "distribution",
+      };
+    }
+    return capabilities;
+  }
+
   const { rows } = await pool.query(
     `SELECT feature_key, can_create, can_read, can_update, can_delete
      FROM role_permissions

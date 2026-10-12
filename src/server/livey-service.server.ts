@@ -14,6 +14,7 @@ import {
   type AssignmentRecord,
 } from "@/domain/contracts/governance";
 import { pool } from "@/server/postgres.server";
+import { withTransaction } from "@/server/command-runtime.server";
 import {
   applyTablePolicy,
   isDistributionOnlyTable,
@@ -1577,7 +1578,10 @@ async function loadGovernedAuthState(userId: string) {
        a.is_seed AS assignment_is_seed
      FROM active_contexts ac
      JOIN assignments a ON a.assignment_id = ac.assignment_id
-     WHERE ac.user_id = $1 AND ac.revoked_at IS NULL
+     WHERE ac.user_id = $1
+       AND ac.revoked_at IS NULL
+       AND a.status = 'active'
+       AND a.revoked_at IS NULL
      ORDER BY ac.issued_at DESC, ac.created_at DESC
      LIMIT 1`,
     [userId],
@@ -1662,6 +1666,252 @@ export async function revokeUserSessionsAndContexts(
   };
 }
 
+/**
+ * Repairs the minimum governed state required by an existing super-admin.
+ *
+ * This is deliberately self-healing and idempotent: one active global
+ * super-admin assignment and one non-revoked context are retained, duplicate
+ * rows created by older bootstrap paths are closed, and non-super-admin
+ * assignments are never touched. The transaction also serializes the repair
+ * so two concurrent login/assignment requests cannot each create a row.
+ */
+export async function ensureSuperAdminGovernance(userId: string): Promise<{
+  assignment: AssignmentRecord;
+  activeContext: ActiveContextRecord;
+}> {
+  return withTransaction(async (tx) => {
+    const { rows: roleRows } = await tx.query(
+      `SELECT role
+       FROM user_roles
+       WHERE user_id = $1 AND role = 'super_admin'
+       LIMIT 1
+       FOR UPDATE`,
+      [userId],
+    );
+    if (roleRows.length === 0) {
+      throw new Error("Super-admin governance requires a super_admin role");
+    }
+
+    const { rows: assignmentRows } = await tx.query(
+      `SELECT
+         a.assignment_id,
+         a.user_id,
+         a.tenant_id,
+         a.organization_tenant_id,
+         a.version AS assignment_version,
+         a.status AS assignment_status,
+         a.role_key,
+         a.team_domain,
+         a.geography_ceiling_node_id,
+         a.partner_id,
+         a.account_id,
+         a.portfolio_id,
+         a.queue_id,
+         a.manager_assignment_id,
+         a.source,
+         a.approver_user_id,
+         a.predecessor_assignment_id,
+         a.successor_assignment_id,
+         a.valid_from,
+         a.valid_to,
+         a.revoked_at,
+         a.revocation_reason,
+         a.created_at AS assignment_created_at,
+         a.updated_at AS assignment_updated_at,
+         a.is_seed AS assignment_is_seed
+       FROM assignments a
+       WHERE a.user_id = $1
+         AND a.role_key = 'super_admin'
+         AND a.status = 'active'
+         AND a.revoked_at IS NULL
+       ORDER BY
+         (a.geography_ceiling_node_id = $2) DESC,
+         a.created_at ASC,
+         a.assignment_id ASC
+       FOR UPDATE`,
+      [userId, GOVERNANCE_GEOGRAPHY_NODE_IDS.global],
+    );
+
+    const existingAssignmentRow = assignmentRows[0] as Record<string, unknown> | undefined;
+    const issuedAt = new Date().toISOString();
+    const assignment: AssignmentRecord = existingAssignmentRow
+      ? mapAssignmentRow(existingAssignmentRow)
+      : {
+          assignmentId: randomUUID(),
+          userId,
+          tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+          organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+          roleKey: "super_admin",
+          teamDomain: "identity",
+          geographyCeilingNodeId: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+          partnerId: null,
+          accountId: null,
+          portfolioId: null,
+          queueId: null,
+          status: "active",
+          validFrom: issuedAt,
+          validTo: null,
+          managerAssignmentId: null,
+          source: "superadmin_governance_repair",
+          approverUserId: userId,
+          predecessorAssignmentId: null,
+          successorAssignmentId: null,
+          revokedAt: null,
+          revocationReason: null,
+          createdAt: issuedAt,
+          updatedAt: issuedAt,
+          version: 1,
+          isSeed: false,
+        };
+
+    if (!existingAssignmentRow) {
+      await tx.query(
+        `INSERT INTO assignments (
+           assignment_id, user_id, tenant_id, organization_tenant_id, role_key, team_domain,
+           geography_ceiling_node_id, status, valid_from, source, approver_user_id, is_seed
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9,$10,false)`,
+        [
+          assignment.assignmentId,
+          assignment.userId,
+          assignment.tenantId,
+          assignment.organizationTenantId,
+          assignment.roleKey,
+          assignment.teamDomain,
+          assignment.geographyCeilingNodeId,
+          assignment.validFrom,
+          assignment.source,
+          assignment.approverUserId,
+        ],
+      );
+    }
+
+    const duplicateAssignmentIds = assignmentRows
+      .map((row) => String((row as Record<string, unknown>).assignment_id))
+      .filter((assignmentId) => assignmentId !== assignment.assignmentId);
+    if (duplicateAssignmentIds.length > 0) {
+      await tx.query(
+        `UPDATE assignments
+         SET status = 'ended',
+             valid_to = COALESCE(valid_to, now()),
+             revoked_at = COALESCE(revoked_at, now()),
+             revocation_reason = COALESCE(revocation_reason, 'duplicate_superadmin_governance'),
+             updated_at = now()
+         WHERE user_id = $1
+           AND role_key = 'super_admin'
+           AND assignment_id = ANY($2::text[])
+           AND status = 'active'
+           AND revoked_at IS NULL`,
+        [userId, duplicateAssignmentIds],
+      );
+    }
+
+    const governedAssignmentIds = [assignment.assignmentId, ...duplicateAssignmentIds];
+    const { rows: contextRows } = await tx.query(
+      `SELECT
+         ac.context_id,
+         ac.user_id,
+         ac.assignment_id,
+         ac.tenant_id,
+         ac.organization_tenant_id,
+         ac.working_scope,
+         ac.issued_at,
+         ac.expires_at,
+         ac.version,
+         ac.revocation_link,
+         ac.revoked_at AS context_revoked_at,
+         ac.revocation_reason AS context_revocation_reason,
+         ac.correlation_id,
+         ac.is_seed AS context_is_seed,
+         ac.created_at AS context_created_at,
+         ac.updated_at AS context_updated_at,
+         a.assignment_id,
+         a.user_id,
+         a.tenant_id,
+         a.organization_tenant_id,
+         a.version AS assignment_version,
+         a.status AS assignment_status,
+         a.role_key,
+         a.team_domain,
+         a.geography_ceiling_node_id,
+         a.partner_id,
+         a.account_id,
+         a.portfolio_id,
+         a.queue_id,
+         a.manager_assignment_id,
+         a.source,
+         a.approver_user_id,
+         a.predecessor_assignment_id,
+         a.successor_assignment_id,
+         a.valid_from,
+         a.valid_to,
+         a.revoked_at,
+         a.revocation_reason,
+         a.created_at AS assignment_created_at,
+         a.updated_at AS assignment_updated_at,
+         a.is_seed AS assignment_is_seed
+       FROM active_contexts ac
+       JOIN assignments a ON a.assignment_id = ac.assignment_id
+       WHERE ac.user_id = $1
+         AND ac.assignment_id = ANY($2::text[])
+         AND ac.revoked_at IS NULL
+         AND a.user_id = $1
+         AND a.role_key = 'super_admin'
+       ORDER BY
+         (ac.assignment_id = $3) DESC,
+         ac.issued_at ASC,
+         ac.context_id ASC
+       FOR UPDATE`,
+      [userId, governedAssignmentIds, assignment.assignmentId],
+    );
+
+    const canonicalContextRow = (contextRows as Array<Record<string, unknown>>).find(
+      (row) => String(row.assignment_id) === assignment.assignmentId,
+    );
+    const activeContext = canonicalContextRow
+      ? mapActiveContextRow(canonicalContextRow)
+      : issueActiveContextFromAssignment({ assignment, issuedAt });
+
+    const duplicateContextIds = (contextRows as Array<Record<string, unknown>>)
+      .map((row) => String(row.context_id))
+      .filter((contextId) => contextId !== activeContext.contextId);
+    if (duplicateContextIds.length > 0) {
+      await tx.query(
+        `UPDATE active_contexts
+         SET revoked_at = COALESCE(revoked_at, now()),
+             revocation_reason = COALESCE(revocation_reason, 'duplicate_superadmin_governance'),
+             updated_at = now()
+         WHERE user_id = $1
+           AND context_id = ANY($2::text[])
+           AND revoked_at IS NULL`,
+        [userId, duplicateContextIds],
+      );
+    }
+
+    if (!canonicalContextRow) {
+      await tx.query(
+        `INSERT INTO active_contexts (
+           context_id, user_id, assignment_id, tenant_id, organization_tenant_id,
+           working_scope, issued_at, expires_at, version, correlation_id, is_seed
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false)`,
+        [
+          activeContext.contextId,
+          activeContext.userId,
+          activeContext.assignmentId,
+          activeContext.tenantId,
+          activeContext.organizationTenantId,
+          activeContext.workingScope,
+          activeContext.issuedAt,
+          activeContext.expiresAt,
+          activeContext.version,
+          activeContext.correlationId,
+        ],
+      );
+    }
+
+    return { assignment, activeContext };
+  });
+}
+
 // Shared by the cookie-based getAuthContext() (web) and the WhatsApp
 // webhook path (no session cookie — the profile is resolved by verified
 // phone number instead). Loads profile → roles → assignment/active-context
@@ -1702,11 +1952,21 @@ export async function resolveAuthContextForProfile(profileId: string) {
 
   const roles = roleRows.map((row: { role: AppRole }) => row.role);
 
+  let resolvedGovernedState = governedState;
+  if (
+    roles.includes("super_admin") &&
+    (resolvedGovernedState.assignment?.roleKey !== "super_admin" ||
+      !resolvedGovernedState.activeContext)
+  ) {
+    await ensureSuperAdminGovernance(profileId);
+    resolvedGovernedState = await loadGovernedAuthState(profileId);
+  }
+
   return {
     profile,
     roles,
-    assignment: governedState.assignment,
-    activeContext: governedState.activeContext,
+    assignment: resolvedGovernedState.assignment,
+    activeContext: resolvedGovernedState.activeContext,
   };
 }
 
