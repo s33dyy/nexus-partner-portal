@@ -345,8 +345,11 @@ function CustomersPage() {
       toast.error("Company, owner, and renewal date are required");
       return;
     }
-    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
-      toast.error("Health score must be a whole number");
+    if (
+      draft.health_score !== "" &&
+      (!/^[0-9]+$/.test(draft.health_score) || Number(draft.health_score) > 100)
+    ) {
+      toast.error("Health score must be a whole number from 0 to 100");
       return;
     }
     setAdding(true);
@@ -375,8 +378,11 @@ function CustomersPage() {
 
   const saveCustomer = async () => {
     if (!selectedCustomer) return;
-    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
-      toast.error("Health score must be a whole number");
+    if (
+      draft.health_score !== "" &&
+      (!/^[0-9]+$/.test(draft.health_score) || Number(draft.health_score) > 100)
+    ) {
+      toast.error("Health score must be a whole number from 0 to 100");
       return;
     }
     setSaving(true);

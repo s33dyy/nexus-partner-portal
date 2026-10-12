@@ -136,7 +136,7 @@ test("ensureSuperAdminGovernance repairs missing rows idempotently", async () =>
 });
 
 test("resolveAuthContextForProfile repairs a super-admin before returning its actor context", async () => {
-  const userId = "admin-2";
+  const userId = "00000000-0000-4000-8000-000000000002";
   const { pool } = await import("@/server/postgres.server");
   const { resolveAuthContextForProfile } = await import("@/server/livey-service.server");
   const harness = installGovernancePool(userId);

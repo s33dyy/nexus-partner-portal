@@ -147,6 +147,13 @@ export async function submitPO(input: {
   data: SubmitPOInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  if (!Number.isFinite(input.data.poAmount) || input.data.poAmount < 0) {
+    return {
+      ok: false,
+      failure: validationFailure("PO amount must be a non-negative decimal"),
+      correlationId,
+    };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {

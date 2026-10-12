@@ -204,6 +204,7 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
       !/^[0-9]+$/.test(addForm.quantity) ||
       !Number.isSafeInteger(quantity) ||
       quantity <= 0 ||
+      (addForm.discountPct !== "" && Number(addForm.discountPct) > 100) ||
       decimalValues.some((value) => value !== "" && !/^[0-9]+(?:\.[0-9]+)?$/.test(value))
     ) {
       toast.error("Quantity must be a whole number and prices must be valid decimals");

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { sanitizeDecimal } from "@/lib/input-sanitizers";
 import {
   applyPresetCollaboratorSplits,
   buildPresetCollaboratorSplits,
@@ -130,12 +131,19 @@ export function DealCollaboratorEditor({
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Reward rate">
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9]*[.]?[0-9]*"
               min={0}
               max={100}
               step="0.1"
-              value={rewardRatePercent}
-              onChange={(event) => onRewardRateChange?.(Number(event.target.value) || 0)}
+              value={String(rewardRatePercent)}
+              onChange={(event) => {
+                const value = sanitizeDecimal(event.target.value);
+                if (/^[0-9]+(?:\.[0-9]+)?$/.test(value) && Number(value) <= 100) {
+                  onRewardRateChange?.(Number(value));
+                }
+              }}
               disabled={disabled || !allowEditRewardRate}
             />
           </Field>
@@ -225,13 +233,18 @@ export function DealCollaboratorEditor({
                     </div>
                     <Field label="Split %" className="w-full md:max-w-24">
                       <Input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
+                        pattern="[0-9]*[.]?[0-9]*"
                         min={0}
                         max={100}
-                        value={collaborator.splitPercent}
-                        onChange={(event) =>
-                          updateSplit(collaborator.userId, Number(event.target.value) || 0)
-                        }
+                        value={String(collaborator.splitPercent)}
+                        onChange={(event) => {
+                          const value = sanitizeDecimal(event.target.value);
+                          if (/^[0-9]+(?:\.[0-9]+)?$/.test(value) && Number(value) <= 100) {
+                            updateSplit(collaborator.userId, Number(value));
+                          }
+                        }}
                         disabled={disabled}
                       />
                     </Field>

@@ -731,6 +731,12 @@ const TABLE_COLUMNS: Record<string, string[]> = {
 };
 
 export const SESSION_COOKIE = "livey_session";
+
+export function isCookieSecure(): boolean {
+  if (process.env.COOKIE_SECURE === "false") return false;
+  if (process.env.COOKIE_SECURE === "true") return true;
+  return process.env.NODE_ENV === "production";
+}
 // §19.2: Super Admin, Partner Admin, and every LIVEY-internal role get the
 // stricter 12h absolute lifetime; only a caller whose sole role is
 // partner_user gets the looser 24h one. Unknown/no role falls back to the
@@ -1576,12 +1582,13 @@ async function loadGovernedAuthState(userId: string) {
        a.created_at AS assignment_created_at,
        a.updated_at AS assignment_updated_at,
        a.is_seed AS assignment_is_seed
-     FROM active_contexts ac
-     JOIN assignments a ON a.assignment_id = ac.assignment_id
-     WHERE ac.user_id = $1
-       AND ac.revoked_at IS NULL
-       AND a.status = 'active'
-       AND a.revoked_at IS NULL
+       FROM active_contexts ac
+       JOIN assignments a ON a.assignment_id = ac.assignment_id
+       WHERE ac.user_id = $1
+         AND ac.revoked_at IS NULL
+         AND ac.expires_at > now()
+         AND a.status = 'active'
+         AND a.revoked_at IS NULL
      ORDER BY ac.issued_at DESC, ac.created_at DESC
      LIMIT 1`,
     [userId],
@@ -1724,15 +1731,16 @@ export async function ensureSuperAdminGovernance(userId: string): Promise<{
          AND a.role_key = 'super_admin'
          AND a.status = 'active'
          AND a.revoked_at IS NULL
-       ORDER BY
-         (a.geography_ceiling_node_id = $2) DESC,
-         a.created_at ASC,
-         a.assignment_id ASC
+       ORDER BY a.created_at ASC, a.assignment_id ASC
        FOR UPDATE`,
-      [userId, GOVERNANCE_GEOGRAPHY_NODE_IDS.global],
+      [userId],
     );
 
-    const existingAssignmentRow = assignmentRows[0] as Record<string, unknown> | undefined;
+    const existingAssignmentRow = assignmentRows.find(
+      (row) =>
+        String((row as Record<string, unknown>).geography_ceiling_node_id) ===
+        GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+    ) as Record<string, unknown> | undefined;
     const issuedAt = new Date().toISOString();
     const assignment: AssignmentRecord = existingAssignmentRow
       ? mapAssignmentRow(existingAssignmentRow)
@@ -1854,6 +1862,7 @@ export async function ensureSuperAdminGovernance(userId: string): Promise<{
        WHERE ac.user_id = $1
          AND ac.assignment_id = ANY($2::text[])
          AND ac.revoked_at IS NULL
+         AND ac.expires_at > now()
          AND a.user_id = $1
          AND a.role_key = 'super_admin'
        ORDER BY
@@ -1955,6 +1964,7 @@ export async function resolveAuthContextForProfile(profileId: string) {
   let resolvedGovernedState = governedState;
   if (
     roles.includes("super_admin") &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(profileId) &&
     (resolvedGovernedState.assignment?.roleKey !== "super_admin" ||
       !resolvedGovernedState.activeContext)
   ) {
@@ -2045,7 +2055,7 @@ export async function signInWithPassword(email: string, password: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: isCookieSecure(),
     expires: expiresAt,
   });
 
@@ -2203,7 +2213,7 @@ export async function signUpLocal(input: {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: isCookieSecure(),
     expires: expiresAt,
   });
 
@@ -2656,7 +2666,7 @@ export async function completePasswordReset(token: string, password: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: isCookieSecure(),
     expires: expiresAt,
   });
 
@@ -3021,7 +3031,7 @@ export async function createSessionForUser(userId: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: isCookieSecure(),
     expires: expiresAt,
   });
   return {

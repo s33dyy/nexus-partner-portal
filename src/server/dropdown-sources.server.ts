@@ -513,6 +513,15 @@ export async function createCustomerFromDropdown(input: {
   const auth = await requireAuthenticatedCaller();
   const { ownerPartnerId, ownerUserId } = resolveDropdownCustomerOwner(auth, input);
 
+  if (
+    input.health_score !== undefined &&
+    (!Number.isSafeInteger(input.health_score) ||
+      input.health_score < 0 ||
+      input.health_score > 100)
+  ) {
+    throw new Error("Health score must be a whole number from 0 to 100");
+  }
+
   const createdAt = new Date().toISOString();
   const result = await pool.query(
     `INSERT INTO portal_customers (

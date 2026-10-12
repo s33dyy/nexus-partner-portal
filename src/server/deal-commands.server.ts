@@ -937,6 +937,13 @@ export async function createDeal(input: {
     const closeDate = data.closeDate || data.possibleCloseDate || todayIsoDate();
     const quantity = data.quantity && data.quantity > 0 ? Math.floor(data.quantity) : 1;
     const rewardRatePercent = data.rewardRatePercent ?? 5;
+    if (!Number.isFinite(rewardRatePercent) || rewardRatePercent < 0 || rewardRatePercent > 100) {
+      return {
+        ok: false,
+        failure: validationFailure("Reward rate must be between 0 and 100"),
+        correlationId,
+      };
+    }
     const dealId = randomUUID();
 
     await tx.query(

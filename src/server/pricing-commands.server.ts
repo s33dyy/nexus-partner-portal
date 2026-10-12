@@ -26,6 +26,25 @@ export async function addDealLineItem(input: {
   data: AddDealLineItemInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const values = [
+    input.data.msrpUsd,
+    input.data.ptpUsd,
+    input.data.discountPct,
+    input.data.dtpUsd,
+    input.data.proposedSellingPriceUsd,
+  ];
+  if (
+    !Number.isSafeInteger(input.data.quantity) ||
+    input.data.quantity <= 0 ||
+    values.some((value) => !Number.isFinite(value) || value < 0) ||
+    input.data.discountPct > 100
+  ) {
+    return {
+      ok: false,
+      failure: validationFailure("Line-item numeric values are invalid"),
+      correlationId,
+    };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {
@@ -99,6 +118,26 @@ export async function updateDealLineItem(input: {
   data: UpdateDealLineItemInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  const numericValues = [
+    input.data.quantity,
+    input.data.msrpUsd,
+    input.data.ptpUsd,
+    input.data.discountPct,
+    input.data.dtpUsd,
+    input.data.proposedSellingPriceUsd,
+  ].filter((value): value is number => value !== undefined);
+  if (
+    numericValues.some((value) => !Number.isFinite(value) || value < 0) ||
+    (input.data.quantity !== undefined &&
+      (!Number.isSafeInteger(input.data.quantity) || input.data.quantity <= 0)) ||
+    (input.data.discountPct !== undefined && input.data.discountPct > 100)
+  ) {
+    return {
+      ok: false,
+      failure: validationFailure("Line-item numeric values are invalid"),
+      correlationId,
+    };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {
@@ -294,6 +333,17 @@ export async function requestDiscount(input: {
   data: RequestDiscountInput;
 }): Promise<CommandExecutionResult> {
   const correlationId = createCorrelationId();
+  if (
+    !Number.isFinite(input.data.requestedDiscountPct) ||
+    input.data.requestedDiscountPct <= 0 ||
+    input.data.requestedDiscountPct > 100
+  ) {
+    return {
+      ok: false,
+      failure: validationFailure("Discount percentage must be between 0 and 100"),
+      correlationId,
+    };
+  }
   return withTransaction(async (tx) => {
     const deal = await loadDealForUpdate(tx, input.data.dealId);
     if (!deal) {

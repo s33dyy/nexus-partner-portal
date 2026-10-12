@@ -59,7 +59,11 @@ const getMyCapabilitiesFn = createServerFn({ method: "GET" }).handler(
     const { getAuthContext } = await import("@/server/livey-service.server");
     const { loadRoleCapabilities } = await import("@/server/rbac-policy.server");
     const authContext = await getAuthContext();
-    return loadRoleCapabilities(authContext.assignment?.roleKey ?? null);
+    return loadRoleCapabilities(
+      authContext.roles.includes("super_admin")
+        ? "super_admin"
+        : (authContext.assignment?.roleKey ?? null),
+    );
   },
 );
 

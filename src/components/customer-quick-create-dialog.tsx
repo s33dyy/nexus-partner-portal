@@ -127,8 +127,11 @@ export function CustomerQuickCreateDialog({
       toast.error("Renewal date is required");
       return;
     }
-    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
-      toast.error("Health score must be a whole number");
+    if (
+      draft.health_score !== "" &&
+      (!/^[0-9]+$/.test(draft.health_score) || Number(draft.health_score) > 100)
+    ) {
+      toast.error("Health score must be a whole number from 0 to 100");
       return;
     }
 

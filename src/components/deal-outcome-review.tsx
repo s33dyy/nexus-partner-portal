@@ -9,6 +9,7 @@ import {
   rejectOutcome,
 } from "@/integrations/local/outcome-review-commands";
 import { toast } from "sonner";
+import { sanitizeDecimal } from "@/lib/input-sanitizers";
 import { FileUp, Check, X, AlertCircle, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -117,9 +118,11 @@ export function DealOutcomeReview({
               <div className="space-y-2">
                 <label className="text-sm font-medium">PO Amount (USD)</label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   value={poAmount}
-                  onChange={(e) => setPoAmount(e.target.value)}
+                  onChange={(e) => setPoAmount(sanitizeDecimal(e.target.value))}
                   placeholder="0.00"
                 />
               </div>
