@@ -378,6 +378,7 @@ function AdminUsersPage() {
       return;
     }
     setCreating(true);
+    let createdUserId: string | null = null;
     try {
       const legacyRole = isLegacyAppRoleKey(newUser.role);
       const { error, data } = await supabase.auth.createWorkspaceUser({
@@ -394,6 +395,7 @@ function AdminUsersPage() {
           : "approved",
       });
       if (error || !data) throw error ?? new Error("Failed to create user");
+      createdUserId = data.id;
 
       const roleResult = await assignGovernedRole({
         targetUserId: data.id,
@@ -412,6 +414,9 @@ function AdminUsersPage() {
       });
       await load();
     } catch (error) {
+      if (createdUserId) {
+        await supabase.from("profiles").delete().eq("id", createdUserId);
+      }
       toast.error(error instanceof Error ? error.message : "Failed to create user");
     } finally {
       setCreating(false);
@@ -451,6 +456,21 @@ function AdminUsersPage() {
         rows: validation.rows,
       });
       if (error || !data) throw new Error(error?.message ?? "Failed to import users");
+
+      try {
+        for (const createdUser of data.users) {
+          const roleResult = await assignGovernedRole({
+            targetUserId: createdUser.id,
+            roleKey: createdUser.role,
+          });
+          if (!roleResult.ok) throw new Error(roleResult.failure.message);
+        }
+      } catch (assignmentError) {
+        for (const createdUser of data.users) {
+          await supabase.from("profiles").delete().eq("id", createdUser.id);
+        }
+        throw assignmentError;
+      }
 
       setImportMessage(buildImportSummaryMessage(data.createdCount, "user", file.name));
       toast.success(`Imported ${data.createdCount} users`);
