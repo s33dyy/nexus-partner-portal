@@ -39,6 +39,7 @@ import {
 import { listLineItemCatalogOptions } from "@/integrations/local/dropdown-sources";
 import { toast } from "sonner";
 import { formatMoney } from "@/lib/money";
+import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -192,8 +193,20 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
       return;
     }
     const quantity = Number(addForm.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      toast.error("Quantity must be a positive number");
+    const decimalValues = [
+      addForm.msrpUsd,
+      addForm.ptpUsd,
+      addForm.discountPct,
+      addForm.dtpUsd,
+      addForm.proposedSellingPriceUsd,
+    ];
+    if (
+      !/^[0-9]+$/.test(addForm.quantity) ||
+      !Number.isSafeInteger(quantity) ||
+      quantity <= 0 ||
+      decimalValues.some((value) => value !== "" && !/^[0-9]+(?:\.[0-9]+)?$/.test(value))
+    ) {
+      toast.error("Quantity must be a whole number and prices must be valid decimals");
       return;
     }
     const msrpUsd = Number(addForm.msrpUsd) || 0;
@@ -270,7 +283,12 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
   const handleRequestDiscount = async () => {
     if (!discountDialogItem) return;
     const pct = Number(requestedDiscountPct);
-    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+    if (
+      !/^[0-9]+(?:\.[0-9]+)?$/.test(requestedDiscountPct) ||
+      !Number.isFinite(pct) ||
+      pct <= 0 ||
+      pct > 100
+    ) {
       toast.error("Discount % must be between 0 and 100");
       return;
     }
@@ -470,12 +488,14 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
               <Label htmlFor="discount_pct">Requested discount %</Label>
               <Input
                 id="discount_pct"
-                type="number"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.]?[0-9]*"
                 min={0}
                 max={100}
                 step="0.01"
                 value={requestedDiscountPct}
-                onChange={(e) => setRequestedDiscountPct(e.target.value)}
+                onChange={(e) => setRequestedDiscountPct(sanitizeDecimal(e.target.value))}
               />
             </div>
             <div className="space-y-2">
@@ -549,11 +569,16 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_quantity">Quantity</Label>
                 <Input
                   id="line_item_quantity"
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min={1}
                   value={addForm.quantity}
                   onChange={(e) =>
-                    setAddForm((current) => ({ ...current, quantity: e.target.value }))
+                    setAddForm((current) => ({
+                      ...current,
+                      quantity: sanitizeWholeNumber(e.target.value),
+                    }))
                   }
                 />
               </div>
@@ -561,12 +586,17 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_msrp">MSRP (USD)</Label>
                 <Input
                   id="line_item_msrp"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   min={0}
                   step="0.01"
                   value={addForm.msrpUsd}
                   onChange={(e) =>
-                    setAddForm((current) => ({ ...current, msrpUsd: e.target.value }))
+                    setAddForm((current) => ({
+                      ...current,
+                      msrpUsd: sanitizeDecimal(e.target.value),
+                    }))
                   }
                 />
               </div>
@@ -574,12 +604,17 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_ptp">PTP (USD)</Label>
                 <Input
                   id="line_item_ptp"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   min={0}
                   step="0.01"
                   value={addForm.ptpUsd}
                   onChange={(e) =>
-                    setAddForm((current) => ({ ...current, ptpUsd: e.target.value }))
+                    setAddForm((current) => ({
+                      ...current,
+                      ptpUsd: sanitizeDecimal(e.target.value),
+                    }))
                   }
                 />
               </div>
@@ -587,13 +622,18 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_discount">Discount %</Label>
                 <Input
                   id="line_item_discount"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   min={0}
                   max={100}
                   step="0.01"
                   value={addForm.discountPct}
                   onChange={(e) =>
-                    setAddForm((current) => ({ ...current, discountPct: e.target.value }))
+                    setAddForm((current) => ({
+                      ...current,
+                      discountPct: sanitizeDecimal(e.target.value),
+                    }))
                   }
                 />
               </div>
@@ -601,12 +641,17 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_dtp">DTP (USD)</Label>
                 <Input
                   id="line_item_dtp"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   min={0}
                   step="0.01"
                   value={addForm.dtpUsd}
                   onChange={(e) =>
-                    setAddForm((current) => ({ ...current, dtpUsd: e.target.value }))
+                    setAddForm((current) => ({
+                      ...current,
+                      dtpUsd: sanitizeDecimal(e.target.value),
+                    }))
                   }
                 />
               </div>
@@ -614,14 +659,16 @@ export function DealLineItems({ dealId, dealStage }: { dealId: string; dealStage
                 <Label htmlFor="line_item_proposed">Proposed selling price (USD)</Label>
                 <Input
                   id="line_item_proposed"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   min={0}
                   step="0.01"
                   value={addForm.proposedSellingPriceUsd}
                   onChange={(e) =>
                     setAddForm((current) => ({
                       ...current,
-                      proposedSellingPriceUsd: e.target.value,
+                      proposedSellingPriceUsd: sanitizeDecimal(e.target.value),
                     }))
                   }
                 />

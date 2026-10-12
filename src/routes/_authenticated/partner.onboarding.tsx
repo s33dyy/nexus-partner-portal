@@ -38,6 +38,7 @@ import {
   regionLookupField,
 } from "@/lib/partner-onboarding-lookups";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 
 export const Route = createFileRoute("/_authenticated/partner/onboarding")({
   component: OnboardingPage,
@@ -88,10 +89,13 @@ const companySchema = z.object({
   employee_count: z.string().min(1, "Select employee band"),
 });
 
-type Form = z.infer<typeof businessSchema> &
-  z.infer<typeof companySchema> & {
-    business_focus: string[];
-  };
+type Form = Omit<
+  z.infer<typeof businessSchema> & z.infer<typeof companySchema>,
+  "years_in_business"
+> & {
+  years_in_business: string;
+  business_focus: string[];
+};
 
 type DocRow = {
   id: string;
@@ -126,7 +130,7 @@ function OnboardingPage() {
     country: "India",
     state: "",
     business_type: "",
-    years_in_business: 0,
+    years_in_business: "0",
     annual_turnover: "",
     employee_count: "",
     business_focus: [],
@@ -201,7 +205,7 @@ function OnboardingPage() {
           country: partner.country ?? "India",
           state: partner.state ?? "",
           business_type: partner.business_type ?? "",
-          years_in_business: partner.years_in_business ?? 0,
+          years_in_business: String(partner.years_in_business ?? ""),
           annual_turnover: partner.annual_turnover ?? "",
           employee_count: partner.employee_count ?? "",
           business_focus: partner.business_focus ?? [],
@@ -239,7 +243,7 @@ function OnboardingPage() {
         country: form.country || null,
         state: form.state || null,
         business_type: form.business_type || null,
-        years_in_business: form.years_in_business || null,
+        years_in_business: form.years_in_business === "" ? null : Number(form.years_in_business),
         annual_turnover: form.annual_turnover || null,
         employee_count: form.employee_count || null,
         business_focus: form.business_focus,
@@ -313,6 +317,10 @@ function OnboardingPage() {
       }
     }
     if (step.key === "company") {
+      if (!/^[0-9]+$/.test(form.years_in_business)) {
+        toast.error("Years in business must be a whole number");
+        return false;
+      }
       const r = companySchema.safeParse(form);
       if (!r.success) {
         toast.error(r.error.issues[0]?.message ?? "Please review the form");
@@ -631,10 +639,14 @@ function OnboardingPage() {
                   </Field>
                   <Field label="Years in business*">
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       min={0}
                       value={form.years_in_business}
-                      onChange={(e) => setField("years_in_business", Number(e.target.value))}
+                      onChange={(e) =>
+                        setField("years_in_business", sanitizeWholeNumber(e.target.value))
+                      }
                       disabled={readOnly}
                     />
                   </Field>

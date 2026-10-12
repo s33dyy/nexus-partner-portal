@@ -41,6 +41,7 @@ import type {
   StockRequestView,
 } from "@/domain/contracts/distribution";
 import { formatDateLabel } from "@/lib/date-utils";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 
 /**
  * Track Stock: one request's lines, its movement history, and whichever
@@ -146,9 +147,27 @@ export function StockTrackingPanel({
   const quantityDrafts = () =>
     quantityLines
       .filter((line) => line.quantity.trim() !== "")
-      .map((line) => ({ lineId: line.lineId, quantity: Number(line.quantity) }))
-      .filter((line) => Number.isSafeInteger(line.quantity) && line.quantity > 0)
-      .map((line) => ({ lineId: line.lineId, quantity: String(line.quantity) }));
+      .filter(
+        (line) =>
+          /^[0-9]+$/.test(line.quantity) &&
+          Number.isSafeInteger(Number(line.quantity)) &&
+          Number(line.quantity) > 0,
+      )
+      .map((line) => ({ lineId: line.lineId, quantity: String(Number(line.quantity)) }));
+
+  const reviewLinesValid = reviewLines.every(
+    (line) =>
+      /^[0-9]+$/.test(line.approvedQuantity) &&
+      Number.isSafeInteger(Number(line.approvedQuantity)) &&
+      Number(line.approvedQuantity) >= 0,
+  );
+  const quantityLinesValid = quantityLines.every(
+    (line) =>
+      line.quantity.trim() === "" ||
+      (/^[0-9]+$/.test(line.quantity) &&
+        Number.isSafeInteger(Number(line.quantity)) &&
+        Number(line.quantity) > 0),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -271,7 +290,9 @@ export function StockTrackingPanel({
                           <Input
                             id={`approve-${line.lineId}`}
                             className="w-24"
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             min={0}
                             max={line.requestedQuantity}
                             value={reviewLines[index]?.approvedQuantity ?? ""}
@@ -279,7 +300,10 @@ export function StockTrackingPanel({
                               setReviewLines((current) =>
                                 current.map((draft, position) =>
                                   position === index
-                                    ? { ...draft, approvedQuantity: event.target.value }
+                                    ? {
+                                        ...draft,
+                                        approvedQuantity: sanitizeWholeNumber(event.target.value),
+                                      }
                                     : draft,
                                 ),
                               )
@@ -322,7 +346,7 @@ export function StockTrackingPanel({
                     />
                     <div className="flex flex-wrap gap-2">
                       <Button
-                        disabled={busy || !reason.trim()}
+                        disabled={busy || !reason.trim() || !reviewLinesValid}
                         onClick={() => onReview("approve", reason, reviewLines)}
                       >
                         Approve
@@ -357,7 +381,9 @@ export function StockTrackingPanel({
                         </div>
                         <Input
                           className="w-28"
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           min={0}
                           placeholder="All"
                           aria-label={`Quantity for ${line.skuCode}`}
@@ -366,7 +392,10 @@ export function StockTrackingPanel({
                             setQuantityLines((current) =>
                               current.map((draft, position) =>
                                 position === index
-                                  ? { ...draft, quantity: event.target.value }
+                                  ? {
+                                      ...draft,
+                                      quantity: sanitizeWholeNumber(event.target.value),
+                                    }
                                   : draft,
                               ),
                             )
@@ -375,7 +404,7 @@ export function StockTrackingPanel({
                       </div>
                     ))}
                     <Button
-                      disabled={busy}
+                      disabled={busy || !quantityLinesValid}
                       onClick={() => {
                         const drafts = quantityDrafts();
                         if (action === "allocate") onAllocate(drafts);

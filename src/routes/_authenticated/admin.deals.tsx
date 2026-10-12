@@ -51,6 +51,7 @@ import { DEAL_STAGE_ORDER, type DealRecord, type TeamMemberRecord } from "@/lib/
 import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
+import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
   component: AdminDealsPage,
@@ -73,6 +74,7 @@ function AdminDealsPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [note, setNote] = useState("");
   const [reviewDraft, setReviewDraft] = useState<DealRecord | null>(null);
+  const [reviewQuantityInput, setReviewQuantityInput] = useState<string | null>(null);
   const [reviewCollaborators, setReviewCollaborators] = useState<DealCollaboratorDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [clientCreateOpen, setClientCreateOpen] = useState(false);
@@ -176,14 +178,17 @@ function AdminDealsPage() {
   useEffect(() => {
     if (!selectedDeal) {
       setReviewDraft(null);
+      setReviewQuantityInput(null);
       setReviewCollaborators([]);
       setNote("");
       return;
     }
     setReviewDraft({
       ...selectedDeal,
+      amount: sanitizeDecimal(selectedDeal.amount),
       probability: normalizeDealProbability(selectedDeal.probability),
     });
+    setReviewQuantityInput(String(selectedDeal.quantity));
     setReviewCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
     setNote(selectedDeal.notes);
   }, [collaboratorsByDealId, selectedDeal]);
@@ -270,6 +275,15 @@ function AdminDealsPage() {
 
   const saveReview = async (status?: "approved" | "need_more_info" | "rejected") => {
     if (!selectedDeal || !reviewDraft) return;
+    const quantityInput = reviewQuantityInput ?? String(reviewDraft.quantity);
+    if (!/^[0-9]+$/.test(quantityInput) || Number(quantityInput) < 1) {
+      toast.error("Quantity must be a whole number greater than zero");
+      return;
+    }
+    if (!/^[0-9]+(?:\.[0-9]+)?$/.test(reviewDraft.amount)) {
+      toast.error("Amount must be a valid decimal");
+      return;
+    }
     setSaving(true);
     try {
       if (status) {
@@ -644,10 +658,15 @@ function AdminDealsPage() {
                         <div className="space-y-2">
                           <Label>Amount</Label>
                           <Input
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9]*[.]?[0-9]*"
                             value={reviewDraft.amount}
                             onChange={(e) =>
                               setReviewDraft((current) =>
-                                current ? { ...current, amount: e.target.value } : current,
+                                current
+                                  ? { ...current, amount: sanitizeDecimal(e.target.value) }
+                                  : current,
                               )
                             }
                           />
@@ -670,16 +689,18 @@ function AdminDealsPage() {
                         <div className="space-y-2">
                           <Label>Quantity</Label>
                           <Input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             min={1}
-                            value={reviewDraft.quantity}
-                            onChange={(e) =>
+                            value={reviewQuantityInput ?? String(reviewDraft.quantity)}
+                            onChange={(e) => {
+                              const value = sanitizeWholeNumber(e.target.value);
+                              setReviewQuantityInput(value);
                               setReviewDraft((current) =>
-                                current
-                                  ? { ...current, quantity: Number(e.target.value) || 1 }
-                                  : current,
-                              )
-                            }
+                                current ? { ...current, quantity: Number(value) || 0 } : current,
+                              );
+                            }}
                           />
                         </div>
                         <div className="space-y-2">

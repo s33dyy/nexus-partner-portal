@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import {
   MOVEMENT_ENDPOINT_RULES,
   type CreateStockLocationInput,
@@ -325,7 +326,7 @@ function MovementDialog({
   const validationError = useMemo(() => {
     if (!productSkuId) return "Choose a product.";
     const parsed = Number(quantity);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    if (!/^[0-9]+$/.test(quantity) || !Number.isSafeInteger(parsed) || parsed <= 0) {
       return "Quantity must be a whole number greater than zero.";
     }
     if (rule.source === "required" && !sourceLocationId) return "Choose a source location.";
@@ -438,11 +439,13 @@ function MovementDialog({
         <Field label="Quantity" htmlFor="movement-quantity" required>
           <Input
             id="movement-quantity"
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             min={1}
             step={1}
             value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
+            onChange={(event) => setQuantity(sanitizeWholeNumber(event.target.value))}
           />
         </Field>
         {locationOptions("source")}

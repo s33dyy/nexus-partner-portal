@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import {
   OUTREACH_TOKENS,
   renderOutreachTemplate,
@@ -105,6 +106,7 @@ export function SequenceBuilder({
   // Which field the caret was last in, so a token chip knows where to land.
   const focusedField = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [dayOffsetInputs, setDayOffsetInputs] = useState<Record<number, string>>({});
 
   const updateStep = useCallback(
     (index: number, patch: Partial<SequenceStepDraft>) => {
@@ -273,15 +275,26 @@ export function SequenceBuilder({
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">Day</span>
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     min={0}
                     max={180}
                     aria-label={`Step ${index + 1} day offset from enrolment`}
                     className="h-8 w-20"
                     disabled={disabled}
-                    value={String(step.dayOffset)}
-                    onChange={(event) =>
-                      updateStep(index, { dayOffset: Number(event.target.value) || 0 })
+                    value={dayOffsetInputs[index] ?? String(step.dayOffset)}
+                    onChange={(event) => {
+                      const value = sanitizeWholeNumber(event.target.value);
+                      setDayOffsetInputs((current) => ({ ...current, [index]: value }));
+                      updateStep(index, { dayOffset: value === "" ? 0 : Number(value) });
+                    }}
+                    onBlur={() =>
+                      setDayOffsetInputs((current) => {
+                        const next = { ...current };
+                        delete next[index];
+                        return next;
+                      })
                     }
                   />
                 </div>

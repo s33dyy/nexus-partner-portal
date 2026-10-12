@@ -2,11 +2,18 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { createDropdownCustomer } from "@/integrations/local/dropdown-sources";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomerRecord } from "@/lib/portal-records";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { toast } from "sonner";
 
 type CustomerQuickCreateDialogProps = {
@@ -32,7 +39,7 @@ type Draft = {
   account_owner: string;
   region: string;
   segment: string;
-  health_score: number;
+  health_score: string;
   mrr: string;
   renewal_date: string;
   status: string;
@@ -68,7 +75,7 @@ export function CustomerQuickCreateDialog({
     account_owner: initialAccountOwner,
     region: initialRegion,
     segment: initialSegment,
-    health_score: initialHealthScore,
+    health_score: String(initialHealthScore),
     mrr: initialMrr,
     renewal_date: initialRenewalDate,
     status: initialStatus,
@@ -84,7 +91,7 @@ export function CustomerQuickCreateDialog({
       account_owner: initialAccountOwner,
       region: initialRegion,
       segment: initialSegment,
-      health_score: initialHealthScore,
+      health_score: String(initialHealthScore),
       mrr: initialMrr,
       renewal_date: initialRenewalDate,
       status: initialStatus,
@@ -118,6 +125,10 @@ export function CustomerQuickCreateDialog({
     }
     if (!draft.renewal_date) {
       toast.error("Renewal date is required");
+      return;
+    }
+    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
+      toast.error("Health score must be a whole number");
       return;
     }
 
@@ -161,14 +172,18 @@ export function CustomerQuickCreateDialog({
           <Field label="Company name *">
             <Input
               value={draft.company_name}
-              onChange={(e) => setDraft((current) => ({ ...current, company_name: e.target.value }))}
+              onChange={(e) =>
+                setDraft((current) => ({ ...current, company_name: e.target.value }))
+              }
               placeholder={companyLabel || "Acme Partners"}
             />
           </Field>
           <Field label="Account owner *">
             <Input
               value={draft.account_owner}
-              onChange={(e) => setDraft((current) => ({ ...current, account_owner: e.target.value }))}
+              onChange={(e) =>
+                setDraft((current) => ({ ...current, account_owner: e.target.value }))
+              }
               placeholder="Owner name"
             />
           </Field>
@@ -211,12 +226,17 @@ export function CustomerQuickCreateDialog({
           </Field>
           <Field label="Health score">
             <Input
-              type="number"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={0}
               max={100}
               value={draft.health_score}
               onChange={(e) =>
-                setDraft((current) => ({ ...current, health_score: Number(e.target.value) || 0 }))
+                setDraft((current) => ({
+                  ...current,
+                  health_score: sanitizeWholeNumber(e.target.value),
+                }))
               }
             />
           </Field>

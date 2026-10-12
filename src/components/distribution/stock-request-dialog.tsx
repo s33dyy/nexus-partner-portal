@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProductRecommendation } from "@/domain/contracts/recommendations";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import {
   STOCK_REQUEST_PRIORITIES,
   type RequestableProductSkuView,
@@ -149,7 +150,7 @@ export function StockRequestDialog({
     if (filled.length === 0) return "Add at least one product.";
     for (const line of filled) {
       const quantity = Number(line.quantity);
-      if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      if (!/^[0-9]+$/.test(line.quantity) || !Number.isSafeInteger(quantity) || quantity <= 0) {
         return "Every quantity must be a whole number greater than zero.";
       }
     }
@@ -287,7 +288,9 @@ export function StockRequestDialog({
             </div>
             <Input
               className="w-24"
-              type="number"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={1}
               step={1}
               aria-label={`Quantity for line ${index + 1}`}
@@ -295,7 +298,9 @@ export function StockRequestDialog({
               onChange={(event) =>
                 setLines((current) =>
                   current.map((candidate, position) =>
-                    position === index ? { ...candidate, quantity: event.target.value } : candidate,
+                    position === index
+                      ? { ...candidate, quantity: sanitizeWholeNumber(event.target.value) }
+                      : candidate,
                   ),
                 )
               }

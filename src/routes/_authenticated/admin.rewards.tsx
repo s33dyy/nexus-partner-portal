@@ -36,6 +36,7 @@ import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDateLabel, formatDateTimeLabel } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { sanitizeSignedWholeNumber, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import {
   calculateOutstandingRewardPoints,
   readRewardCatalogImportRows,
@@ -237,6 +238,10 @@ function AdminRewardsPage() {
 
   const saveItem = async () => {
     if (!selectedItem) return;
+    if (!/^[0-9]+$/.test(draft.points_cost) || !/^[0-9]+$/.test(draft.stock)) {
+      toast.error("Points cost and stock must be whole numbers");
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase
@@ -276,6 +281,10 @@ function AdminRewardsPage() {
   const addItem = async () => {
     if (!draft.title.trim() || !draft.description.trim()) {
       toast.error("Title and description are required");
+      return;
+    }
+    if (!/^[0-9]+$/.test(draft.points_cost) || !/^[0-9]+$/.test(draft.stock)) {
+      toast.error("Points cost and stock must be whole numbers");
       return;
     }
     setCreating(true);
@@ -501,9 +510,10 @@ function AdminRewardsPage() {
 
   const saveAdjustment = async () => {
     const user = users.find((entry) => entry.id === adjustmentDraft.userId) ?? null;
-    const pointsDelta = Number.parseInt(adjustmentDraft.pointsDelta, 10);
+    const pointsDelta = Number(adjustmentDraft.pointsDelta);
     if (
       !user ||
+      !/^-?[0-9]+$/.test(adjustmentDraft.pointsDelta) ||
       !Number.isFinite(pointsDelta) ||
       pointsDelta === 0 ||
       !adjustmentDraft.reason.trim()
@@ -830,11 +840,16 @@ function AdminRewardsPage() {
                       <Label htmlFor="reward_points">Points cost</Label>
                       <Input
                         id="reward_points"
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         min={0}
                         value={draft.points_cost}
                         onChange={(event) =>
-                          setDraft((current) => ({ ...current, points_cost: event.target.value }))
+                          setDraft((current) => ({
+                            ...current,
+                            points_cost: sanitizeWholeNumber(event.target.value),
+                          }))
                         }
                       />
                     </div>
@@ -842,11 +857,16 @@ function AdminRewardsPage() {
                       <Label htmlFor="reward_stock">Stock</Label>
                       <Input
                         id="reward_stock"
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         min={0}
                         value={draft.stock}
                         onChange={(event) =>
-                          setDraft((current) => ({ ...current, stock: event.target.value }))
+                          setDraft((current) => ({
+                            ...current,
+                            stock: sanitizeWholeNumber(event.target.value),
+                          }))
                         }
                       />
                     </div>
@@ -908,12 +928,14 @@ function AdminRewardsPage() {
                     <Label htmlFor="adjustment-points">Points delta</Label>
                     <Input
                       id="adjustment-points"
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="-?[0-9]*"
                       value={adjustmentDraft.pointsDelta}
                       onChange={(event) =>
                         setAdjustmentDraft((current) => ({
                           ...current,
-                          pointsDelta: event.target.value,
+                          pointsDelta: sanitizeSignedWholeNumber(event.target.value),
                         }))
                       }
                       placeholder="Use positive or negative values"
@@ -1067,11 +1089,16 @@ function AdminRewardsPage() {
                       <Label htmlFor="reward_points_modal">Points cost</Label>
                       <Input
                         id="reward_points_modal"
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         min={0}
                         value={draft.points_cost}
                         onChange={(event) =>
-                          setDraft((current) => ({ ...current, points_cost: event.target.value }))
+                          setDraft((current) => ({
+                            ...current,
+                            points_cost: sanitizeWholeNumber(event.target.value),
+                          }))
                         }
                       />
                     </div>
@@ -1079,11 +1106,16 @@ function AdminRewardsPage() {
                       <Label htmlFor="reward_stock_modal">Stock</Label>
                       <Input
                         id="reward_stock_modal"
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         min={0}
                         value={draft.stock}
                         onChange={(event) =>
-                          setDraft((current) => ({ ...current, stock: event.target.value }))
+                          setDraft((current) => ({
+                            ...current,
+                            stock: sanitizeWholeNumber(event.target.value),
+                          }))
                         }
                       />
                     </div>

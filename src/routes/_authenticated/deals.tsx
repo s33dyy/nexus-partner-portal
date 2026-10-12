@@ -73,6 +73,7 @@ import {
 import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
+import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { useAuth } from "@/hooks/use-auth";
@@ -131,7 +132,7 @@ type DealForm = {
   region: string;
   product: string;
   stage: DealStage;
-  quantity: number;
+  quantity: string;
   amount: string;
   currency_code: string;
   amount_value: number | null;
@@ -158,7 +159,7 @@ type DealEditForm = {
   country: string;
   region: string;
   product: string;
-  quantity: number;
+  quantity: string;
   amount: string;
   currency_code: string;
   amount_value: number | null;
@@ -187,7 +188,7 @@ const EMPTY_FORM: DealForm = {
   region: "India West",
   product: "LIVEY WC350 QHD Webcam",
   stage: "sourced",
-  quantity: 1,
+  quantity: "1",
   amount: "",
   currency_code: "USD",
   amount_value: null,
@@ -248,8 +249,8 @@ function dealToEditForm(deal: DealRecord): DealEditForm {
     country: deal.country,
     region: deal.region,
     product: deal.product,
-    quantity: deal.quantity,
-    amount: deal.amount,
+    quantity: String(deal.quantity),
+    amount: deal.amount.trim() ? String(parseDealAmount(deal.amount)) : "",
     currency_code: deal.currency_code || "USD",
     amount_value: normalizeNullableNumber(deal.amount_value),
     amount_usd: normalizeNullableNumber(deal.amount_usd),
@@ -1353,7 +1354,10 @@ function DealsPage() {
       !accountName.trim() ||
       !ownerName.trim() ||
       !draft.contact_name.trim() ||
-      !draft.amount.trim()
+      !/^[0-9]+$/.test(draft.quantity) ||
+      Number(draft.quantity) < 1 ||
+      !draft.amount.trim() ||
+      !/^[0-9]+(?:\.[0-9]+)?$/.test(draft.amount)
     ) {
       toast.error("Fill in the account, client, and amount");
       return;
@@ -1456,7 +1460,18 @@ function DealsPage() {
     const source = selectedDealDraft.source.trim();
     const notes = selectedDealDraft.notes.trim();
 
-    if (!accountName || !contactName || !ownerName || !region || !product || !amount || !source) {
+    if (
+      !accountName ||
+      !contactName ||
+      !ownerName ||
+      !region ||
+      !product ||
+      !/^[0-9]+$/.test(selectedDealDraft.quantity) ||
+      Number(selectedDealDraft.quantity) < 1 ||
+      !amount ||
+      !source ||
+      !/^[0-9]+(?:\.[0-9]+)?$/.test(amount)
+    ) {
       toast.error("Fill in account, client, owner, region, product, amount, and source");
       return;
     }
@@ -2087,13 +2102,18 @@ function DealsPage() {
                     </Field>
                     <Field label="Quantity">
                       <Input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         min={1}
                         value={selectedDealDraft.quantity}
                         onChange={(e) =>
                           setSelectedDealDraft((current) =>
                             current
-                              ? { ...current, quantity: Number(e.target.value) || 1 }
+                              ? {
+                                  ...current,
+                                  quantity: sanitizeWholeNumber(e.target.value),
+                                }
                               : current,
                           )
                         }
@@ -2101,10 +2121,15 @@ function DealsPage() {
                     </Field>
                     <Field label="Amount">
                       <Input
+                        type="text"
+                        inputMode="decimal"
+                        pattern="[0-9]*[.]?[0-9]*"
                         value={selectedDealDraft.amount}
                         onChange={(e) =>
                           setSelectedDealDraft((current) =>
-                            current ? { ...current, amount: e.target.value } : current,
+                            current
+                              ? { ...current, amount: sanitizeDecimal(e.target.value) }
+                              : current,
                           )
                         }
                       />
@@ -2696,13 +2721,15 @@ function DealsPage() {
             <Label htmlFor="quantity">Quantity</Label>
             <Input
               id="quantity"
-              type="number"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={1}
               value={draft.quantity}
               onChange={(e) =>
                 setDraft((current) => ({
                   ...current,
-                  quantity: Number(e.target.value) || 1,
+                  quantity: sanitizeWholeNumber(e.target.value),
                 }))
               }
               placeholder="1"
@@ -2714,9 +2741,14 @@ function DealsPage() {
             <Label htmlFor="amount">Amount</Label>
             <Input
               id="amount"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9]*[.]?[0-9]*"
               value={draft.amount}
-              onChange={(e) => setDraft((value) => ({ ...value, amount: e.target.value }))}
-              placeholder="$9,200"
+              onChange={(e) =>
+                setDraft((value) => ({ ...value, amount: sanitizeDecimal(e.target.value) }))
+              }
+              placeholder="9200.00"
             />
           </div>
           <div className="space-y-2">

@@ -29,6 +29,7 @@ import {
 } from "@/integrations/local/dropdown-sources";
 import { supabase, uploadRewardImage } from "@/integrations/local/client";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { type CsvColumn } from "@/lib/csv-export";
 import { ImportFeedback } from "@/lib/import-feedback";
 import {
@@ -65,7 +66,7 @@ type CatalogForm = {
   partner_tier: string;
   list_price: string;
   margin: string;
-  stock: number;
+  stock: number | string;
   availability: string;
   benefits: string;
   catalog_kind: CatalogKind;
@@ -424,10 +425,15 @@ function AdminCatalogPage() {
 
   const saveItem = async () => {
     if (!selectedItem) return;
+    if (!/^[0-9]+$/.test(String(draft.stock))) {
+      toast.error("Stock must be a whole number");
+      return;
+    }
     setSaving(true);
     try {
       const values = buildCatalogCreateValues({
         ...draft,
+        stock: Number(draft.stock) || 0,
         catalog_kind: draft.catalog_kind,
       });
       const updatedItem = (await updateDropdownCatalogItem({
@@ -453,9 +459,13 @@ function AdminCatalogPage() {
       toast.error("Product name is required");
       return;
     }
+    if (!/^[0-9]+$/.test(String(draft.stock))) {
+      toast.error("Stock must be a whole number");
+      return;
+    }
     setAdding(true);
     try {
-      const values = buildCatalogCreateValues(draft);
+      const values = buildCatalogCreateValues({ ...draft, stock: Number(draft.stock) || 0 });
       await createDropdownCatalogItem(values);
       toast.success("Catalog item added");
       setDraft({ ...EMPTY_FORM, catalog_kind: moduleKind });
@@ -766,10 +776,15 @@ function AdminCatalogPage() {
                 </Field>
                 <Field label="Stock">
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={draft.stock}
                     onChange={(e) =>
-                      setDraft((value) => ({ ...value, stock: Number(e.target.value) || 0 }))
+                      setDraft((value) => ({
+                        ...value,
+                        stock: sanitizeWholeNumber(e.target.value),
+                      }))
                     }
                   />
                 </Field>
@@ -917,10 +932,15 @@ function AdminCatalogPage() {
                 </Field>
                 <Field label="Stock">
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={draft.stock}
                     onChange={(e) =>
-                      setDraft((value) => ({ ...value, stock: Number(e.target.value) || 0 }))
+                      setDraft((value) => ({
+                        ...value,
+                        stock: sanitizeWholeNumber(e.target.value),
+                      }))
                     }
                   />
                 </Field>

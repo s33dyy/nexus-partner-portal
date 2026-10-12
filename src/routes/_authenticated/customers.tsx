@@ -71,6 +71,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
+import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 
 type CustomerForm = {
   company_name: string;
@@ -78,7 +79,7 @@ type CustomerForm = {
   country: string;
   region: string;
   segment: string;
-  health_score: number;
+  health_score: string;
   mrr: string;
   renewal_date: string;
   status: string;
@@ -92,7 +93,7 @@ const EMPTY_FORM: CustomerForm = {
   country: "India",
   region: "India West",
   segment: "Mid-market",
-  health_score: 70,
+  health_score: "70",
   mrr: "$5K",
   renewal_date: "",
   status: "active",
@@ -344,6 +345,10 @@ function CustomersPage() {
       toast.error("Company, owner, and renewal date are required");
       return;
     }
+    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
+      toast.error("Health score must be a whole number");
+      return;
+    }
     setAdding(true);
     try {
       const payload = {
@@ -370,6 +375,10 @@ function CustomersPage() {
 
   const saveCustomer = async () => {
     if (!selectedCustomer) return;
+    if (draft.health_score !== "" && !/^[0-9]+$/.test(draft.health_score)) {
+      toast.error("Health score must be a whole number");
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase
@@ -380,7 +389,7 @@ function CustomersPage() {
           country: draft.country,
           region: draft.region,
           segment: draft.segment,
-          health_score: draft.health_score,
+          health_score: Number(draft.health_score),
           mrr: draft.mrr,
           renewal_date: draft.renewal_date,
           status: draft.status,
@@ -420,7 +429,7 @@ function CustomersPage() {
       country: selectedCustomer.country ?? "India",
       region: selectedCustomer.region,
       segment: selectedCustomer.segment,
-      health_score: selectedCustomer.health_score,
+      health_score: String(selectedCustomer.health_score),
       mrr: selectedCustomer.mrr,
       renewal_date: toDateInputValue(selectedCustomer.renewal_date),
       status: selectedCustomer.status,
@@ -909,12 +918,17 @@ function CustomersPage() {
                 </Field>
                 <Field label="Health score">
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     min={0}
                     max={100}
                     value={draft.health_score}
                     onChange={(e) =>
-                      setDraft((value) => ({ ...value, health_score: Number(e.target.value) || 0 }))
+                      setDraft((value) => ({
+                        ...value,
+                        health_score: sanitizeWholeNumber(e.target.value),
+                      }))
                     }
                   />
                 </Field>
@@ -1054,14 +1068,16 @@ function CustomersPage() {
                 </Field>
                 <Field label="Health score">
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     min={0}
                     max={100}
                     value={draft.health_score}
                     onChange={(e) =>
                       setDraft((valueState) => ({
                         ...valueState,
-                        health_score: Number(e.target.value) || 0,
+                        health_score: sanitizeWholeNumber(e.target.value),
                       }))
                     }
                   />
@@ -1364,7 +1380,7 @@ function CustomersPage() {
                       country: selectedCustomer.country ?? "India",
                       region: selectedCustomer.region,
                       segment: selectedCustomer.segment,
-                      health_score: selectedCustomer.health_score,
+                      health_score: String(selectedCustomer.health_score),
                       mrr: selectedCustomer.mrr,
                       renewal_date: toDateInputValue(selectedCustomer.renewal_date),
                       status: selectedCustomer.status,
