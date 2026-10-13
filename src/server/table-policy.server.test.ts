@@ -929,6 +929,31 @@ test("tasks reads for queryTableWithAuthContext generate a real (creator_id = $1
   }
 });
 
+test("task CRUD policy keeps ordinary fields writable but rejects lifecycle fields", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+  const auth = {
+    userId: "user-1",
+    roles: ["partner_admin"],
+    partnerId: "partner-1",
+    companyName: "Acme",
+    hasGovernedContext: true,
+    governedRoleKey: "partner_admin" as const,
+  };
+
+  const update = await applyTablePolicy(
+    { table: "tasks", operation: "update", filters: [], values: { title: "Updated" } },
+    auth,
+  );
+  expect(update.values).toEqual({ title: "Updated" });
+
+  await expect(
+    applyTablePolicy(
+      { table: "tasks", operation: "update", filters: [], values: { status: "completed" } },
+      auth,
+    ),
+  ).rejects.toThrow("Task lifecycle fields require a named task command");
+});
+
 test("domain_activity_events allows a non-super-admin to read events for a specific deal they can already see", async () => {
   const { applyTablePolicy } = await import("@/server/table-policy.server");
   const { pool } = await import("@/server/postgres.server");

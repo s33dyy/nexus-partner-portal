@@ -206,7 +206,7 @@ const CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "stock", header: "Stock" },
   { key: "availability", header: "Availability" },
   { key: "benefits", header: "Benefits" },
-  { key: "catalog_kind", header: "Module" },
+  { key: "catalog_kind", header: "Product Class" },
 ];
 
 export const Route = createFileRoute("/_authenticated/admin/catalog")({
@@ -788,7 +788,7 @@ function AdminCatalogPage() {
                     }
                   />
                 </Field>
-                <Field label="Module">
+                <Field label="Product Class">
                   <div className="flex gap-2">
                     <Button
                       type="button"
@@ -956,7 +956,7 @@ function AdminCatalogPage() {
                     options={editOptions.availability}
                   />
                 </Field>
-                <Field label="Module">
+                <Field label="Product Class">
                   <div className="flex gap-2">
                     <Button
                       type="button"

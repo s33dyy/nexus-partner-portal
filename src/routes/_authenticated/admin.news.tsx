@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { createBrowserId } from "@/lib/browser-id";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { AccessDeniedPage } from "@/components/route-placeholder";
@@ -210,7 +211,7 @@ function AdminNewsPage() {
     setCreating(true);
     try {
       const payload = {
-        id: crypto.randomUUID(),
+        id: createBrowserId(),
         title: draft.title.trim(),
         caption: draft.caption.trim(),
         image_path: draft.image_path.trim(),

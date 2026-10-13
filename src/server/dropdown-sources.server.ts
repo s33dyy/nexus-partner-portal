@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "@/server/postgres.server";
+import { isRenewalType } from "@/domain/contracts/reference-data";
 import { getAuthContext } from "@/server/livey-service.server";
 import {
   buildCatalogInsertRow,
@@ -128,6 +129,16 @@ function toOption(row: Record<string, unknown>, source: DropdownSourceKey): Drop
   };
 }
 
+export function buildCatalogOptionDescription(
+  kind: string,
+  sku: string | null | undefined,
+  unitPrice: string | number | null | undefined,
+) {
+  const price = parseMoneyText(unitPrice == null ? null : String(unitPrice));
+  const suffix = price == null ? "" : ` · unit price: ${price.toFixed(2)} USD`;
+  return `${kind}${sku ? ` · ${sku}` : ""}${suffix}`;
+}
+
 export async function listDropdownSourceValues(input: {
   source: DropdownSourceKey;
   fieldName?: string;
@@ -166,10 +177,11 @@ export async function listDropdownSourceValues(input: {
     const where: string[] = [];
     const columns = await getPortalCatalogItemColumns();
     const hasCatalogKindColumn = columns.has("catalog_kind");
+    const priceColumn = columns.has("list_price") ? ", list_price" : "";
     let sql = hasCatalogKindColumn
-      ? `SELECT id, sku, product_name AS label, category, partner_tier, catalog_kind
+      ? `SELECT id, sku, product_name AS label, category, partner_tier, catalog_kind${priceColumn}
                FROM portal_catalog_items`
-      : `SELECT id, sku, product_name AS label, category, partner_tier, 'product'::text AS catalog_kind
+      : `SELECT id, sku, product_name AS label, category, partner_tier, 'product'::text AS catalog_kind${priceColumn}
                FROM portal_catalog_items`;
 
     if (input.catalogKind && input.catalogKind !== "all") {
@@ -201,9 +213,11 @@ export async function listDropdownSourceValues(input: {
     return result.rows.map((row) => ({
       id: String(row.id ?? ""),
       label: String(row.label ?? row.product_name ?? ""),
-      description: `${getCatalogKindLabel(normalizeCatalogKind(row.catalog_kind as string | null))} · ${
-        row.sku ?? ""
-      }`,
+      description: buildCatalogOptionDescription(
+        getCatalogKindLabel(normalizeCatalogKind(row.catalog_kind as string | null)),
+        row.sku == null ? null : String(row.sku),
+        row.list_price as string | null,
+      ),
       source: input.source,
     }));
   }
@@ -520,6 +534,9 @@ export async function createCustomerFromDropdown(input: {
       input.health_score > 100)
   ) {
     throw new Error("Health score must be a whole number from 0 to 100");
+  }
+  if (!isRenewalType(input.renewal_date)) {
+    throw new Error("Renewal type must be LIVEYfy or RC");
   }
 
   const createdAt = new Date().toISOString();

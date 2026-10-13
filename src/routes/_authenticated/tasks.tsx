@@ -20,14 +20,17 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/local/client";
 import {
   createTask,
+  deleteTask,
+  listTaskAssignees,
+  listTasks,
   setTaskProposedCompletion,
   transitionTask,
+  updateTask,
 } from "@/integrations/local/task-commands";
 import { formatDateLabel, formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
-import type { TaskStatus } from "@/server/task-commands.server";
+import type { TaskAssignee, TaskStatus } from "@/server/task-commands.server";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
   component: TasksPage,
@@ -42,6 +45,11 @@ type TaskRecord = {
   due_at: string | null;
   proposed_completion_at: string | null;
   blocked_reason: string | null;
+  assignee_id: string | null;
+  assignee_name: string | null;
+  creator_id: string | null;
+  creator_name: string | null;
+  partner_id: string | null;
   version: number;
   created_at: string;
 };
@@ -77,6 +85,7 @@ const EMPTY_DRAFT = {
   priority: "medium",
   due_at: "",
   proposed_completion_at: "",
+  assignee_id: "",
 };
 
 // A date input yields "YYYY-MM-DD" with no time. Anchoring it at midday
@@ -90,8 +99,9 @@ function dateInputToIso(value: string): string | null {
 }
 
 function TasksPage() {
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"all" | TaskStatus>("all");
   const [draft, setDraft] = useState(EMPTY_DRAFT);
@@ -105,16 +115,20 @@ function TasksPage() {
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [dateEdit, setDateEdit] = useState<{ task: TaskRecord; value: string } | null>(null);
   const [savingDate, setSavingDate] = useState(false);
+  const [editTask, setEditTask] = useState<TaskRecord | null>(null);
+  const [editDraft, setEditDraft] = useState({ title: "", description: "", priority: "medium" });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const canCreate = can("tasks", "create");
+  const canUpdate = can("tasks", "update");
+  const canDelete = can("tasks", "delete");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setTasks((data ?? []) as TaskRecord[]);
+      const [taskResult, assigneeResult] = await Promise.all([listTasks(), listTaskAssignees()]);
+      if (!taskResult.ok) throw new Error(taskResult.failure.message);
+      setTasks(taskResult.data as TaskRecord[]);
+      if (assigneeResult.ok) setAssignees(assigneeResult.data);
     } catch (error) {
       console.error("Failed to load tasks", error);
       setTasks([]);
@@ -145,7 +159,7 @@ function TasksPage() {
         priority: draft.priority,
         dueAt: dateInputToIso(draft.due_at),
         proposedCompletionAt: dateInputToIso(draft.proposed_completion_at),
-        assigneeId: profile?.id ?? null,
+        assigneeId: draft.assignee_id || profile?.id || null,
       });
       if (!result.ok) {
         toast.error(result.failure.message);
@@ -160,6 +174,45 @@ function TasksPage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const openEdit = (task: TaskRecord) => {
+    setEditTask(task);
+    setEditDraft({ title: task.title, description: task.description, priority: task.priority });
+  };
+
+  const saveEdit = async () => {
+    if (!editTask) return;
+    setSavingEdit(true);
+    try {
+      const result = await updateTask({
+        taskId: editTask.id,
+        expectedVersion: editTask.version,
+        patch: editDraft,
+      });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success("Task updated");
+      setEditTask(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update task");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const removeTask = async (task: TaskRecord) => {
+    if (!window.confirm(`Delete “${task.title}”?`)) return;
+    const result = await deleteTask({ taskId: task.id, expectedVersion: task.version });
+    if (!result.ok) {
+      toast.error(result.failure.message);
+      return;
+    }
+    toast.success("Task deleted");
+    await load();
   };
 
   const saveProposedDate = async () => {
@@ -338,7 +391,7 @@ function TasksPage() {
         title="My Tasks"
         description="Track work items through to do, in progress, blocked, completed, and cancelled."
         actions={
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)} disabled={!canCreate}>
             <Plus className="mr-2 h-4 w-4" /> New task
           </Button>
         }
@@ -416,6 +469,28 @@ function TasksPage() {
             }
           />
         </Field>
+        {assignees.length > 0 ? (
+          <Field label="Assignee" hint="Choose an in-scope user or keep yourself assigned.">
+            <Select
+              value={draft.assignee_id || profile?.id || ""}
+              onValueChange={(value) => setDraft((prev) => ({ ...prev, assignee_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select assignee" />
+              </SelectTrigger>
+              <SelectContent>
+                {profile?.id ? <SelectItem value={profile.id}>Myself</SelectItem> : null}
+                {assignees
+                  .filter((assignee) => assignee.id !== profile?.id)
+                  .map((assignee) => (
+                    <SelectItem key={assignee.id} value={assignee.id}>
+                      {assignee.full_name || assignee.email}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
       </FormDialog>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
@@ -496,6 +571,16 @@ function TasksPage() {
                   }
                   trailing={
                     <div className="flex flex-wrap gap-2">
+                      {canUpdate ? (
+                        <Button size="sm" variant="outline" onClick={() => openEdit(task)}>
+                          Edit
+                        </Button>
+                      ) : null}
+                      {canDelete ? (
+                        <Button size="sm" variant="ghost" onClick={() => void removeTask(task)}>
+                          Delete
+                        </Button>
+                      ) : null}
                       {busyTaskId === task.id ? (
                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                       ) : (
@@ -528,6 +613,51 @@ function TasksPage() {
             placeholder="Why is this changing?"
             autoFocus
           />
+        </Field>
+      </FormDialog>
+
+      <FormDialog
+        open={editTask !== null}
+        onOpenChange={(open) => !open && setEditTask(null)}
+        title="Edit task"
+        description="Update task details. Lifecycle changes use their named commands."
+        busy={savingEdit}
+        submitLabel="Save changes"
+        busyLabel="Saving…"
+        onSubmit={saveEdit}
+      >
+        <Field label="Title" htmlFor="task-edit-title" required>
+          <Input
+            id="task-edit-title"
+            value={editDraft.title}
+            onChange={(event) => setEditDraft((prev) => ({ ...prev, title: event.target.value }))}
+          />
+        </Field>
+        <Field label="Description" htmlFor="task-edit-description">
+          <Textarea
+            id="task-edit-description"
+            rows={3}
+            value={editDraft.description}
+            onChange={(event) =>
+              setEditDraft((prev) => ({ ...prev, description: event.target.value }))
+            }
+          />
+        </Field>
+        <Field label="Priority">
+          <Select
+            value={editDraft.priority}
+            onValueChange={(value) => setEditDraft((prev) => ({ ...prev, priority: value }))}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="urgent">Urgent</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
       </FormDialog>
 

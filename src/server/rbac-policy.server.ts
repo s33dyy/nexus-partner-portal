@@ -120,31 +120,30 @@ export async function loadEffectiveCapabilities(
 ): Promise<FeatureCapabilities> {
   const capabilities = await loadRoleCapabilities(roleKey);
   if (!userId || !roleKey || roleKey === "super_admin") return capabilities;
-
   const { rows } = await pool.query(
-    `SELECT feature_key, operation, decision
-     FROM user_access_overrides
-     WHERE user_id = $1`,
+    `SELECT feature_key, operation, decision FROM user_access_overrides WHERE user_id = $1`,
     [userId],
   );
-
   for (const row of rows as Array<{
     feature_key: string;
     operation: string;
     decision: AccessDecision;
   }>) {
-    if (!(row.feature_key in capabilities)) continue;
-    if (!["create", "read", "update", "delete"].includes(row.operation)) continue;
-    capabilities[row.feature_key as FeatureKey][row.operation as CrudOperation] =
-      resolveEffectiveCapability({
-        role: roleKey,
-        feature: row.feature_key as FeatureKey,
-        operation: row.operation as CrudOperation,
-        roleAllowed: capabilities[row.feature_key as FeatureKey][row.operation as CrudOperation],
-        userOverride: row.decision === "allow",
-      });
+    if (
+      !(row.feature_key in capabilities) ||
+      !["create", "read", "update", "delete"].includes(row.operation)
+    )
+      continue;
+    const feature = row.feature_key as FeatureKey;
+    const operation = row.operation as CrudOperation;
+    capabilities[feature][operation] = resolveEffectiveCapability({
+      role: roleKey,
+      feature,
+      operation,
+      roleAllowed: capabilities[feature][operation],
+      userOverride: row.decision === "allow",
+    });
   }
-
   return capabilities;
 }
 

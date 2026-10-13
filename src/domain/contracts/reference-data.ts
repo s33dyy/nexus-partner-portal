@@ -42,6 +42,13 @@ export type ReferenceDataBucket = {
 
 const EFFECTIVE_FROM = "2026-07-29";
 
+export const RENEWAL_TYPES = ["LIVEYfy", "RC"] as const;
+export type RenewalType = (typeof RENEWAL_TYPES)[number];
+
+export function isRenewalType(value: unknown): value is RenewalType {
+  return typeof value === "string" && RENEWAL_TYPES.includes(value as RenewalType);
+}
+
 const PROVINCE_STATE_CODES = [
   ["IN-GJ", "Gujarat", "IN"],
   ["IN-MH", "Maharashtra", "IN"],
@@ -621,4 +628,24 @@ export async function seedGovernedReferenceData(pool: Pick<Pool, "query">) {
       ],
     );
   }
+}
+
+const countryCurrencyBucket = GOVERNED_REFERENCE_BUCKETS.find(
+  (bucket) => bucket.fieldName === "geography.country_currency",
+);
+
+export function getCountryCurrencyCode(
+  countryCodeOrName: string | null | undefined,
+): string | null {
+  const needle = countryCodeOrName?.trim().toLowerCase();
+  if (!needle) return null;
+  const country = WORLD_COUNTRIES.find(
+    (candidate) =>
+      candidate.code.toLowerCase() === needle || candidate.name.toLowerCase() === needle,
+  );
+  if (!country) return null;
+  return (
+    countryCurrencyBucket?.items.find((item) => item.valueKey === country.code)?.value ??
+    country.currencyCode
+  );
 }

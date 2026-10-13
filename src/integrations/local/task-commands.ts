@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import type { CommandExecutionResult } from "@/domain/contracts/commands";
-import type { CreateTaskInput, TaskStatus } from "@/server/task-commands.server";
+import type { CreateTaskInput, TaskPatch, TaskStatus } from "@/server/task-commands.server";
 
 async function resolveActorOrDenial() {
   const { getAuthContext } = await import("@/server/livey-service.server");
@@ -28,6 +28,47 @@ const createTaskFn = createServerFn({ method: "POST" })
     if (!actorResult.ok) return actorDenialResult(actorResult.failure);
     const { createTask } = await import("@/server/task-commands.server");
     return createTask({ actor: actorResult.actor, data });
+  });
+
+const listTasksFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actorResult = await resolveActorOrDenial();
+  if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+  const { listTasks } = await import("@/server/task-commands.server");
+  return listTasks({ actor: actorResult.actor });
+});
+
+const listTaskAssigneesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actorResult = await resolveActorOrDenial();
+  if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+  const { listTaskAssignees } = await import("@/server/task-commands.server");
+  return listTaskAssignees({ actor: actorResult.actor });
+});
+
+const updateTaskFn = createServerFn({ method: "POST" })
+  .validator((input: { taskId: string; expectedVersion?: number; patch: TaskPatch }) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { updateTask } = await import("@/server/task-commands.server");
+    return updateTask({
+      actor: actorResult.actor,
+      taskId: data.taskId,
+      expectedVersion: data.expectedVersion,
+      patch: data.patch,
+    });
+  });
+
+const deleteTaskFn = createServerFn({ method: "POST" })
+  .validator((input: { taskId: string; expectedVersion?: number }) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { deleteTask } = await import("@/server/task-commands.server");
+    return deleteTask({
+      actor: actorResult.actor,
+      taskId: data.taskId,
+      expectedVersion: data.expectedVersion,
+    });
   });
 
 const transitionTaskFn = createServerFn({ method: "POST" })
@@ -76,6 +117,29 @@ const setTaskProposedCompletionFn = createServerFn({ method: "POST" })
 
 export async function createTask(input: CreateTaskInput): Promise<CommandExecutionResult> {
   return createTaskFn({ data: input });
+}
+
+export async function listTasks() {
+  return listTasksFn();
+}
+
+export async function listTaskAssignees() {
+  return listTaskAssigneesFn();
+}
+
+export async function updateTask(input: {
+  taskId: string;
+  expectedVersion?: number;
+  patch: TaskPatch;
+}): Promise<CommandExecutionResult> {
+  return updateTaskFn({ data: input });
+}
+
+export async function deleteTask(input: {
+  taskId: string;
+  expectedVersion?: number;
+}): Promise<CommandExecutionResult> {
+  return deleteTaskFn({ data: input });
 }
 
 export async function transitionTask(input: {

@@ -78,3 +78,35 @@ test("filterDealsByView treats the open status as any deal not yet won or lost",
     }).map((deal) => deal.id),
   ).toEqual(["open-1"]);
 });
+
+test("filterDealsByView supports advanced KAM, PAM, Partner Admin, and Partner User owner filters", () => {
+  const deals = [
+    buildDeal({ id: "kam", owner_role: "kam" }),
+    buildDeal({ id: "pam", owner_role: "pam" }),
+    buildDeal({ id: "admin", owner_role: "partner_admin" }),
+    buildDeal({ id: "user", owner_role: "partner_user" }),
+  ];
+
+  expect(
+    filterDealsByView(deals, {
+      query: "",
+      stage: "all",
+      status: "all",
+      ownerRole: "pam",
+    }).map((deal) => deal.id),
+  ).toEqual(["pam"]);
+});
+
+test("filterDealsByView searches the canonical company name when a deal provides one", () => {
+  const deals = [
+    buildDeal({ id: "company", account_name: "Legacy Account", company_name: "Northwind Ltd" }),
+  ];
+
+  expect(
+    filterDealsByView(deals, {
+      query: "northwind",
+      stage: "all",
+      status: "all",
+    }).map((deal) => deal.id),
+  ).toEqual(["company"]);
+});

@@ -356,6 +356,9 @@ function SignUpForm() {
         // Twilio Verify isn't configured in this environment, so there is no
         // code to wait for — the account is created in one step instead of
         // blocking registration behind an OTP that can never arrive.
+        if (result.bypassed) {
+          toast.info("Phone verification is skipped in local/staging test mode.");
+        }
         await createAccount(null);
         return;
       }

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   assertSuperAdminCaller,
+  buildCatalogOptionDescription,
   resolveDropdownCustomerOwner,
   resolveDropdownScope,
 } from "@/server/dropdown-sources.server";
@@ -74,6 +75,12 @@ test("resolveDropdownCustomerOwner lets super_admin create a customer under any 
 test("assertSuperAdminCaller denies a non-super_admin and allows a super_admin", () => {
   expect(() => assertSuperAdminCaller(auth({ isSuperAdmin: false }))).toThrow("Access denied");
   expect(() => assertSuperAdminCaller(auth({ isSuperAdmin: true }))).not.toThrow();
+});
+
+test("catalogue dropdown descriptions carry the unit price for deal creation", () => {
+  expect(buildCatalogOptionDescription("product", "WC350", "$125.50")).toBe(
+    "product · WC350 · unit price: 125.50 USD",
+  );
 });
 
 // §2.4/§8.7a/§8.8: "Distributor cannot discover an untagged Customer" — the

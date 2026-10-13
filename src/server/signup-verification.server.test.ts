@@ -7,7 +7,10 @@ const TWILIO_KEYS = [
   "TWILIO_AUTH_TOKEN",
   "TWILIO_VERIFY_SERVICE_SID",
 ] as const;
-const originalEnv = Object.fromEntries(TWILIO_KEYS.map((key) => [key, process.env[key]]));
+const SIGNUP_MODE_KEYS = ["SIGNUP_VERIFICATION_BYPASS", "APP_ENV", "NODE_ENV"] as const;
+const originalEnv = Object.fromEntries(
+  [...TWILIO_KEYS, ...SIGNUP_MODE_KEYS].map((key) => [key, process.env[key]]),
+);
 
 function configureTwilio() {
   process.env.TWILIO_ACCOUNT_SID = "AC_test";
@@ -20,10 +23,35 @@ function unconfigureTwilio() {
 }
 
 afterEach(() => {
-  for (const key of TWILIO_KEYS) {
+  for (const key of [...TWILIO_KEYS, ...SIGNUP_MODE_KEYS]) {
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }
+});
+
+test("verification bypass is explicit and limited to local, test, or staging environments", async () => {
+  const {
+    getSignupVerificationCapability,
+    isSignupVerificationRequired,
+  } = await import("@/server/signup-verification.server");
+
+  configureTwilio();
+  process.env.SIGNUP_VERIFICATION_BYPASS = "true";
+  process.env.APP_ENV = "staging";
+  expect(isSignupVerificationRequired()).toBe(false);
+  expect(getSignupVerificationCapability()).toEqual({
+    required: false,
+    configured: true,
+    bypassed: true,
+  });
+
+  process.env.APP_ENV = "production";
+  expect(isSignupVerificationRequired()).toBe(true);
+  expect(getSignupVerificationCapability()).toEqual({
+    required: true,
+    configured: true,
+    bypassed: false,
+  });
 });
 
 /**
@@ -108,6 +136,8 @@ test("an unconfigured deployment reports required:false instead of blocking regi
       harness.deps,
     );
     expect(result.required).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(result.bypassed).toBe(false);
     expect(harness.twilioCalls).toEqual([]);
   } finally {
     harness.restore();

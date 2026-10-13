@@ -1,3 +1,4 @@
+import { newId } from "@/domain/contracts/ids";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -36,6 +37,13 @@ import { Field, FieldGrid } from "@/components/ui/form-dialog";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { supabase } from "@/integrations/local/client";
 import { applyPartnerScope } from "@/lib/partner-scope";
 import {
@@ -72,6 +80,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
+import { isRenewalType, RENEWAL_TYPES } from "@/domain/contracts/reference-data";
 
 type CustomerForm = {
   company_name: string;
@@ -115,8 +124,8 @@ const CUSTOMER_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "account_owner", header: "Account Owner" },
   { key: "region", header: "Region" },
   { key: "segment", header: "Segment" },
-  { key: "health_score", header: "Health Score" },
-  { key: "mrr", header: "MRR" },
+  { key: "health_score", header: "Credibility" },
+  { key: "mrr", header: "Employee Count" },
   { key: "renewal_date", header: "Renewal Date" },
   { key: "status", header: "Status" },
   { key: "next_step", header: "Next Step" },
@@ -214,7 +223,7 @@ function CustomersPage() {
         throw error ?? activityError ?? participantError;
       const rows = ((data as CustomerRecord[] | null) ?? []).map((customer) => ({
         ...customer,
-        renewal_date: toDateInputValue(customer.renewal_date),
+        renewal_date: customer.renewal_date,
       }));
       const activityRows = (activityData as CustomerActivityRecord[] | null) ?? [];
       const participantRows = (participantData as CustomerParticipantRecord[] | null) ?? [];
@@ -342,20 +351,24 @@ function CustomersPage() {
 
   const createCustomer = async () => {
     if (!draft.company_name.trim() || !draft.account_owner.trim() || !draft.renewal_date) {
-      toast.error("Company, owner, and renewal date are required");
+      toast.error("Company, owner, and renewal type are required");
+      return;
+    }
+    if (!isRenewalType(draft.renewal_date)) {
+      toast.error("Renewal type must be LIVEYfy or RC");
       return;
     }
     if (
       draft.health_score !== "" &&
       (!/^[0-9]+$/.test(draft.health_score) || Number(draft.health_score) > 100)
     ) {
-      toast.error("Health score must be a whole number from 0 to 100");
+      toast.error("Credibility must be a whole number from 0 to 100");
       return;
     }
     setAdding(true);
     try {
       const payload = {
-        id: globalThis.crypto.randomUUID(),
+        id: newId(),
         ...draft,
         health_score: Number(draft.health_score) || 0,
         user_id: profile?.id,
@@ -437,7 +450,7 @@ function CustomersPage() {
       segment: selectedCustomer.segment,
       health_score: String(selectedCustomer.health_score),
       mrr: selectedCustomer.mrr,
-      renewal_date: toDateInputValue(selectedCustomer.renewal_date),
+      renewal_date: selectedCustomer.renewal_date,
       status: selectedCustomer.status,
       next_step: selectedCustomer.next_step,
       last_touch: selectedCustomer.last_touch,
@@ -469,7 +482,7 @@ function CustomersPage() {
     try {
       const now = new Date().toISOString();
       const { error: activityError } = await supabase.from("portal_customer_activities").insert({
-        id: globalThis.crypto.randomUUID(),
+        id: newId(),
         customer_id: selectedCustomer.id,
         partner_id: selectedCustomer.partner_id,
         actor_id: profile?.id ?? null,
@@ -598,7 +611,7 @@ function CustomersPage() {
           .update({ customer_id: selectedCustomer.id })
           .eq("customer_id", selectedMergeCandidate.id),
         supabase.from("customer_merge_events").insert({
-          id: globalThis.crypto.randomUUID(),
+          id: newId(),
           partner_id: selectedCustomer.partner_id ?? profile?.partner_id ?? null,
           surviving_customer_id: selectedCustomer.id,
           merged_customer_id: selectedMergeCandidate.id,
@@ -668,7 +681,7 @@ function CustomersPage() {
 
       const now = new Date().toISOString();
       const payloads = validation.rows.map((row) => ({
-        id: globalThis.crypto.randomUUID(),
+        id: newId(),
         ...row,
         user_id: profile?.id ?? null,
         partner_id: profile?.partner_id ?? null,
@@ -840,7 +853,7 @@ function CustomersPage() {
                     }}
                     title={customer.company_name}
                     subtitle={`${customer.account_owner} · ${customer.segment} · ${customer.region}`}
-                    meta={<span>{customer.health_score}% health</span>}
+                    meta={<span>{customer.health_score}% credibility</span>}
                     trailing={
                       <>
                         <span className="text-[13px] font-semibold" data-numeric>
@@ -922,7 +935,7 @@ function CustomersPage() {
                     options={editOptions.segments}
                   />
                 </Field>
-                <Field label="Health score">
+                <Field label="Credibility">
                   <Input
                     type="text"
                     inputMode="numeric"
@@ -938,24 +951,34 @@ function CustomersPage() {
                     }
                   />
                 </Field>
-                <Field label="MRR">
+                <Field label="Employee Count">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.customerMrr}
-                    label="MRR"
+                    label="Employee Count"
                     value={draft.mrr}
                     onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
-                    placeholder="Select or create MRR"
+                    placeholder="Select or create employee count"
                     options={editOptions.mrrs}
                   />
                 </Field>
                 <Field label="Renewal date">
-                  <Input
-                    type="date"
+                  <Select
                     value={draft.renewal_date}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, renewal_date: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, renewal_date: value }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select renewal type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RENEWAL_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Status">
                   <LookupCombobox
@@ -1072,7 +1095,7 @@ function CustomersPage() {
                     options={editOptions.segments}
                   />
                 </Field>
-                <Field label="Health score">
+                <Field label="Credibility">
                   <Input
                     type="text"
                     inputMode="numeric"
@@ -1088,24 +1111,34 @@ function CustomersPage() {
                     }
                   />
                 </Field>
-                <Field label="MRR">
+                <Field label="Employee Count">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.customerMrr}
-                    label="MRR"
+                    label="Employee Count"
                     value={draft.mrr}
                     onValueChange={(value) => setDraft((current) => ({ ...current, mrr: value }))}
-                    placeholder="Select or create MRR"
+                    placeholder="Select or create employee count"
                     options={editOptions.mrrs}
                   />
                 </Field>
                 <Field label="Renewal date">
-                  <Input
-                    type="date"
+                  <Select
                     value={draft.renewal_date}
-                    onChange={(e) =>
-                      setDraft((value) => ({ ...value, renewal_date: e.target.value }))
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, renewal_date: value }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select renewal type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RENEWAL_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Status">
                   <LookupCombobox
@@ -1388,7 +1421,7 @@ function CustomersPage() {
                       segment: selectedCustomer.segment,
                       health_score: String(selectedCustomer.health_score),
                       mrr: selectedCustomer.mrr,
-                      renewal_date: toDateInputValue(selectedCustomer.renewal_date),
+                      renewal_date: selectedCustomer.renewal_date,
                       status: selectedCustomer.status,
                       next_step: selectedCustomer.next_step,
                       last_touch: selectedCustomer.last_touch,

@@ -84,6 +84,10 @@ type TaskRow = {
   title: string;
   assignee_id?: string | null;
   creator_id?: string | null;
+  organization_tenant_id?: string;
+  role_key?: string;
+  geography_ceiling_node_id?: string;
+  tenant_id?: string;
 };
 
 function baseTaskRow(overrides: Partial<TaskRow> = {}): TaskRow {
@@ -97,7 +101,7 @@ function baseTaskRow(overrides: Partial<TaskRow> = {}): TaskRow {
   };
 }
 
-function installFakePool(taskRow: TaskRow | null) {
+function installFakePool(taskRow: TaskRow | null, taskUpdateOverride?: boolean) {
   return async () => {
     const { pool } = await import("@/server/postgres.server");
     const calls: string[] = [];
@@ -129,13 +133,41 @@ function installFakePool(taskRow: TaskRow | null) {
     };
 
     const originalConnect = pool.connect.bind(pool);
+    const originalQuery = pool.query.bind(pool);
     pool.connect = (async () => fakeClient) as typeof pool.connect;
+    pool.query = (async (sql: string) => {
+      if (String(sql).includes("FROM role_permissions")) {
+        return {
+          rows: [
+            {
+              feature_key: "tasks",
+              can_create: true,
+              can_read: true,
+              can_update: true,
+              can_delete: true,
+            },
+          ],
+          rowCount: 1,
+        } as never;
+      }
+      if (String(sql).includes("FROM user_access_overrides")) {
+        return {
+          rows:
+            taskUpdateOverride === undefined
+              ? []
+              : [{ feature_key: "tasks", operation: "update", decision: taskUpdateOverride ? "allow" : "deny" }],
+          rowCount: taskUpdateOverride === undefined ? 0 : 1,
+        } as never;
+      }
+      return { rows: [], rowCount: 0 } as never;
+    }) as typeof pool.query;
 
     return {
       calls,
       updateCalls,
       restore: () => {
         pool.connect = originalConnect as typeof pool.connect;
+        pool.query = originalQuery as typeof pool.query;
       },
     };
   };
@@ -352,4 +384,87 @@ test("createTask requires a non-empty title", async () => {
   const result = await createTask({ actor, data: { title: "   " } });
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+});
+
+test("an in-scope PAM may assign a task to another user", async () => {
+  const assigneeId = "22222222-2222-2222-2222-222222222222";
+  const harness = await installFakePool({
+    ...baseTaskRow(),
+    id: assigneeId,
+    partner_id: "partner-1",
+    organization_tenant_id: "tenant-livey-org",
+    tenant_id: "tenant-livey-org",
+    role_key: "partner_user",
+    geography_ceiling_node_id: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+  })();
+  try {
+  const { createTask } = await import("@/server/task-commands.server");
+  const actor = buildActor({ roleKey: "pam" });
+  const result = await createTask({
+    actor,
+    data: { title: "Review renewal", assigneeId, partnerId: "partner-1" },
+  });
+
+  expect(result.ok).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("task lifecycle remains command-owned", async () => {
+  const { updateTask } = await import("@/server/task-commands.server");
+  const result = await updateTask({
+    actor: buildActor(),
+    taskId: "task-1",
+    patch: { status: "completed" },
+  });
+
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+});
+
+test("an explicit user deny override blocks task updates even when the role allows them", async () => {
+  const userId = "11111111-1111-1111-1111-111111111111";
+  const harness = await installFakePool(
+    baseTaskRow({ creator_id: userId, assignee_id: userId }),
+    false,
+  )();
+  try {
+    const { updateTask } = await import("@/server/task-commands.server");
+    const result = await updateTask({
+      actor: buildActor({ userId, roleKey: "partner_user", partnerId: "partner-1" }),
+      taskId: "task-1",
+      expectedVersion: 2,
+      patch: { title: "Updated title" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("an out-of-scope assignee is rejected by task creation", async () => {
+  const assigneeId = "33333333-3333-3333-3333-333333333333";
+  const harness = await installFakePool({
+    ...baseTaskRow(),
+    id: assigneeId,
+    partner_id: "partner-2",
+    organization_tenant_id: "tenant-livey-org",
+    tenant_id: "tenant-livey-org",
+    role_key: "partner_user",
+    geography_ceiling_node_id: GOVERNANCE_GEOGRAPHY_NODE_IDS.global,
+  })();
+  try {
+  const { createTask } = await import("@/server/task-commands.server");
+  const result = await createTask({
+    actor: buildActor({ roleKey: "partner_admin", partnerId: "partner-1" }),
+    data: { title: "Review renewal", assigneeId, partnerId: "partner-2" },
+  });
+
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+  } finally {
+    harness.restore();
+  }
 });

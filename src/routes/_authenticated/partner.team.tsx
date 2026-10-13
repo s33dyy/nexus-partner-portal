@@ -12,6 +12,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { createBrowserId } from "@/lib/browser-id";
 
 import { CsvExportButton } from "@/components/csv-export-button";
 import { PageHeader } from "@/components/page-header";
@@ -183,7 +184,7 @@ function PartnerTeamPage() {
       if (userError) throw userError;
 
       const payload = {
-        id: userData?.id || crypto.randomUUID(),
+        id: userData?.id || createBrowserId(),
         company_name: companyName,
         full_name: draft.full_name,
         email: draft.email,

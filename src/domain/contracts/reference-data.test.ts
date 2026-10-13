@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { GOVERNED_REFERENCE_BUCKETS } from "@/domain/contracts/reference-data";
+import {
+  GOVERNED_REFERENCE_BUCKETS,
+  RENEWAL_TYPES,
+  getCountryCurrencyCode,
+  isRenewalType,
+} from "@/domain/contracts/reference-data";
 import { ROLE_KEYS } from "@/domain/contracts/taxonomy";
 import { SALES_REGIONS, WORLD_COUNTRIES } from "@/domain/contracts/world-geography";
 
@@ -51,6 +56,15 @@ test("geography.country_currency maps every country to its reference currency", 
     const item = bucket!.items.find((entry) => entry.valueKey === country.code);
     expect(item?.value).toBe(country.currencyCode);
   }
+});
+
+test("reference helpers resolve country currency and restrict renewal types", () => {
+  expect(getCountryCurrencyCode("IN")).toBe("INR");
+  expect(getCountryCurrencyCode("India")).toBe("INR");
+  expect(getCountryCurrencyCode("GB")).toBe("GBP");
+  expect(RENEWAL_TYPES).toEqual(["LIVEYfy", "RC"]);
+  expect(isRenewalType("LIVEYfy")).toBe(true);
+  expect(isRenewalType("2026-10-13")).toBe(false);
 });
 
 test("governance.sales_region partitions every world country exactly once", () => {

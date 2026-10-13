@@ -115,6 +115,8 @@ import {
   type DealStage,
   type TeamMemberRecord,
 } from "@/lib/portal-records";
+import { resolveCountryForText } from "@/domain/contracts/world-geography";
+import { createBrowserId } from "@/lib/browser-id";
 import {
   buildImportSummaryMessage,
   downloadTemplateCsv,
@@ -150,6 +152,7 @@ type DealForm = {
   notes: string;
   is_hidden_to_team: boolean;
   reward_rate_percent: number;
+  catalog_unit_price: number | null;
 };
 
 type DealEditForm = {
@@ -190,7 +193,7 @@ const EMPTY_FORM: DealForm = {
   stage: "sourced",
   quantity: "1",
   amount: "",
-  currency_code: "USD",
+  currency_code: "INR",
   amount_value: null,
   amount_usd: null,
   fx_rate: null,
@@ -206,6 +209,7 @@ const EMPTY_FORM: DealForm = {
   notes: "",
   is_hidden_to_team: false,
   reward_rate_percent: 5,
+  catalog_unit_price: null,
 };
 
 function normalizeCompanyName(value: string | null | undefined) {
@@ -239,6 +243,11 @@ function formatUsdAmount(value: number | null) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value ?? 0);
+}
+
+function catalogUnitPriceFromDescription(description: string | null | undefined) {
+  const match = description?.match(/unit price:\s*([0-9]+(?:\.[0-9]+)?)\s+USD/i);
+  return match ? Number(match[1]) : null;
 }
 
 function dealToEditForm(deal: DealRecord): DealEditForm {
@@ -275,7 +284,7 @@ function uniqueStrings(values: Array<string | null | undefined>) {
 }
 
 const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
-  { key: "account_name", header: "Account" },
+  { key: "account_name", header: "Company" },
   { key: "contact_name", header: "Client" },
   { key: "owner_name", header: "Owner" },
   { key: "country", header: "Country" },
@@ -284,10 +293,10 @@ const DEAL_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "stage", header: "Stage" },
   { key: "status", header: "Status" },
   { key: "quantity", header: "Quantity" },
-  { key: "amount", header: "Amount" },
+  { key: "amount", header: "Price Per Unit" },
   { key: "currency_code", header: "Currency" },
   { key: "amount_usd", header: "USD Equivalent" },
-  { key: "customer_budget", header: "Customer Budget" },
+  { key: "customer_budget", header: "Customer Budget Per Unit" },
   { key: "possible_close_date", header: "Possible Close Date" },
   { key: "close_date", header: "Close Date" },
   { key: "source", header: "Source" },
@@ -967,7 +976,7 @@ function DealsPage() {
     type: string;
   }) => {
     const { error } = await supabase.from("notifications").insert({
-      id: globalThis.crypto.randomUUID(),
+      id: createBrowserId(),
       user_id: deal?.user_id ?? profile?.id ?? null,
       partner_id: profile?.partner_id ?? null,
       title: notificationTitle,
@@ -1241,7 +1250,7 @@ function DealsPage() {
           return [];
         }
 
-        const customerId = globalThis.crypto.randomUUID();
+        const customerId = createBrowserId();
         customerIdByKey.set(resolvedRow.customer_key, customerId);
         return [
           {
@@ -1273,7 +1282,7 @@ function DealsPage() {
       }
 
       const payloads = resolvedRows.map((resolvedRow) => ({
-        id: globalThis.crypto.randomUUID(),
+        id: createBrowserId(),
         partner_id: resolvedRow.partner_id,
         customer_id: customerIdByKey.get(resolvedRow.customer_key) ?? null,
         poc_profile_id: resolvedRow.poc_profile_id,
@@ -1348,7 +1357,9 @@ function DealsPage() {
         ? partnerAdminName || profile?.full_name || draft.owner_name || "Partner Admin"
         : draft.owner_name;
     const amountValue = parseDealAmount(draft.amount);
-    const autoApproved = !requiresSuperAdminApproval(amountValue);
+    const autoApproved = !requiresSuperAdminApproval(
+      draft.currency_code === "USD" ? amountValue : (draft.amount_usd ?? 0),
+    );
 
     if (
       !accountName.trim() ||
@@ -1414,7 +1425,7 @@ function DealsPage() {
       await publishDealNotification({
         notificationTitle: autoApproved ? "Deal auto-approved" : "Deal submitted for review",
         notificationMessage: autoApproved
-          ? `${accountName} was auto-approved because the deal amount is $5,000 or below.`
+          ? `${accountName} was auto-approved because the deal amount is $100 or below.`
           : `${accountName} is waiting for super admin approval.`,
         type: "deal_created",
       });
@@ -2017,7 +2028,7 @@ function DealsPage() {
                 </div>
                 {selectedDealEditing && selectedDealDraft ? (
                   <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Account">
+                    <Field label="Company">
                       <Input
                         value={selectedDealDraft.account_name}
                         onChange={(e) =>
@@ -2119,7 +2130,7 @@ function DealsPage() {
                         }
                       />
                     </Field>
-                    <Field label="Amount">
+                    <Field label="Price Per Unit">
                       <Input
                         type="text"
                         inputMode="decimal"
@@ -2576,14 +2587,18 @@ function DealsPage() {
         <div className="grid gap-3 md:grid-cols-2">
           {(hasRole("super_admin") || hasRole("partner_admin")) && (
             <div className="space-y-2">
-              <Label htmlFor="account_name">Account</Label>
+              <Label htmlFor="account_name">Company</Label>
               <LookupCombobox
                 fieldName={LOOKUP_FIELDS.dealAccount}
                 source="account"
-                label="Account"
+                label="Company"
                 value={draft.account_name}
                 onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, account_name: value }))
+                  setDraft((current) => ({
+                    ...current,
+                    account_name: value,
+                    partner_id: null,
+                  }))
                 }
                 onSelectionChange={(selection) =>
                   setDraft((current) => ({
@@ -2599,7 +2614,7 @@ function DealsPage() {
           )}
           {hasRole("partner_user") && (
             <div className="space-y-2">
-              <Label htmlFor="account_name">Account</Label>
+              <Label htmlFor="account_name">Company</Label>
               <Input
                 value={profile?.full_name ?? draft.account_name}
                 readOnly
@@ -2642,7 +2657,11 @@ function DealsPage() {
                 label="POC"
                 value={draft.owner_name}
                 onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, owner_name: value }))
+                  setDraft((current) => ({
+                    ...current,
+                    owner_name: value,
+                    poc_profile_id: null,
+                  }))
                 }
                 onSelectionChange={(selection) =>
                   setDraft((current) => ({
@@ -2675,6 +2694,7 @@ function DealsPage() {
                   ...current,
                   country: value,
                   region: current.country === value ? current.region : "",
+                  currency_code: resolveCountryForText(value)?.currencyCode ?? "USD",
                 }))
               }
               placeholder="Select a country"
@@ -2711,6 +2731,18 @@ function DealsPage() {
               label="Product"
               value={draft.product}
               onValueChange={(value) => setDraft((current) => ({ ...current, product: value }))}
+              onSelectionChange={(selection) => {
+                const unitPrice = catalogUnitPriceFromDescription(selection?.description);
+                setDraft((current) => ({
+                  ...current,
+                  product: selection?.label ?? current.product,
+                  catalog_unit_price: unitPrice,
+                  amount:
+                    unitPrice == null
+                      ? current.amount
+                      : (unitPrice * Number(current.quantity || 1)).toFixed(2),
+                }));
+              }}
               placeholder="Select or create product or combo"
               source="catalog"
               catalogKind="all"
@@ -2730,6 +2762,12 @@ function DealsPage() {
                 setDraft((current) => ({
                   ...current,
                   quantity: sanitizeWholeNumber(e.target.value),
+                  amount: current.catalog_unit_price
+                    ? (
+                        current.catalog_unit_price *
+                        Number(sanitizeWholeNumber(e.target.value) || 1)
+                      ).toFixed(2)
+                    : current.amount,
                 }))
               }
               placeholder="1"
@@ -2738,13 +2776,14 @@ function DealsPage() {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="amount">Amount</Label>
+            <Label htmlFor="amount">Price Per Unit</Label>
             <Input
               id="amount"
               type="text"
               inputMode="decimal"
               pattern="[0-9]*[.]?[0-9]*"
               value={draft.amount}
+              readOnly={draft.catalog_unit_price != null}
               onChange={(e) =>
                 setDraft((value) => ({ ...value, amount: sanitizeDecimal(e.target.value) }))
               }
@@ -2805,16 +2844,17 @@ function DealsPage() {
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="customer_budget">Customer budget</Label>
-            <LookupCombobox
-              fieldName={LOOKUP_FIELDS.dealCustomerBudget}
-              label="Customer budget"
+            <Input
+              id="customer_budget"
+              inputMode="decimal"
               value={draft.customer_budget}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, customer_budget: value }))
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  customer_budget: sanitizeDecimal(event.target.value),
+                }))
               }
-              placeholder="Select or create budget"
-              options={editOptions.budgets}
-              allowCreate={hasRole("super_admin")}
+              placeholder="0.00"
             />
           </div>
           <div className="space-y-2">

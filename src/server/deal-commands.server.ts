@@ -23,6 +23,7 @@ import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { SALES_REGIONS, resolveCountryForText } from "@/domain/contracts/world-geography";
 import {
   DEAL_STAGE_ORDER,
+  isDealCurrencyCode,
   parseDealAmount,
   requiresSuperAdminApproval,
   type DealStage,
@@ -33,6 +34,7 @@ import {
   type GovernedActor,
   type ResolveGovernedActorInput,
 } from "@/server/governed-actor.server";
+import { hasCapability, loadEffectiveCapabilities } from "@/server/rbac-policy.server";
 
 const DEAL_EVENT_SCHEMA_VERSION = 1;
 const GOVERNANCE_GEOGRAPHY_GRAPH = (() => {
@@ -887,6 +889,45 @@ function resolveRegionForCountry(country: string): string {
   return region?.name ?? "Unassigned";
 }
 
+function parseCatalogUnitPrice(value: unknown): number | null {
+  const numeric = Number.parseFloat(String(value ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+async function loadCatalogUnitPrice(tx: PoolClient, product: string): Promise<number | null> {
+  const { rows } = await tx.query(
+    `SELECT list_price FROM portal_catalog_items
+     WHERE lower(trim(product_name)) = lower(trim($1))
+     ORDER BY updated_at DESC LIMIT 1`,
+    [product],
+  );
+  return parseCatalogUnitPrice((rows[0] as { list_price?: unknown } | undefined)?.list_price);
+}
+
+async function validateDealLookupScope(
+  tx: PoolClient,
+  partnerId: string | null,
+  pocProfileId: string | null,
+): Promise<string | null> {
+  if (partnerId) {
+    const partner = await tx.query(`SELECT id FROM partners WHERE id = $1 LIMIT 1`, [partnerId]);
+    if (partner.rows.length === 0) return "Selected Partner was not found";
+  }
+
+  if (pocProfileId) {
+    const poc = await tx.query(`SELECT id, partner_id FROM profiles WHERE id = $1 LIMIT 1`, [
+      pocProfileId,
+    ]);
+    const row = poc.rows[0] as { partner_id?: string | null } | undefined;
+    if (!row) return "Selected POC was not found";
+    if (partnerId && row.partner_id !== partnerId) {
+      return "Selected POC is outside the selected Partner scope";
+    }
+  }
+
+  return null;
+}
+
 export async function createDeal(input: {
   actor: DealCommandActor;
   data: CreateDealInput;
@@ -911,12 +952,65 @@ export async function createDeal(input: {
     };
   }
 
+  const capabilities = await loadEffectiveCapabilities(
+    input.actor.userId,
+    input.actor.assignment.roleKey,
+  );
+  if (!hasCapability(capabilities, "deals", "create")) {
+    return {
+      ok: false,
+      failure: makePolicyDenial(null, "You do not have permission to create deals"),
+      correlationId,
+    };
+  }
+
   return withTransaction(async (tx) => {
     const resolvedPartnerId = resolveCreatePartnerId(input.actor, data.partnerId ?? null);
     const country = data.country?.trim() || "India";
     const region = data.region?.trim() || resolveRegionForCountry(country);
-    const currencyCode = (data.currencyCode?.trim() || "USD").toUpperCase();
-    const amountValue = data.amountValue ?? parseDealAmount(amount);
+    const governedCountry = resolveCountryForText(country);
+    const currencyCode = (
+      data.currencyCode?.trim() ||
+      governedCountry?.currencyCode ||
+      "USD"
+    ).toUpperCase();
+    if (!isDealCurrencyCode(currencyCode)) {
+      return {
+        ok: false,
+        failure: validationFailure(`Unsupported deal currency: ${currencyCode}`, "currencyCode"),
+        correlationId,
+      };
+    }
+    if (governedCountry && currencyCode !== governedCountry.currencyCode) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          `${country} must use ${governedCountry.currencyCode}`,
+          "currencyCode",
+        ),
+        correlationId,
+      };
+    }
+    const lookupError = await validateDealLookupScope(
+      tx,
+      resolvedPartnerId,
+      data.pocProfileId ?? null,
+    );
+    if (lookupError) {
+      return { ok: false, failure: validationFailure(lookupError), correlationId };
+    }
+    const quantity = data.quantity && data.quantity > 0 ? Math.floor(data.quantity) : 1;
+    const catalogUnitPrice = await loadCatalogUnitPrice(tx, product);
+    if (catalogUnitPrice == null) {
+      return {
+        ok: false,
+        failure: validationFailure("The selected product has no catalogue price", "product"),
+        correlationId,
+      };
+    }
+    const catalogTotal = catalogUnitPrice == null ? null : catalogUnitPrice * quantity;
+    const amountValue = catalogTotal ?? data.amountValue ?? parseDealAmount(amount);
+    const persistedAmount = catalogTotal == null ? amount : catalogTotal.toFixed(2);
     const amountUsd = currencyCode === "USD" ? amountValue : (data.amountUsd ?? null);
     const policy = await authorizeDealActor(
       input.actor,
@@ -935,7 +1029,6 @@ export async function createDeal(input: {
     const stage: DealStage = "sourced";
     const ownerName = data.ownerName?.trim() || (await resolveOwnerName(tx, input.actor.userId));
     const closeDate = data.closeDate || data.possibleCloseDate || todayIsoDate();
-    const quantity = data.quantity && data.quantity > 0 ? Math.floor(data.quantity) : 1;
     const rewardRatePercent = data.rewardRatePercent ?? 5;
     if (!Number.isFinite(rewardRatePercent) || rewardRatePercent < 0 || rewardRatePercent > 100) {
       return {
@@ -969,7 +1062,7 @@ export async function createDeal(input: {
         stage,
         status,
         quantity,
-        amount,
+        persistedAmount,
         currencyCode,
         amountValue,
         amountUsd,
@@ -1016,7 +1109,7 @@ export async function createDeal(input: {
     const creationPayload = {
       accountName,
       product,
-      amount,
+      amount: persistedAmount,
       currencyCode,
       amountUsd,
       source,

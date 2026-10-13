@@ -1,3 +1,4 @@
+import { newId } from "@/domain/contracts/ids";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -19,6 +20,7 @@ import { LookupCombobox } from "@/components/lookup-combobox";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { resolveStatusTone } from "@/lib/status-tone";
+import { createBrowserId } from "@/lib/browser-id";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -290,7 +292,7 @@ function AdminRewardsPage() {
     setCreating(true);
     try {
       const { error } = await supabase.from("reward_catalog_items").insert({
-        id: crypto.randomUUID(),
+        id: createBrowserId(),
         title: draft.title.trim(),
         description: draft.description.trim(),
         image_path: draft.image_path.trim() || null,
@@ -482,7 +484,7 @@ function AdminRewardsPage() {
       const now = new Date().toISOString();
       const { error } = await supabase.from("reward_catalog_items").insert(
         validation.rows.map((row) => ({
-          id: globalThis.crypto.randomUUID(),
+          id: newId(),
           ...row,
           is_seed: false,
           created_at: now,
@@ -528,7 +530,7 @@ function AdminRewardsPage() {
         userId: user.id,
         pointsDelta,
         reason: adjustmentDraft.reason,
-        idempotencyKey: globalThis.crypto.randomUUID(),
+        idempotencyKey: newId(),
       });
       if (!result.ok) throw new Error(result.failure.message);
 

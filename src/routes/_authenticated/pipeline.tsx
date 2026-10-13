@@ -1,3 +1,4 @@
+import { newId } from "@/domain/contracts/ids";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -46,9 +47,15 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
+import {
+  filterDealsByView,
+  getDealCompanyName,
+  type DealOwnerRoleFilter,
+} from "@/lib/deal-filters";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
+import { formatRegionalCurrency } from "@/lib/regional-display";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
@@ -69,7 +76,7 @@ type PipelineColumn = {
 };
 
 const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
-  { key: "account_name", header: "Account" },
+  { key: "account_name", header: "Company" },
   { key: "contact_name", header: "Client" },
   { key: "owner_name", header: "Owner" },
   { key: "country", header: "Country" },
@@ -78,10 +85,10 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "stage", header: "Stage" },
   { key: "status", header: "Status" },
   { key: "quantity", header: "Quantity" },
-  { key: "amount", header: "Amount" },
+  { key: "amount", header: "Price Per Unit" },
   { key: "currency_code", header: "Currency" },
   { key: "amount_usd", header: "USD Equivalent" },
-  { key: "customer_budget", header: "Customer Budget" },
+  { key: "customer_budget", header: "Customer Budget Per Unit" },
   { key: "probability", header: "Probability" },
   { key: "possible_close_date", header: "Possible Close Date" },
   { key: "close_date", header: "Close Date" },
@@ -100,6 +107,7 @@ function PipelinePage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
+  const [ownerRoleFilter, setOwnerRoleFilter] = useState<DealOwnerRoleFilter>("all");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
@@ -136,7 +144,7 @@ function PipelinePage() {
         bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
-      const [dealRes, collaboratorRes, pipelineMetricRes] = await Promise.all([
+      const [dealRes, collaboratorRes, pipelineMetricRes, roleRes] = await Promise.all([
         queryBuilder,
         supabase
           .from("portal_deal_collaborators")
@@ -147,8 +155,16 @@ function PipelinePage() {
         // effective DTP, never the free-text amount — instead of
         // maintaining a third, divergent client-side sum here.
         loadDashboardPipeline(selectedRegion),
+        supabase.from("user_roles").select("user_id, role"),
       ]);
-      if (dealRes.error || collaboratorRes.error) throw dealRes.error ?? collaboratorRes.error;
+      if (dealRes.error || collaboratorRes.error || roleRes.error)
+        throw dealRes.error ?? collaboratorRes.error ?? roleRes.error;
+      const ownerRoles = new Map<string, string>();
+      for (const row of (roleRes.data as Array<{ user_id: string; role: string }> | null) ?? []) {
+        if (["kam", "pam", "partner_admin", "partner_user"].includes(row.role)) {
+          ownerRoles.set(row.user_id, row.role);
+        }
+      }
       const collaboratorRows =
         (collaboratorRes.data as Array<{
           deal_id: string;
@@ -160,6 +176,7 @@ function PipelinePage() {
       const rows = filterVisibleDeals(
         ((dealRes.data as DealRecord[] | null) ?? []).map((deal) => ({
           ...deal,
+          owner_role: deal.user_id ? (ownerRoles.get(deal.user_id) ?? null) : null,
           is_hidden_to_team: Boolean(deal.is_hidden_to_team),
         })),
         collaboratorIdsByDeal,
@@ -205,7 +222,7 @@ function PipelinePage() {
     notificationMessage: string,
   ) => {
     const { error } = await supabase.from("notifications").insert({
-      id: globalThis.crypto.randomUUID(),
+      id: newId(),
       user_id: deal.user_id ?? profile?.id ?? null,
       partner_id: profile?.partner_id ?? null,
       title: notificationTitle,
@@ -225,18 +242,13 @@ function PipelinePage() {
   );
 
   const visibleDeals = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return regionScopedDeals.filter((deal) => {
-      const matchesStage = stageFilter === "all" || deal.stage === stageFilter;
-      const matchesQuery =
-        !term ||
-        [deal.account_name, deal.contact_name, deal.owner_name, deal.region, deal.product]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-      return matchesStage && matchesQuery;
+    return filterDealsByView(regionScopedDeals, {
+      query,
+      stage: stageFilter,
+      status: "all",
+      ownerRole: ownerRoleFilter,
     });
-  }, [regionScopedDeals, query, stageFilter]);
+  }, [regionScopedDeals, query, stageFilter, ownerRoleFilter]);
 
   // Won and Lost share one terminal column.
   //
@@ -627,6 +639,17 @@ function PipelinePage() {
               options={DEAL_STAGE_ORDER.map((stage) => stage)}
               triggerClassName="w-full sm:w-44"
             />
+            <LookupCombobox
+              fieldName="deals.owner_role"
+              label="Owner role"
+              value={ownerRoleFilter === "all" ? "" : ownerRoleFilter}
+              onValueChange={(value) => setOwnerRoleFilter((value as DealOwnerRoleFilter) || "all")}
+              placeholder="All owner roles"
+              clearLabel="All owner roles"
+              allowClear
+              options={["kam", "pam", "partner_admin", "partner_user"]}
+              triggerClassName="w-full sm:w-52"
+            />
           </Toolbar>
         </CardHeader>
         <CardContent className="overflow-x-auto p-4">
@@ -660,8 +683,12 @@ function PipelinePage() {
                         key={deal.id}
                         tone={DEAL_STAGE_TONE[deal.stage]}
                         owner={deal.owner_name}
-                        title={deal.account_name}
-                        amount={deal.amount}
+                        title={getDealCompanyName(deal)}
+                        amount={formatRegionalCurrency(
+                          deal.amount_value ??
+                            (Number.parseFloat(deal.amount.replace(/[^\d.-]/g, "")) || 0),
+                          deal.country,
+                        )}
                         details={
                           <div className="space-y-1.5">
                             {/* The collapsed pill truncates, so the full name

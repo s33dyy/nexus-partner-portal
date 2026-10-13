@@ -237,7 +237,7 @@ function installFakePoolForRegistration(dealRow: DealRow, finalRevisionTotalDtpU
 test("§2.5/§9.1/§9.7: submitDealForRegistration auto-approves without touching stage", async () => {
   const harness = await installFakePoolForRegistration(
     baseDealRow({ stage: "sourced", status: "draft" }),
-    2000,
+    100,
   )();
   try {
     const { submitDealForRegistration } = await import("@/server/deal-commands.server");
@@ -251,7 +251,7 @@ test("§2.5/§9.1/§9.7: submitDealForRegistration auto-approves without touchin
     expect(sql).not.toContain("stage");
     expect(sql).toContain("status");
     expect(sql).toContain("commercial_approved");
-    // status=$1, commercial_approved=$2 — approved + true for a $2,000 deal (below the $5,000 threshold).
+    // status=$1, commercial_approved=$2 — approved + true at the USD 100 boundary.
     expect(harness.updateCalls[0]?.params[0]).toBe("approved");
     expect(harness.updateCalls[0]?.params[1]).toBe(true);
   } finally {
@@ -1091,7 +1091,18 @@ test("resolveDealCommandActor denies when the caller has no active context", asy
   expect(result.ok).toBe(false);
 });
 
-function installFakeCreatePool() {
+function installFakeCreatePool(options: {
+  catalogRow?: { product_name: string; list_price: string } | null;
+  capabilityRows?: Array<{
+    feature_key: string;
+    can_create: boolean;
+    can_read: boolean;
+    can_update: boolean;
+    can_delete: boolean;
+  }>;
+  profilePartnerId?: string | null;
+  partnerExists?: boolean;
+} = {}) {
   return async () => {
     const { pool } = await import("@/server/postgres.server");
     const calls: string[] = [];
@@ -1101,8 +1112,34 @@ function installFakeCreatePool() {
       query: async (sql: string, params?: unknown[]) => {
         const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
         calls.push(verb);
+        if (sql.includes("FROM role_permissions")) {
+          return { rows: options.capabilityRows ?? [], rowCount: options.capabilityRows?.length ?? 0 };
+        }
+        if (sql.includes("FROM user_access_overrides")) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("FROM partners") && sql.includes("WHERE id")) {
+          return options.partnerExists === false
+            ? { rows: [], rowCount: 0 }
+            : { rows: [{ id: params?.[0] }], rowCount: 1 };
+        }
+        if (sql.includes("FROM profiles") && sql.includes("WHERE id")) {
+          return {
+            rows: options.profilePartnerId === "missing" ? [] : [{ id: params?.[0], partner_id: options.profilePartnerId ?? params?.[1] ?? null }],
+            rowCount: options.profilePartnerId === "missing" ? 0 : 1,
+          };
+        }
         if (verb === "INSERT") {
           insertCalls.push({ sql, params: params ?? [] });
+        }
+        if (sql.includes("FROM portal_catalog_items")) {
+          const catalogRow = options.catalogRow === undefined
+            ? { product_name: "WC350", list_price: "$1000" }
+            : options.catalogRow;
+          return {
+            rows: catalogRow ? [catalogRow] : [],
+            rowCount: catalogRow ? 1 : 0,
+          };
         }
         return { rows: [], rowCount: 1 };
       },
@@ -1230,6 +1267,127 @@ test("createDeal always creates a new deal in draft status (auto-approval happen
     }
     const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
     expect(dealInsert?.params[8]).toBe("draft");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal derives the total amount from a catalogue unit price and quantity", async () => {
+  const harness = await installFakeCreatePool({
+    catalogRow: { product_name: "WC350", list_price: "$125.50" },
+  })();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor(),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        ownerName: "Jane Doe",
+        product: "WC350",
+        quantity: 3,
+        amount: "1",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(true);
+    const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
+    expect(dealInsert?.params[10]).toBe("376.50");
+    expect(dealInsert?.params[12]).toBe(376.5);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal rejects a product when the catalogue has no usable price", async () => {
+  const harness = await installFakeCreatePool({ catalogRow: null })();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor(),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        product: "Unknown product",
+        amount: "1",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+    expect(harness.insertCalls).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal consults effective deals.create capability", async () => {
+  const harness = await installFakeCreatePool({
+    capabilityRows: [
+      { feature_key: "deals", can_create: false, can_read: true, can_update: true, can_delete: false },
+    ],
+  })();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor({ roleKey: "rm", teamDomain: "sales" }),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        product: "WC350",
+        amount: "100",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("POLICY_DENIED");
+    expect(harness.insertCalls).toHaveLength(0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal rejects a country and currency combination outside governed data", async () => {
+  const harness = await installFakeCreatePool()();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor(),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        country: "India",
+        currencyCode: "USD",
+        product: "WC350",
+        amount: "100",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("createDeal rejects a POC that is outside the selected Partner scope", async () => {
+  const harness = await installFakeCreatePool({ profilePartnerId: "partner-other" })();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor(),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        partnerId: "partner-1",
+        pocProfileId: "profile-1",
+        product: "WC350",
+        amount: "100",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe("VALIDATION_FAILED");
   } finally {
     harness.restore();
   }

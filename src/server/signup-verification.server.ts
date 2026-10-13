@@ -26,6 +26,13 @@ import {
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_SENDS_PER_WINDOW = 3;
+const SIGNUP_BYPASS_ENVIRONMENTS = new Set(["local", "development", "test", "staging", "preview"]);
+
+export type SignupVerificationCapability = {
+  required: boolean;
+  configured: boolean;
+  bypassed: boolean;
+};
 
 type RateEntry = { count: number; windowStart: number };
 
@@ -61,7 +68,22 @@ export function __resetSignupRateLimit() {
 }
 
 export function isSignupVerificationRequired(): boolean {
-  return isWhatsappVerificationConfigured();
+  return getSignupVerificationCapability().required;
+}
+
+export function getSignupVerificationCapability(): SignupVerificationCapability {
+  const configured = isWhatsappVerificationConfigured();
+  const bypassed = isSignupVerificationBypassed();
+  return { required: !bypassed && configured, configured, bypassed };
+}
+
+export function isSignupVerificationBypassed(): boolean {
+  const environment = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "").trim().toLowerCase();
+  return (
+    process.env.SIGNUP_VERIFICATION_BYPASS === "true" &&
+    SIGNUP_BYPASS_ENVIRONMENTS.has(environment) &&
+    environment !== "production"
+  );
 }
 
 /**
@@ -124,13 +146,14 @@ export async function requestSignupPhoneVerification(
     phoneE164: string;
   },
   deps: VerificationDeps = DEFAULT_DEPS,
-): Promise<{ ok: true; required: boolean }> {
+): Promise<{ ok: true } & SignupVerificationCapability> {
   const phone = normalizePhone(input.phoneE164);
+  const capability = getSignupVerificationCapability();
 
-  if (!isSignupVerificationRequired()) {
+  if (!capability.required) {
     // Nothing to send. The client reads `required: false` and submits the
     // account details directly.
-    return { ok: true, required: false };
+    return { ok: true, ...capability };
   }
 
   if (!isValidE164(phone)) {
@@ -147,7 +170,7 @@ export async function requestSignupPhoneVerification(
   }
 
   await deps.startVerification(phone);
-  return { ok: true, required: true };
+  return { ok: true, ...capability };
 }
 
 export type VerifiedSignUpInput = {
