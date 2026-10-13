@@ -1526,9 +1526,14 @@ function DealsPage() {
       toast.error("Fill in account, client, owner, region, product, amount, and source");
       return;
     }
+    const canReuseExistingConversion =
+      selectedDealDraft.currency_code === selectedDeal.currency_code &&
+      selectedDealDraft.amount === String(parseDealAmount(selectedDeal.amount)) &&
+      Boolean(selectedDeal.amount_usd && selectedDeal.fx_rate);
     if (
       selectedDealDraft.currency_code !== "USD" &&
-      (!selectedDealDraft.amount_usd || !selectedDealDraft.fx_rate)
+      (!selectedDealDraft.amount_usd || !selectedDealDraft.fx_rate) &&
+      !canReuseExistingConversion
     ) {
       toast.error("Wait for the USD conversion to load before saving this deal");
       return;
@@ -1540,7 +1545,8 @@ function DealsPage() {
       const resolvedAmountUsd =
         selectedDealDraft.currency_code === "USD"
           ? resolvedAmountValue
-          : (selectedDealDraft.amount_usd ?? null);
+          : (selectedDealDraft.amount_usd ??
+            (canReuseExistingConversion ? (selectedDeal.amount_usd ?? null) : null));
       const { error } = await supabase
         .from("portal_deals")
         .update({
