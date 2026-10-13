@@ -561,6 +561,7 @@ function TasksPage() {
                       <span>
                         {task.due_at ? `Due ${formatDateTimeLabel(task.due_at)}` : "No due date"}
                       </span>
+                      {task.assignee_name ? <span>Assigned to {task.assignee_name}</span> : null}
                       <button
                         type="button"
                         // An inline text button is still a tap target: give it
