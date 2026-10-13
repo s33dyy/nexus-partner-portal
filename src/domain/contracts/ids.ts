@@ -13,7 +13,8 @@
  * contract modules can use it without inverting the dependency direction.
  */
 export function newId(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
+  const randomUUID = globalThis.crypto?.randomUUID;
+  const uuid = typeof randomUUID === "function" ? randomUUID.call(globalThis.crypto) : undefined;
   if (uuid) return uuid;
   // Only reached on a runtime without WebCrypto. Not cryptographically
   // strong, and deliberately shaped like a UUID so it can't be mistaken for

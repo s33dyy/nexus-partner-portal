@@ -14,7 +14,10 @@ test("createBrowserId returns a UUID-shaped fallback without randomUUID", () => 
     },
   });
 
-  expect(id).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-  );
+  expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test("createBrowserId ignores a non-callable randomUUID property", () => {
+  const id = createBrowserId({ randomUUID: "unsupported" as unknown as () => string });
+  expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });

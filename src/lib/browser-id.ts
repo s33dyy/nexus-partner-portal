@@ -9,7 +9,7 @@ function hexByte(value: number) {
 
 /** Generates an ID in client bundles without importing node:crypto. */
 export function createBrowserId(cryptoApi: BrowserCrypto | undefined = globalThis.crypto) {
-  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
 
   const bytes = new Uint8Array(16);
   if (cryptoApi?.getRandomValues) cryptoApi.getRandomValues(bytes);
