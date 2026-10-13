@@ -5,7 +5,7 @@ import { pool } from "@/server/postgres.server";
 import {
   assertFeatureCapability,
   countriesWithinCeiling,
-  loadRoleCapabilities,
+  loadEffectiveCapabilities,
 } from "@/server/rbac-policy.server";
 
 export type QueryFilter = {
@@ -1233,7 +1233,7 @@ async function assertGovernedFeatureCapability(
   const featureKey = TABLE_FEATURE_MAP[query.table];
   if (!featureKey) return;
 
-  const capabilities = await loadRoleCapabilities(auth.governedRoleKey ?? null);
+  const capabilities = await loadEffectiveCapabilities(auth.userId, auth.governedRoleKey ?? null);
   assertFeatureCapability(capabilities, featureKey, operationToCrud(query.operation));
 }
 

@@ -32,8 +32,13 @@ import {
   type FeatureKey,
 } from "@/domain/contracts/features";
 import { ROLE_KEYS, type RoleKey } from "@/domain/contracts/taxonomy";
-import { saveRolePermissions } from "@/integrations/local/role-permission-commands";
-import { supabase } from "@/integrations/local/client";
+import {
+  loadAccessControlSnapshot,
+  removeUserAccessOverride,
+  saveRolePermissions,
+  saveUserAccessOverride,
+} from "@/integrations/local/role-permission-commands";
+import type { AccessControlSnapshot } from "@/server/rbac-policy.server";
 import { useAuth } from "@/hooks/use-auth";
 
 const CRUD_OPERATIONS: CrudOperation[] = ["create", "read", "update", "delete"];
@@ -63,6 +68,8 @@ type RolePermissionRow = {
   can_delete: boolean;
 };
 
+type AccessSection = "roles" | "users";
+
 export const Route = createFileRoute("/_authenticated/admin/roles")({
   component: AdminRolesPage,
 });
@@ -71,6 +78,9 @@ function AdminRolesPage() {
   const { hasRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [accessSection, setAccessSection] = useState<AccessSection>("roles");
+  const [snapshot, setSnapshot] = useState<AccessControlSnapshot | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [selectedRole, setSelectedRole] = useState<RoleKey>("rm");
   const [capabilitiesByRole, setCapabilitiesByRole] = useState<Record<RoleKey, RoleCapabilities>>(
     {} as Record<RoleKey, RoleCapabilities>,
@@ -79,24 +89,15 @@ function AdminRolesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const permissionsRes = await supabase.from("role_permissions").select("*");
-      if (permissionsRes.error) throw permissionsRes.error;
-
-      const capabilities = {} as Record<RoleKey, RoleCapabilities>;
-      for (const role of ROLE_KEYS) capabilities[role] = emptyCapabilities();
-      for (const row of (permissionsRes.data as RolePermissionRow[] | null) ?? []) {
-        const role = row.role_key as RoleKey;
-        const feature = row.feature_key as FeatureKey;
-        if (!capabilities[role] || !(feature in capabilities[role])) continue;
-        capabilities[role][feature] = {
-          create: row.can_create,
-          read: row.can_read,
-          update: row.can_update,
-          delete: row.can_delete,
-        };
-      }
-
-      setCapabilitiesByRole(capabilities);
+      const loaded = await loadAccessControlSnapshot();
+      setSnapshot(loaded);
+      setCapabilitiesByRole(
+        Object.fromEntries(loaded.roles.map((role) => [role.roleKey, role.capabilities])) as Record<
+          RoleKey,
+          RoleCapabilities
+        >,
+      );
+      setSelectedUserId((current) => current || loaded.users[0]?.userId || "");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load role permissions");
     } finally {
@@ -144,6 +145,19 @@ function AdminRolesPage() {
     }
   };
 
+  const selectedUser = snapshot?.users.find((user) => user.userId === selectedUserId) ?? null;
+  const selectedUserRole = selectedUser?.roleKey ?? null;
+  const userRoleCapabilities = selectedUserRole
+    ? (capabilitiesByRole[selectedUserRole] ?? emptyCapabilities())
+    : emptyCapabilities();
+  const overrideFor = (featureKey: FeatureKey, operation: CrudOperation) =>
+    snapshot?.overrides.find(
+      (override) =>
+        override.userId === selectedUserId &&
+        override.featureKey === featureKey &&
+        override.operation === operation,
+    );
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -165,71 +179,192 @@ function AdminRolesPage() {
         }
       />
 
-      <Card>
-        <CardHeader className="space-y-4 border-b">
-          <div className="space-y-1">
-            <CardTitle>Feature access</CardTitle>
-            <CardDescription>
-              Create, Read, Update, and Delete permission per feature for{" "}
-              {ROLE_KEY_LABELS[selectedRole]}.
-            </CardDescription>
-          </div>
-          <Toolbar>
-            <Label htmlFor="role-select" className="text-xs font-medium">
-              Selected role
-            </Label>
-            <Select
-              value={selectedRole}
-              onValueChange={(value) => setSelectedRole(value as RoleKey)}
-            >
-              <SelectTrigger id="role-select" className="w-64">
-                <SelectValue />
+      <div className="flex gap-2 border-b">
+        <Button
+          variant={accessSection === "roles" ? "secondary" : "ghost"}
+          onClick={() => setAccessSection("roles")}
+        >
+          Role defaults
+        </Button>
+        <Button
+          variant={accessSection === "users" ? "secondary" : "ghost"}
+          onClick={() => setAccessSection("users")}
+        >
+          User access
+        </Button>
+      </div>
+
+      {accessSection === "users" ? (
+        <Card>
+          <CardHeader className="space-y-4 border-b">
+            <div className="space-y-1">
+              <CardTitle>Per-user access</CardTitle>
+              <CardDescription>
+                An explicit Allow or Deny overrides the selected user&apos;s role default. Inherited
+                cells have no user override. Changes apply immediately on the next authorization
+                check.
+              </CardDescription>
+            </div>
+            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+              <SelectTrigger className="w-80">
+                <SelectValue placeholder="Select a user" />
               </SelectTrigger>
               <SelectContent>
-                {ROLE_KEYS.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {ROLE_KEY_LABELS[role]}
+                {(snapshot?.users ?? []).map((user) => (
+                  <SelectItem key={user.userId} value={user.userId}>
+                    {user.fullName || user.email} —{" "}
+                    {user.roleKey ? ROLE_KEY_LABELS[user.roleKey] : "No role"}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-          </Toolbar>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Feature</TableHead>
-                {CRUD_OPERATIONS.map((operation) => (
-                  <TableHead key={operation} className="w-24 text-center">
-                    {CRUD_LABELS[operation]}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {FEATURE_KEYS.map((feature) => (
-                <TableRow key={feature}>
-                  <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+          </CardHeader>
+          <CardContent className="p-0">
+            {selectedUser ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Feature</TableHead>
+                    {CRUD_OPERATIONS.map((operation) => (
+                      <TableHead key={operation} className="w-40 text-center">
+                        {CRUD_LABELS[operation]}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {FEATURE_KEYS.map((feature) => (
+                    <TableRow key={feature}>
+                      <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+                      {CRUD_OPERATIONS.map((operation) => {
+                        const override = overrideFor(feature, operation);
+                        const value = override?.decision ?? "inherited";
+                        return (
+                          <TableCell key={operation} className="text-center">
+                            <Select
+                              value={value}
+                              onValueChange={async (decision) => {
+                                setSaving(true);
+                                try {
+                                  const result =
+                                    decision === "inherited"
+                                      ? await removeUserAccessOverride({
+                                          userId: selectedUserId,
+                                          featureKey: feature,
+                                          operation,
+                                        })
+                                      : await saveUserAccessOverride({
+                                          userId: selectedUserId,
+                                          featureKey: feature,
+                                          operation,
+                                          decision: decision as "allow" | "deny",
+                                        });
+                                  if (!result.ok) toast.error(result.message);
+                                  else await load();
+                                } finally {
+                                  setSaving(false);
+                                }
+                              }}
+                              disabled={saving || !selectedUserRole}
+                            >
+                              <SelectTrigger
+                                aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="inherited">
+                                  Inherited (
+                                  {userRoleCapabilities[feature]?.[operation]
+                                    ? "Allowed"
+                                    : "Denied"}
+                                  )
+                                </SelectItem>
+                                <SelectItem value="allow">Explicit allow</SelectItem>
+                                <SelectItem value="deny">Explicit deny</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="p-6 text-sm text-muted-foreground">No users available.</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {accessSection === "roles" ? (
+        <Card>
+          <CardHeader className="space-y-4 border-b">
+            <div className="space-y-1">
+              <CardTitle>Feature access</CardTitle>
+              <CardDescription>
+                Create, Read, Update, and Delete permission per feature for{" "}
+                {ROLE_KEY_LABELS[selectedRole]}.
+              </CardDescription>
+            </div>
+            <Toolbar>
+              <Label htmlFor="role-select" className="text-xs font-medium">
+                Selected role
+              </Label>
+              <Select
+                value={selectedRole}
+                onValueChange={(value) => setSelectedRole(value as RoleKey)}
+              >
+                <SelectTrigger id="role-select" className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_KEYS.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {ROLE_KEY_LABELS[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+            </Toolbar>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Feature</TableHead>
                   {CRUD_OPERATIONS.map((operation) => (
-                    <TableCell key={operation} className="text-center">
-                      <Checkbox
-                        className="mx-auto"
-                        aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
-                        checked={draftCapabilities[feature]?.[operation] ?? false}
-                        onCheckedChange={(value) =>
-                          setCapability(feature, operation, value === true)
-                        }
-                      />
-                    </TableCell>
+                    <TableHead key={operation} className="w-24 text-center">
+                      {CRUD_LABELS[operation]}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {FEATURE_KEYS.map((feature) => (
+                  <TableRow key={feature}>
+                    <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+                    {CRUD_OPERATIONS.map((operation) => (
+                      <TableCell key={operation} className="text-center">
+                        <Checkbox
+                          className="mx-auto"
+                          aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
+                          checked={draftCapabilities[feature]?.[operation] ?? false}
+                          onCheckedChange={(value) =>
+                            setCapability(feature, operation, value === true)
+                          }
+                        />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

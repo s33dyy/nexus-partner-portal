@@ -7,7 +7,12 @@ import {
   type GeographyGraph,
 } from "@/domain/contracts/governance";
 import { WORLD_COUNTRIES } from "@/domain/contracts/world-geography";
-import { FEATURE_KEYS, type CrudOperation, type FeatureKey } from "@/domain/contracts/features";
+import {
+  FEATURE_KEYS,
+  type AccessDecision,
+  type CrudOperation,
+  type FeatureKey,
+} from "@/domain/contracts/features";
 import type { RoleKey } from "@/domain/contracts/taxonomy";
 import { pool } from "@/server/postgres.server";
 
@@ -22,6 +27,34 @@ const GEOGRAPHY_GRAPH: GeographyGraph = (() => {
 })();
 
 export type FeatureCapabilities = Record<FeatureKey, Record<CrudOperation, boolean>>;
+
+export type EffectiveCapabilityInput = {
+  role: RoleKey;
+  feature: FeatureKey;
+  operation: CrudOperation;
+  roleAllowed: boolean;
+  userOverride: boolean | null;
+};
+
+export type AccessControlSnapshot = {
+  roles: Array<{
+    roleKey: RoleKey;
+    capabilities: FeatureCapabilities;
+  }>;
+  users: Array<{ userId: string; fullName: string; email: string; roleKey: RoleKey | null }>;
+  overrides: Array<{
+    userId: string;
+    featureKey: FeatureKey;
+    operation: CrudOperation;
+    decision: AccessDecision;
+    updatedAt: string;
+  }>;
+};
+
+export function resolveEffectiveCapability(input: EffectiveCapabilityInput): boolean {
+  if (input.role === "super_admin") return true;
+  return input.userOverride ?? input.roleAllowed;
+}
 
 function emptyCapabilities(): FeatureCapabilities {
   const capabilities = {} as FeatureCapabilities;
@@ -76,6 +109,40 @@ export async function loadRoleCapabilities(roleKey: RoleKey | null): Promise<Fea
       update: row.can_update,
       delete: row.can_delete,
     };
+  }
+
+  return capabilities;
+}
+
+export async function loadEffectiveCapabilities(
+  userId: string | null,
+  roleKey: RoleKey | null,
+): Promise<FeatureCapabilities> {
+  const capabilities = await loadRoleCapabilities(roleKey);
+  if (!userId || !roleKey || roleKey === "super_admin") return capabilities;
+
+  const { rows } = await pool.query(
+    `SELECT feature_key, operation, decision
+     FROM user_access_overrides
+     WHERE user_id = $1`,
+    [userId],
+  );
+
+  for (const row of rows as Array<{
+    feature_key: string;
+    operation: string;
+    decision: AccessDecision;
+  }>) {
+    if (!(row.feature_key in capabilities)) continue;
+    if (!["create", "read", "update", "delete"].includes(row.operation)) continue;
+    capabilities[row.feature_key as FeatureKey][row.operation as CrudOperation] =
+      resolveEffectiveCapability({
+        role: roleKey,
+        feature: row.feature_key as FeatureKey,
+        operation: row.operation as CrudOperation,
+        roleAllowed: capabilities[row.feature_key as FeatureKey][row.operation as CrudOperation],
+        userOverride: row.decision === "allow",
+      });
   }
 
   return capabilities;

@@ -47,6 +47,16 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
 
 export type CrudOperation = "create" | "read" | "update" | "delete";
 
+export type AccessDecision = "allow" | "deny";
+
+export type UserAccessOverride = {
+  userId: string;
+  featureKey: FeatureKey;
+  operation: CrudOperation;
+  decision: AccessDecision;
+  updatedAt?: string;
+};
+
 /** product.md §1.4: the product serves exactly two team domains — the LIVEY
  * internal domain and the Partner external domain. Membership is a property
  * of the governed role and is *never* inferred from email domain, company

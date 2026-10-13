@@ -19,6 +19,7 @@ import {
   FEATURE_KEYS,
   ROLE_KEY_TEAM_DOMAIN,
   isLegacyAppRoleKey,
+  type AccessDecision,
   type CrudOperation,
   type FeatureKey,
 } from "@/domain/contracts/features";
@@ -26,6 +27,11 @@ import { createCorrelationId } from "@/domain/contracts/telemetry";
 import { appendOutboxEnvelope, withTransaction } from "@/server/command-runtime.server";
 import type { GovernedActor } from "@/server/governed-actor.server";
 import { revokeUserSessionsAndContexts } from "@/server/livey-service.server";
+import {
+  loadEffectiveCapabilities,
+  loadRoleCapabilities,
+  type AccessControlSnapshot,
+} from "@/server/rbac-policy.server";
 
 const ASSIGNMENT_EVENT_SCHEMA_VERSION = 1;
 
@@ -322,6 +328,186 @@ export type SaveRolePermissionsInput = {
 export type SaveRolePermissionsResult =
   | { ok: true; correlationId: string }
   | { ok: false; failure: ReturnType<typeof makePolicyDenial>; correlationId: string };
+
+export type SaveUserAccessOverrideInput = {
+  actor: GovernedActor;
+  userId: string;
+  featureKey: FeatureKey;
+  operation: CrudOperation;
+  decision: AccessDecision;
+  reason?: string | null;
+};
+
+export type SaveUserAccessOverrideResult =
+  | { ok: true; correlationId: string }
+  | { ok: false; failure: ReturnType<typeof makePolicyDenial>; correlationId: string };
+
+export type RemoveUserAccessOverrideInput = Omit<SaveUserAccessOverrideInput, "decision">;
+
+function authorizeAccessControl(actor: GovernedActor) {
+  const policy = authorizeAssignRole(actor);
+  if (!policy.allowed) return policy;
+  return { allowed: true as const, reason: null };
+}
+
+export async function loadAccessControlSnapshot(
+  actor: GovernedActor,
+): Promise<AccessControlSnapshot> {
+  const policy = authorizeAccessControl(actor);
+  if (!policy.allowed) throw new Error(policy.denial.message);
+
+  const { rows: userRows } = await import("@/server/postgres.server").then(({ pool }) =>
+    pool.query(
+      `SELECT p.id AS user_id, p.full_name, p.email, a.role_key
+       FROM profiles p
+       LEFT JOIN LATERAL (
+         SELECT role_key FROM assignments
+         WHERE user_id = p.id AND status = 'active'
+         ORDER BY valid_from DESC LIMIT 1
+       ) a ON true
+       ORDER BY p.full_name, p.email`,
+    ),
+  );
+  const { rows: overrideRows } = await import("@/server/postgres.server").then(({ pool }) =>
+    pool.query(
+      `SELECT user_id, feature_key, operation, decision, updated_at
+       FROM user_access_overrides ORDER BY updated_at DESC`,
+    ),
+  );
+
+  const roleKeys = ROLE_KEYS;
+  const roles = await Promise.all(
+    roleKeys.map(async (roleKey) => ({
+      roleKey,
+      capabilities: await loadRoleCapabilities(roleKey),
+    })),
+  );
+  return {
+    roles,
+    users: (userRows as Array<Record<string, unknown>>).map((row) => ({
+      userId: String(row.user_id),
+      fullName: String(row.full_name ?? ""),
+      email: String(row.email ?? ""),
+      roleKey: (row.role_key as RoleKey | null) ?? null,
+    })),
+    overrides: (overrideRows as Array<Record<string, unknown>>).map((row) => ({
+      userId: String(row.user_id),
+      featureKey: row.feature_key as FeatureKey,
+      operation: row.operation as CrudOperation,
+      decision: row.decision as AccessDecision,
+      updatedAt: String(row.updated_at),
+    })),
+  };
+}
+
+export async function loadEffectiveUserCapabilities(input: {
+  actor: GovernedActor;
+  userId: string;
+  roleKey: RoleKey;
+}) {
+  const policy = authorizeAccessControl(input.actor);
+  if (!policy.allowed) throw new Error(policy.denial.message);
+  return loadEffectiveCapabilities(input.userId, input.roleKey);
+}
+
+function isFeatureKey(value: string): value is FeatureKey {
+  return (FEATURE_KEYS as readonly string[]).includes(value);
+}
+
+function isCrudOperation(value: string): value is CrudOperation {
+  return ["create", "read", "update", "delete"].includes(value);
+}
+
+export async function saveUserAccessOverride(
+  input: SaveUserAccessOverrideInput,
+): Promise<SaveUserAccessOverrideResult> {
+  const correlationId = createCorrelationId();
+  if (!isFeatureKey(input.featureKey) || !isCrudOperation(input.operation)) {
+    return {
+      ok: false,
+      failure: makePolicyDenial(null, "Unknown access-control field"),
+      correlationId,
+    };
+  }
+  const policy = authorizeAccessControl(input.actor);
+  if (!policy.allowed) return { ok: false, failure: policy.denial, correlationId };
+
+  return withTransaction(async (tx) => {
+    const { rows } = await tx.query(`SELECT id FROM profiles WHERE id = $1 LIMIT 1`, [
+      input.userId,
+    ]);
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        failure: makePolicyDenial(null, "User is not accessible"),
+        correlationId,
+      };
+    }
+    await tx.query(
+      `INSERT INTO user_access_overrides (user_id, feature_key, operation, decision, updated_by)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id, feature_key, operation)
+       DO UPDATE SET decision = EXCLUDED.decision, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [input.userId, input.featureKey, input.operation, input.decision, input.actor.userId],
+    );
+    await appendOutboxEnvelope(
+      tx,
+      createOutboxEnvelope({
+        eventName: "identity.user_access_override_updated",
+        schemaVersion: ASSIGNMENT_EVENT_SCHEMA_VERSION,
+        aggregateType: "user_access_override",
+        aggregateId: `${input.userId}:${input.featureKey}:${input.operation}`,
+        tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+        organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+        actorUserId: input.actor.userId,
+        assignmentId: input.actor.assignment.assignmentId,
+        correlationId,
+        idempotencyKey: null,
+        publishAfter: null,
+        payload: {
+          userId: input.userId,
+          featureKey: input.featureKey,
+          operation: input.operation,
+          decision: input.decision,
+        },
+      }),
+    );
+    return { ok: true, correlationId };
+  });
+}
+
+export async function removeUserAccessOverride(
+  input: RemoveUserAccessOverrideInput,
+): Promise<SaveUserAccessOverrideResult> {
+  const correlationId = createCorrelationId();
+  const policy = authorizeAccessControl(input.actor);
+  if (!policy.allowed) return { ok: false, failure: policy.denial, correlationId };
+  return withTransaction(async (tx) => {
+    await tx.query(
+      `DELETE FROM user_access_overrides
+       WHERE user_id = $1 AND feature_key = $2 AND operation = $3`,
+      [input.userId, input.featureKey, input.operation],
+    );
+    await appendOutboxEnvelope(
+      tx,
+      createOutboxEnvelope({
+        eventName: "identity.user_access_override_removed",
+        schemaVersion: ASSIGNMENT_EVENT_SCHEMA_VERSION,
+        aggregateType: "user_access_override",
+        aggregateId: `${input.userId}:${input.featureKey}:${input.operation}`,
+        tenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+        organizationTenantId: GOVERNANCE_TENANT_IDS.liveyOrganization,
+        actorUserId: input.actor.userId,
+        assignmentId: input.actor.assignment.assignmentId,
+        correlationId,
+        idempotencyKey: null,
+        publishAfter: null,
+        payload: { userId: input.userId, featureKey: input.featureKey, operation: input.operation },
+      }),
+    );
+    return { ok: true, correlationId };
+  });
+}
 
 /** Replaces a role's feature-permission matrix (Create/Read/Update/Delete
  * per feature). Region access is deliberately NOT configured here — it
