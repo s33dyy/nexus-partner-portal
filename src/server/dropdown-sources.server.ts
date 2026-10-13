@@ -210,14 +210,28 @@ export async function listDropdownSourceValues(input: {
 
     sql += ` ORDER BY updated_at DESC, product_name ASC`;
     const result = await pool.query(sql, values);
-    return result.rows.map((row) => ({
+    const catalogRows =
+      result.rows.length > 0
+        ? result.rows
+        : (
+            await pool.query(
+              `SELECT DISTINCT ON (product) id, product AS label, amount, currency_code
+           FROM portal_deals
+           WHERE product IS NOT NULL AND product <> ''
+           ORDER BY product, updated_at DESC`,
+            )
+          ).rows;
+    return catalogRows.map((row) => ({
       id: String(row.id ?? ""),
       label: String(row.label ?? row.product_name ?? ""),
-      description: buildCatalogOptionDescription(
-        getCatalogKindLabel(normalizeCatalogKind(row.catalog_kind as string | null)),
-        row.sku == null ? null : String(row.sku),
-        row.list_price as string | null,
-      ),
+      description:
+        "product_name" in row
+          ? buildCatalogOptionDescription(
+              getCatalogKindLabel(normalizeCatalogKind(row.catalog_kind as string | null)),
+              row.sku == null ? null : String(row.sku),
+              row.list_price as string | null,
+            )
+          : `product · unit price: ${String(row.amount ?? "")} ${String(row.currency_code ?? "USD")}`,
       source: input.source,
     }));
   }
@@ -253,7 +267,18 @@ export async function listDropdownSourceValues(input: {
     }
     sql += ` ORDER BY company_name ASC`;
     const result = await pool.query(sql, values);
-    return result.rows.map((row) => toOption(row, input.source));
+    if (result.rows.length > 0) return result.rows.map((row) => toOption(row, input.source));
+    if (scopedPartnerId || scopedUserId) return [];
+    const fallback = await pool.query(
+      `SELECT id, company_name AS label, email AS description
+       FROM profiles
+       WHERE company_name IS NOT NULL AND company_name <> ''
+       ORDER BY company_name ASC`,
+    );
+    return fallback.rows.map((row) => ({
+      ...toOption(row, input.source),
+      id: `profile:${String(row.id)}`,
+    }));
   }
 
   if (input.source === "client") {

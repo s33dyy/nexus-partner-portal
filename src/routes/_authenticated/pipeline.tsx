@@ -643,11 +643,15 @@ function PipelinePage() {
               fieldName="deals.owner_role"
               label="Owner role"
               value={ownerRoleFilter === "all" ? "" : ownerRoleFilter}
-              onValueChange={(value) => setOwnerRoleFilter((value as DealOwnerRoleFilter) || "all")}
+              onValueChange={(value) =>
+                setOwnerRoleFilter(
+                  (value || "all").toLowerCase().replaceAll(" ", "_") as DealOwnerRoleFilter,
+                )
+              }
               placeholder="All owner roles"
               clearLabel="All owner roles"
               allowClear
-              options={["kam", "pam", "partner_admin", "partner_user"]}
+              options={["KAM", "PAM", "Partner Admin", "Partner User"]}
               triggerClassName="w-full sm:w-52"
             />
           </Toolbar>

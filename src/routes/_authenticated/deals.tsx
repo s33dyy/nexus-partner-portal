@@ -80,7 +80,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
-import { filterDealsByView, type DealListStatusFilter } from "@/lib/deal-filters";
+import {
+  filterDealsByView,
+  type DealListStatusFilter,
+  type DealOwnerRoleFilter,
+} from "@/lib/deal-filters";
 import {
   buildDealCollaboratorPayloads,
   isDealCollaboratorEditingLocked,
@@ -323,6 +327,7 @@ const dealSearchSchema = z.object({
   q: z.string().optional(),
   stage: z.enum(["all", ...DEAL_STAGE_ORDER]).optional(),
   status: z.enum(DEAL_STATUS_FILTER_OPTIONS).optional(),
+  ownerRole: z.enum(["all", "kam", "pam", "partner_admin", "partner_user"]).optional(),
 });
 
 export const Route = createFileRoute("/_authenticated/deals")({
@@ -394,6 +399,7 @@ function DealsPage() {
   const query = search.q ?? "";
   const stageFilter = search.stage ?? "all";
   const statusFilter = search.status ?? "all";
+  const ownerRoleFilter = search.ownerRole ?? "all";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -645,8 +651,35 @@ function DealsPage() {
     };
   }, [hasRole]);
 
+  useEffect(() => {
+    if (!createOpen || !draft.product || draft.catalog_unit_price != null) return;
+    let active = true;
+    void listDropdownSourceValues({ source: "catalog", catalogKind: "all" }).then((options) => {
+      if (!active) return;
+      const selected = options.find(
+        (option) => option.label.trim().toLowerCase() === draft.product.trim().toLowerCase(),
+      );
+      const match = selected?.description?.match(/unit price:\s*([0-9]+(?:\.[0-9]+)?)/i);
+      const unitPrice = match ? Number(match[1]) : null;
+      if (unitPrice == null || !Number.isFinite(unitPrice)) return;
+      setDraft((current) => ({
+        ...current,
+        catalog_unit_price: unitPrice,
+        amount: (unitPrice * Number(current.quantity || 1)).toFixed(2),
+      }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [createOpen, draft.catalog_unit_price, draft.product, draft.quantity]);
+
   const updateListFilters = useCallback(
-    (next: { q?: string; stage?: DealStage | "all"; status?: DealListStatusFilter }) => {
+    (next: {
+      q?: string;
+      stage?: DealStage | "all";
+      status?: DealListStatusFilter;
+      ownerRole?: DealOwnerRoleFilter;
+    }) => {
       void navigate({
         to: "/deals",
         replace: true,
@@ -665,6 +698,12 @@ function DealsPage() {
                 ? undefined
                 : next.status
               : current.status,
+          ownerRole:
+            next.ownerRole !== undefined
+              ? next.ownerRole === "all"
+                ? undefined
+                : next.ownerRole
+              : current.ownerRole,
         }),
       });
     },
@@ -712,8 +751,9 @@ function DealsPage() {
       query,
       stage: stageFilter,
       status: statusFilter,
+      ownerRole: ownerRoleFilter,
     });
-  }, [regionScopedDeals, query, stageFilter, statusFilter]);
+  }, [regionScopedDeals, query, stageFilter, statusFilter, ownerRoleFilter]);
 
   const groupedDeals = useMemo(() => {
     const byStage = new Map<DealStage, DealRecord[]>();
@@ -1908,6 +1948,24 @@ function DealsPage() {
               options={DEAL_STATUS_FILTER_OPTIONS.filter((option) => option !== "all")}
               triggerClassName="w-44"
             />
+            <LookupCombobox
+              fieldName="deals.owner_role"
+              label="Owner role"
+              value={ownerRoleFilter === "all" ? "" : ownerRoleFilter}
+              onValueChange={(value) =>
+                updateListFilters({
+                  ownerRole: (value || "all")
+                    .toLowerCase()
+                    .replaceAll(" ", "_") as DealOwnerRoleFilter,
+                })
+              }
+              placeholder="All owner roles"
+              clearLabel="All owner roles"
+              allowClear
+              allowCreate={false}
+              options={["KAM", "PAM", "Partner Admin", "Partner User"]}
+              triggerClassName="w-52"
+            />
           </Toolbar>
         </CardHeader>
         <CardContent className="p-0">
@@ -2603,7 +2661,9 @@ function DealsPage() {
                 onSelectionChange={(selection) =>
                   setDraft((current) => ({
                     ...current,
-                    partner_id: selection?.id ?? null,
+                    partner_id: selection?.id?.startsWith("profile:")
+                      ? null
+                      : (selection?.id ?? null),
                     account_name: selection?.label ?? current.account_name,
                   }))
                 }
