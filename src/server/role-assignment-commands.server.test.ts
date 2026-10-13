@@ -227,3 +227,34 @@ test("saveRolePermissions no longer accepts or touches geography — feature mat
     harness.restore();
   }
 });
+
+test("saveRolePermissions rejects structural super_admin defaults", async () => {
+  const harness = await installFakePool({})();
+  try {
+    const { saveRolePermissions } = await import("@/server/role-assignment-commands.server");
+    const { FEATURE_KEYS } = await import("@/domain/contracts/features");
+    const capabilities = Object.fromEntries(
+      FEATURE_KEYS.map((key) => [
+        key,
+        { create: false, read: false, update: false, delete: false },
+      ]),
+    ) as Record<
+      (typeof FEATURE_KEYS)[number],
+      { create: boolean; read: boolean; update: boolean; delete: boolean }
+    >;
+
+    const result = await saveRolePermissions({
+      actor: buildActor(),
+      roleKey: "super_admin",
+      capabilities,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("POLICY_DENIED");
+      expect(result.failure.reason).toContain("structural");
+    }
+  } finally {
+    harness.restore();
+  }
+});

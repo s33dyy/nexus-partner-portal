@@ -532,6 +532,14 @@ export async function saveRolePermissions(
   }
   const roleKey = input.roleKey;
 
+  if (roleKey === "super_admin") {
+    return {
+      ok: false,
+      failure: makePolicyDenial(null, "Super Admin defaults are structural and read-only"),
+      correlationId,
+    };
+  }
+
   const policy = authorizeAssignRole(input.actor);
   if (!policy.allowed) {
     return { ok: false, failure: policy.denial, correlationId };

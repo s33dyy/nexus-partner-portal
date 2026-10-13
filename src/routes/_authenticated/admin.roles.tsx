@@ -116,6 +116,7 @@ function AdminRolesPage() {
   }
 
   const setCapability = (feature: FeatureKey, operation: CrudOperation, value: boolean) => {
+    if (selectedRole === "super_admin") return;
     setCapabilitiesByRole((current) => ({
       ...current,
       [selectedRole]: {
@@ -172,9 +173,14 @@ function AdminRolesPage() {
           </>
         }
         actions={
-          <Button onClick={() => void save()} disabled={saving || loading}>
+          <Button
+            onClick={() => void save()}
+            disabled={saving || loading || selectedRole === "super_admin"}
+          >
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Save {ROLE_KEY_LABELS[selectedRole]} permissions
+            {selectedRole === "super_admin"
+              ? "Super Admin defaults are read-only"
+              : `Save ${ROLE_KEY_LABELS[selectedRole]} permissions`}
           </Button>
         }
       />
@@ -305,7 +311,10 @@ function AdminRolesPage() {
               <CardTitle>Feature access</CardTitle>
               <CardDescription>
                 Create, Read, Update, and Delete permission per feature for{" "}
-                {ROLE_KEY_LABELS[selectedRole]}.
+                {ROLE_KEY_LABELS[selectedRole]}.{" "}
+                {selectedRole === "super_admin"
+                  ? "Super Admin has structural full access and cannot be edited."
+                  : ""}
               </CardDescription>
             </div>
             <Toolbar>
@@ -352,6 +361,7 @@ function AdminRolesPage() {
                           className="mx-auto"
                           aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
                           checked={draftCapabilities[feature]?.[operation] ?? false}
+                          disabled={selectedRole === "super_admin"}
                           onCheckedChange={(value) =>
                             setCapability(feature, operation, value === true)
                           }
