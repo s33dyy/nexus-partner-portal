@@ -24,6 +24,8 @@ Deliver the requested CRM fixes as one coordinated release while preserving the 
 - `super_admin` has functional add/edit/delete access anywhere the product exposes those capabilities.
 - `super_admin`, `rm`, `kam`, `pam`, and `partner_admin` may create tasks for other users, subject to scope checks.
 - Pipeline and Deals receive advanced filters for KAM, PAM, Partner Admin, and Partner User, backed by the same scoped query model.
+- Task List access is governed by the same CRUD matrix and additionally supports user-based access rules for who may view, create, update, and delete tasks.
+- The admin access-control panel manages both role-level CRUD defaults and explicit per-user overrides, with an effective-access preview and server-side audit trail.
 
 ### Deal workflow
 
@@ -47,6 +49,8 @@ Use additive, compatibility-preserving changes:
 3. Update commands and route loaders/actions to use those helpers.
 4. Update UI labels, forms, filters, and exports to the new terminology and capability state.
 5. Add focused tests before broad verification.
+
+The access-control model is additive: role permissions remain the default, an explicit user rule overrides the role for that feature/operation, and absent user rules inherit the role. Super Admin administration is structural and cannot be removed through its own editable matrix. Task lifecycle transitions remain command-owned even when ordinary task CRUD is granted.
 
 Existing security boundaries remain authoritative on the server. UI visibility is treated as a convenience only and never as authorization.
 
