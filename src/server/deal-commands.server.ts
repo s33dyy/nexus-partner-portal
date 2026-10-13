@@ -901,7 +901,21 @@ async function loadCatalogUnitPrice(tx: PoolClient, product: string): Promise<nu
      ORDER BY updated_at DESC LIMIT 1`,
     [product],
   );
-  return parseCatalogUnitPrice((rows[0] as { list_price?: unknown } | undefined)?.list_price);
+  const directPrice = parseCatalogUnitPrice(
+    (rows[0] as { list_price?: unknown } | undefined)?.list_price,
+  );
+  if (directPrice != null) return directPrice;
+
+  // Some deployed workspaces contain legacy deal rows but an empty catalogue.
+  // Keep creation consistent with the visible catalogue fallback used by the
+  // form until the catalogue is backfilled.
+  const fallback = await tx.query(
+    `SELECT amount FROM portal_deals
+     WHERE lower(trim(product)) = lower(trim($1))
+     ORDER BY updated_at DESC LIMIT 1`,
+    [product],
+  );
+  return parseCatalogUnitPrice((fallback.rows[0] as { amount?: unknown } | undefined)?.amount);
 }
 
 async function validateDealLookupScope(

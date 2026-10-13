@@ -1091,18 +1091,21 @@ test("resolveDealCommandActor denies when the caller has no active context", asy
   expect(result.ok).toBe(false);
 });
 
-function installFakeCreatePool(options: {
-  catalogRow?: { product_name: string; list_price: string } | null;
-  capabilityRows?: Array<{
-    feature_key: string;
-    can_create: boolean;
-    can_read: boolean;
-    can_update: boolean;
-    can_delete: boolean;
-  }>;
-  profilePartnerId?: string | null;
-  partnerExists?: boolean;
-} = {}) {
+function installFakeCreatePool(
+  options: {
+    catalogRow?: { product_name: string; list_price: string } | null;
+    legacyDealRow?: { product: string; amount: string } | null;
+    capabilityRows?: Array<{
+      feature_key: string;
+      can_create: boolean;
+      can_read: boolean;
+      can_update: boolean;
+      can_delete: boolean;
+    }>;
+    profilePartnerId?: string | null;
+    partnerExists?: boolean;
+  } = {},
+) {
   return async () => {
     const { pool } = await import("@/server/postgres.server");
     const calls: string[] = [];
@@ -1113,7 +1116,10 @@ function installFakeCreatePool(options: {
         const verb = sql.trim().split(/\s+/)[0]?.toUpperCase();
         calls.push(verb);
         if (sql.includes("FROM role_permissions")) {
-          return { rows: options.capabilityRows ?? [], rowCount: options.capabilityRows?.length ?? 0 };
+          return {
+            rows: options.capabilityRows ?? [],
+            rowCount: options.capabilityRows?.length ?? 0,
+          };
         }
         if (sql.includes("FROM user_access_overrides")) {
           return { rows: [], rowCount: 0 };
@@ -1125,7 +1131,15 @@ function installFakeCreatePool(options: {
         }
         if (sql.includes("FROM profiles") && sql.includes("WHERE id")) {
           return {
-            rows: options.profilePartnerId === "missing" ? [] : [{ id: params?.[0], partner_id: options.profilePartnerId ?? params?.[1] ?? null }],
+            rows:
+              options.profilePartnerId === "missing"
+                ? []
+                : [
+                    {
+                      id: params?.[0],
+                      partner_id: options.profilePartnerId ?? params?.[1] ?? null,
+                    },
+                  ],
             rowCount: options.profilePartnerId === "missing" ? 0 : 1,
           };
         }
@@ -1133,12 +1147,20 @@ function installFakeCreatePool(options: {
           insertCalls.push({ sql, params: params ?? [] });
         }
         if (sql.includes("FROM portal_catalog_items")) {
-          const catalogRow = options.catalogRow === undefined
-            ? { product_name: "WC350", list_price: "$1000" }
-            : options.catalogRow;
+          const catalogRow =
+            options.catalogRow === undefined
+              ? { product_name: "WC350", list_price: "$1000" }
+              : options.catalogRow;
           return {
             rows: catalogRow ? [catalogRow] : [],
             rowCount: catalogRow ? 1 : 0,
+          };
+        }
+        if (sql.includes("FROM portal_deals") && sql.includes("WHERE lower(trim(product))")) {
+          const legacyDealRow = options.legacyDealRow;
+          return {
+            rows: legacyDealRow ? [legacyDealRow] : [],
+            rowCount: legacyDealRow ? 1 : 0,
           };
         }
         return { rows: [], rowCount: 1 };
@@ -1321,10 +1343,42 @@ test("createDeal rejects a product when the catalogue has no usable price", asyn
   }
 });
 
+test("createDeal uses the visible legacy product price when the catalogue is empty", async () => {
+  const harness = await installFakeCreatePool({
+    catalogRow: null,
+    legacyDealRow: { product: "WC350", amount: "5000" },
+  })();
+  try {
+    const { createDeal } = await import("@/server/deal-commands.server");
+    const result = await createDeal({
+      actor: buildActor(),
+      data: {
+        accountName: "Acme Co",
+        contactName: "Jane Doe",
+        product: "WC350",
+        quantity: 2,
+        amount: "1",
+        source: "manual",
+      },
+    });
+    expect(result.ok).toBe(true);
+    const dealInsert = harness.insertCalls.find((call) => call.sql.includes("portal_deals"));
+    expect(dealInsert?.params[10]).toBe("10000.00");
+  } finally {
+    harness.restore();
+  }
+});
+
 test("createDeal consults effective deals.create capability", async () => {
   const harness = await installFakeCreatePool({
     capabilityRows: [
-      { feature_key: "deals", can_create: false, can_read: true, can_update: true, can_delete: false },
+      {
+        feature_key: "deals",
+        can_create: false,
+        can_read: true,
+        can_update: true,
+        can_delete: false,
+      },
     ],
   })();
   try {
