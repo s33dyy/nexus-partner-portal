@@ -116,7 +116,12 @@ function TasksPage() {
   const [dateEdit, setDateEdit] = useState<{ task: TaskRecord; value: string } | null>(null);
   const [savingDate, setSavingDate] = useState(false);
   const [editTask, setEditTask] = useState<TaskRecord | null>(null);
-  const [editDraft, setEditDraft] = useState({ title: "", description: "", priority: "medium" });
+  const [editDraft, setEditDraft] = useState({
+    title: "",
+    description: "",
+    priority: "medium",
+    assignee_id: "",
+  });
   const [savingEdit, setSavingEdit] = useState(false);
   const canCreate = can("tasks", "create");
   const canUpdate = can("tasks", "update");
@@ -178,7 +183,12 @@ function TasksPage() {
 
   const openEdit = (task: TaskRecord) => {
     setEditTask(task);
-    setEditDraft({ title: task.title, description: task.description, priority: task.priority });
+    setEditDraft({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      assignee_id: task.assignee_id ?? profile?.id ?? "",
+    });
   };
 
   const saveEdit = async () => {
@@ -188,7 +198,12 @@ function TasksPage() {
       const result = await updateTask({
         taskId: editTask.id,
         expectedVersion: editTask.version,
-        patch: editDraft,
+        patch: {
+          title: editDraft.title,
+          description: editDraft.description,
+          priority: editDraft.priority,
+          assigneeId: editDraft.assignee_id || profile?.id || null,
+        },
       });
       if (!result.ok) {
         toast.error(result.failure.message);
@@ -659,6 +674,28 @@ function TasksPage() {
             </SelectContent>
           </Select>
         </Field>
+        {assignees.length > 0 ? (
+          <Field label="Assignee" hint="Choose an in-scope user or keep yourself assigned.">
+            <Select
+              value={editDraft.assignee_id || profile?.id || ""}
+              onValueChange={(value) => setEditDraft((prev) => ({ ...prev, assignee_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select assignee" />
+              </SelectTrigger>
+              <SelectContent>
+                {profile?.id ? <SelectItem value={profile.id}>Myself</SelectItem> : null}
+                {assignees
+                  .filter((assignee) => assignee.id !== profile?.id)
+                  .map((assignee) => (
+                    <SelectItem key={assignee.id} value={assignee.id}>
+                      {assignee.full_name || assignee.email}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
       </FormDialog>
 
       <FormDialog

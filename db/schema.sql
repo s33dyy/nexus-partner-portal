@@ -384,7 +384,7 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   segment TEXT NOT NULL,
   health_score INTEGER NOT NULL DEFAULT 0,
   mrr TEXT NOT NULL,
-  renewal_date DATE NOT NULL,
+  renewal_date TEXT NOT NULL,
   status TEXT NOT NULL,
   next_step TEXT NOT NULL,
   last_touch TEXT NOT NULL,
@@ -404,6 +404,9 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE portal_customers
+  ALTER COLUMN renewal_date TYPE TEXT USING renewal_date::text;
 
 CREATE TABLE IF NOT EXISTS portal_customer_activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

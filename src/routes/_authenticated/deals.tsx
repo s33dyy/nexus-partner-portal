@@ -325,6 +325,7 @@ type BadgeTone = "neutral" | "brand" | "success" | "warning" | "info" | "danger"
 // stages as success/danger.
 const dealSearchSchema = z.object({
   q: z.string().optional(),
+  dealId: z.string().uuid().optional(),
   stage: z.enum(["all", ...DEAL_STAGE_ORDER]).optional(),
   status: z.enum(DEAL_STATUS_FILTER_OPTIONS).optional(),
   ownerRole: z.enum(["all", "kam", "pam", "partner_admin", "partner_user"]).optional(),
@@ -721,6 +722,12 @@ function DealsPage() {
     () => deals.find((deal) => deal.id === selectedId) ?? null,
     [deals, selectedId],
   );
+
+  useEffect(() => {
+    if (!search.dealId || !deals.some((deal) => deal.id === search.dealId)) return;
+    setSelectedId(search.dealId);
+    setSelectedDealOpen(true);
+  }, [deals, search.dealId]);
   const canEditSelectedDeal =
     hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
   const selectedDealCollaboratorEditingLocked = selectedDeal

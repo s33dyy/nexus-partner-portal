@@ -326,6 +326,7 @@ export function BoardCard({
   owner,
   details,
   actions,
+  onOpen,
   className,
 }: {
   tone?: StatusTone;
@@ -334,6 +335,7 @@ export function BoardCard({
   owner?: string | null;
   details?: React.ReactNode;
   actions?: React.ReactNode;
+  onOpen?: () => void;
   className?: string;
 }) {
   const [pinned, setPinned] = React.useState(false);
@@ -352,7 +354,10 @@ export function BoardCard({
       <button
         type="button"
         aria-expanded={hasMore ? pinned : undefined}
-        onClick={() => hasMore && setPinned((value) => !value)}
+        onClick={() => {
+          onOpen?.();
+          if (hasMore) setPinned((value) => !value);
+        }}
         className={cn(
           // min-h-11 on touch: this collapsed pill is the only way to open a
           // board card's detail, and at py-1.5 it was a 32px target.

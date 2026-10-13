@@ -1,5 +1,5 @@
 import { newId } from "@/domain/contracts/ids";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DollarSign,
@@ -97,6 +97,7 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 ];
 
 function PipelinePage() {
+  const navigate = useNavigate();
   const { profile, hasRole, roleKey } = useAuth();
   const access = useRequireAccess("full");
   const { selectedRegion } = useRegionFilter();
@@ -686,6 +687,7 @@ function PipelinePage() {
                       <BoardCard
                         key={deal.id}
                         tone={DEAL_STAGE_TONE[deal.stage]}
+                        onOpen={() => void navigate({ to: "/deals", search: { dealId: deal.id } })}
                         owner={deal.owner_name}
                         title={getDealCompanyName(deal)}
                         amount={formatRegionalCurrency(

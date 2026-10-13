@@ -126,7 +126,7 @@ const CUSTOMER_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "segment", header: "Segment" },
   { key: "health_score", header: "Credibility" },
   { key: "mrr", header: "Employee Count" },
-  { key: "renewal_date", header: "Renewal Date" },
+  { key: "renewal_date", header: "Renewal Type" },
   { key: "status", header: "Status" },
   { key: "next_step", header: "Next Step" },
   { key: "last_touch", header: "Last Touch" },
@@ -961,7 +961,10 @@ function CustomersPage() {
                     options={editOptions.mrrs}
                   />
                 </Field>
-                <Field label="Renewal date">
+                <Field
+                  label="Renewal type"
+                  hint="Choose LIVEYfy or RC. This is a renewal classification, not a calendar date."
+                >
                   <Select
                     value={draft.renewal_date}
                     onValueChange={(value) =>
@@ -1121,7 +1124,10 @@ function CustomersPage() {
                     options={editOptions.mrrs}
                   />
                 </Field>
-                <Field label="Renewal date">
+                <Field
+                  label="Renewal type"
+                  hint="Choose LIVEYfy or RC. This is a renewal classification, not a calendar date."
+                >
                   <Select
                     value={draft.renewal_date}
                     onValueChange={(value) =>
