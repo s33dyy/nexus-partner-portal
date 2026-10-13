@@ -1,3 +1,4 @@
+import { newId } from "@/domain/contracts/ids";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -52,6 +53,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
+import { filterDealsByView, type DealListStatusFilter } from "@/lib/deal-filters";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
   component: AdminDealsPage,
@@ -69,7 +71,8 @@ function AdminDealsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<DealListStatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -153,19 +156,12 @@ function AdminDealsPage() {
   );
 
   const filteredDeals = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return regionScopedDeals.filter((deal) => {
-      const matchesStatus =
-        statusFilter === "all" || deal.status === statusFilter || deal.stage === statusFilter;
-      const matchesQuery =
-        !term ||
-        [deal.account_name, deal.contact_name, deal.owner_name, deal.product, deal.notes]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-      return matchesStatus && matchesQuery;
+    return filterDealsByView(regionScopedDeals, {
+      query,
+      stage: stageFilter,
+      status: statusFilter,
     });
-  }, [regionScopedDeals, query, statusFilter]);
+  }, [regionScopedDeals, query, stageFilter, statusFilter]);
 
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
@@ -228,7 +224,7 @@ function AdminDealsPage() {
     notificationMessage: string,
   ) => {
     const { error } = await supabase.from("notifications").insert({
-      id: globalThis.crypto.randomUUID(),
+      id: newId(),
       user_id: deal.user_id ?? null,
       partner_id: deal.partner_id ?? null,
       title: notificationTitle,
@@ -437,6 +433,18 @@ function AdminDealsPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <LookupCombobox
+                  fieldName={LOOKUP_FIELDS.dealStage}
+                  label="Stage"
+                  value={stageFilter === "all" ? "" : stageFilter}
+                  onValueChange={(value) => setStageFilter((value as DealRecord["stage"]) || "all")}
+                  placeholder="All stages"
+                  clearLabel="All stages"
+                  allowClear
+                  allowCreate={false}
+                  options={DEAL_STAGE_ORDER.map((stage) => stage)}
+                  triggerClassName="w-44"
+                />
+                <LookupCombobox
                   fieldName={LOOKUP_FIELDS.dealStatus}
                   label="Status"
                   value={statusFilter === "all" ? "" : statusFilter}
@@ -444,7 +452,7 @@ function AdminDealsPage() {
                   placeholder="All statuses"
                   clearLabel="All statuses"
                   allowClear
-                  options={[...statusOptions, ...stageOptions]}
+                  options={["open", "approved", "submitted", "won", "lost"]}
                   triggerClassName="w-44"
                 />
               </div>
@@ -525,11 +533,11 @@ function AdminDealsPage() {
                       <div className="text-sm font-medium">Edit review details</div>
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label>Account</Label>
+                          <Label>Company</Label>
                           <LookupCombobox
                             fieldName={LOOKUP_FIELDS.dealAccount}
                             source="account"
-                            label="Account"
+                            label="Company"
                             value={reviewDraft.account_name}
                             onValueChange={(value) =>
                               setReviewDraft((current) =>
@@ -672,10 +680,10 @@ function AdminDealsPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Customer budget</Label>
+                          <Label>Customer Budget Per Unit</Label>
                           <LookupCombobox
                             fieldName={LOOKUP_FIELDS.dealCustomerBudget}
-                            label="Customer budget"
+                            label="Customer Budget Per Unit"
                             value={reviewDraft.customer_budget ?? ""}
                             onValueChange={(value) =>
                               setReviewDraft((current) =>

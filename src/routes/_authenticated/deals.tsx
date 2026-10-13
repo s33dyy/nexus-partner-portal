@@ -2159,7 +2159,7 @@ function DealsPage() {
                         allowCreate={false}
                       />
                     </Field>
-                    <Field label="Customer budget">
+                    <Field label="Customer Budget Per Unit">
                       <Input
                         value={selectedDealDraft.customer_budget}
                         onChange={(e) =>
@@ -2843,7 +2843,7 @@ function DealsPage() {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="customer_budget">Customer budget</Label>
+            <Label htmlFor="customer_budget">Customer Budget Per Unit</Label>
             <Input
               id="customer_budget"
               inputMode="decimal"

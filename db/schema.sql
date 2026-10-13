@@ -1510,6 +1510,19 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   PRIMARY KEY (role_key, feature_key)
 );
 
+CREATE TABLE IF NOT EXISTS user_access_overrides (
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  feature_key TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('create', 'read', 'update', 'delete')),
+  decision TEXT NOT NULL CHECK (decision IN ('allow', 'deny')),
+  updated_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, feature_key, operation)
+);
+
+CREATE INDEX IF NOT EXISTS user_access_overrides_user_id_idx
+  ON user_access_overrides (user_id);
+
 DROP TRIGGER IF EXISTS role_permissions_updated_at ON role_permissions;
 CREATE TRIGGER role_permissions_updated_at
 BEFORE UPDATE ON role_permissions
