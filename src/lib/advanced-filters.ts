@@ -74,10 +74,10 @@ function getRecordField<T extends Record<string, unknown>>(
   base: string,
   options: AdvancedFilterMatchOptions<T>,
 ): string | undefined {
-  if (base in record) return base;
   if (base === "date") {
     return options.dateFields?.find((field) => field in record);
   }
+  if (base in record) return base;
   return undefined;
 }
 

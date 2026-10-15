@@ -66,6 +66,14 @@ describe("advanced filter primitives", () => {
     ).toBe(false);
     expect(
       matchesAdvancedFilters(
+        { date: "2026-10-15", closeDate: "2026-10-14" },
+        { dateFrom: "2026-10-15" },
+        ["date"],
+        { dateFields: ["closeDate"] },
+      ),
+    ).toBe(false);
+    expect(
+      matchesAdvancedFilters(
         { closeDate: "2026-10-15" },
         { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
         ["closeDate"],
