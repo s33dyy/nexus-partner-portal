@@ -46,6 +46,21 @@ describe("advanced filter primitives", () => {
         ["closeDate"],
       ),
     ).toBe(false);
+    expect(
+      matchesAdvancedFilters(
+        { closeDate: "2026-10-15T23:59:59.000Z" },
+        { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
+        ["closeDate"],
+      ),
+    ).toBe(true);
+    expect(
+      matchesAdvancedFilters(
+        { createdDate: "2026-10-15" },
+        { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
+        ["closeDate"],
+        { dateFields: ["closeDate"] },
+      ),
+    ).toBe(false);
   });
 
   it("ignores empty filter values and preserves zero as active", () => {
@@ -58,5 +73,9 @@ describe("advanced filter primitives", () => {
     ).toBe(true);
     expect(countActiveFilters({ query: "", status: "open", amountMin: undefined, amountMax: 100 })).toBe(2);
     expect(countActiveFilters({ amountMin: 0, amountMax: null, empty: "   " })).toBe(1);
+    expect(matchesExactOption("open", ["", "open"])).toBe(true);
+    expect(matchesExactOption("open", [""])).toBe(false);
+    expect(matchesAdvancedFilters({ status: "open" }, { missing: "value" }, [])).toBe(false);
+    expect(matchesAdvancedFilters({ amount: 100 }, { missingMin: 0 }, [])).toBe(false);
   });
 });

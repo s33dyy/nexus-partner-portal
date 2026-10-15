@@ -12,6 +12,10 @@ export type IsoDateRange = {
   to?: string | null;
 };
 
+export type AdvancedFilterMatchOptions<T extends Record<string, unknown>> = {
+  dateFields?: readonly (keyof T & string)[];
+};
+
 const RANGE_SUFFIXES = ["Min", "Max", "From", "To"] as const;
 
 export function normalizeFilterText(value: unknown): string {
@@ -21,15 +25,16 @@ export function normalizeFilterText(value: unknown): string {
 export function isEmptyFilterValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === "string") return normalizeFilterText(value) === "";
-  if (Array.isArray(value)) return value.length === 0;
+  if (Array.isArray(value)) return value.every((item) => isEmptyFilterValue(item));
   return false;
 }
 
 export function matchesExactOption(value: unknown, expected: unknown): boolean {
-  if (isEmptyFilterValue(expected)) return true;
   if (Array.isArray(expected)) {
-    return expected.some((option) => matchesExactOption(value, option));
+    const options = expected.filter((option) => !isEmptyFilterValue(option));
+    return options.length > 0 && options.some((option) => matchesExactOption(value, option));
   }
+  if (isEmptyFilterValue(expected)) return true;
   return value === expected;
 }
 
@@ -53,17 +58,26 @@ export function matchesInclusiveIsoDateRange(value: unknown, range: IsoDateRange
     if (!Number.isFinite(from) || dateValue < from) return false;
   }
   if (!isEmptyFilterValue(range.to)) {
-    const to = Date.parse(String(range.to));
-    if (!Number.isFinite(to) || dateValue > to) return false;
+    const toValue = String(range.to);
+    const to = Date.parse(toValue);
+    if (!Number.isFinite(to)) return false;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(toValue) ? dateValue >= to + 24 * 60 * 60 * 1000 : dateValue > to) {
+      return false;
+    }
   }
   return true;
 }
 
-function getRecordField<T extends Record<string, unknown>>(record: T, base: string): string | undefined {
+function getRecordField<T extends Record<string, unknown>>(
+  record: T,
+  base: string,
+  textFields: readonly (keyof T & string)[],
+  options: AdvancedFilterMatchOptions<T>,
+): string | undefined {
   if (base in record) return base;
   if (base === "date") {
-    const dateField = Object.keys(record).find((key) => key.toLocaleLowerCase().endsWith("date"));
-    return dateField;
+    const configuredFields = options.dateFields ?? textFields;
+    return configuredFields.find((field) => field in record);
   }
   return undefined;
 }
@@ -82,6 +96,7 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
   record: T,
   filters: AdvancedFilterValues,
   textFields: readonly (keyof T & string)[],
+  options: AdvancedFilterMatchOptions<T> = {},
 ): boolean {
   const text = filters.text;
   if (!isEmptyFilterValue(text)) {
@@ -95,8 +110,8 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
 
     const range = getRangeBase(key);
     if (range) {
-      const field = getRecordField(record, range.base);
-      if (!field) continue;
+      const field = getRecordField(record, range.base, textFields, options);
+      if (!field) return false;
 
       const hasNumericRange = hasRangeValue(filters, range.base, "Min") || hasRangeValue(filters, range.base, "Max");
       const hasDateRange = hasRangeValue(filters, range.base, "From") || hasRangeValue(filters, range.base, "To");
@@ -122,7 +137,7 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
       continue;
     }
 
-    if (key in record && !matchesExactOption(record[key], expected)) return false;
+    if (!(key in record) || !matchesExactOption(record[key], expected)) return false;
   }
 
   return true;
