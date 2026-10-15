@@ -2244,6 +2244,8 @@ function DealsPage() {
                     dealId={selectedDeal.id}
                     status={selectedDeal.status}
                     commercialApproved={selectedDeal.commercial_approved}
+                    canApprove={hasRole("super_admin")}
+                    version={selectedDeal.version}
                     onUpdated={load}
                   />
                   <Badge tone={DEAL_STAGE_TONE[selectedDeal.stage]}>{selectedDeal.stage}</Badge>
