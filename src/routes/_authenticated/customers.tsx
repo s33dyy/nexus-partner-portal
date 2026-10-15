@@ -16,6 +16,12 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import {
+  AdvancedFilterNumericRangeField,
+  AdvancedFilterSelectField,
+  AdvancedFilterTextField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +87,8 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { isRenewalType, RENEWAL_TYPES } from "@/domain/contracts/reference-data";
+import { countActiveFilters } from "@/lib/advanced-filters";
+import { filterCustomersByView, type CustomerAdvancedFilters } from "@/lib/customer-filters";
 
 type CustomerForm = {
   company_name: string;
@@ -156,6 +164,7 @@ function CustomersPage() {
   const [participants, setParticipants] = useState<CustomerParticipantRecord[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [advancedFilters, setAdvancedFilters] = useState<CustomerAdvancedFilters>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<CustomerForm>(EMPTY_FORM);
@@ -255,7 +264,7 @@ function CustomersPage() {
 
   const filteredCustomers = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return regionScopedCustomers.filter((customer) => {
+    const basicFilteredCustomers = regionScopedCustomers.filter((customer) => {
       const matchesStatus = statusFilter === "all" || customer.status === statusFilter;
       const matchesQuery =
         !term ||
@@ -271,7 +280,8 @@ function CustomersPage() {
           .includes(term);
       return matchesStatus && matchesQuery;
     });
-  }, [regionScopedCustomers, query, statusFilter]);
+    return filterCustomersByView(basicFilteredCustomers, advancedFilters);
+  }, [advancedFilters, regionScopedCustomers, query, statusFilter]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === selectedId) ?? null,
@@ -331,11 +341,20 @@ function CustomersPage() {
     return {
       owners: uniqueStrings(customers.map((customer) => customer.account_owner)),
       regions: uniqueStrings(customers.map((customer) => customer.region)),
+      countries: uniqueStrings(customers.map((customer) => customer.country)),
       segments: uniqueStrings(customers.map((customer) => customer.segment)),
       mrrs: uniqueStrings(customers.map((customer) => customer.mrr)),
       statuses: uniqueStrings(customers.map((customer) => customer.status)),
     };
   }, [customers]);
+
+  const updateAdvancedFilter = useCallback((key: keyof CustomerAdvancedFilters, value: string) => {
+    setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+  }, []);
+
+  const clearAdvancedFilters = useCallback(() => {
+    setAdvancedFilters({});
+  }, []);
 
   const stats = useMemo(() => {
     const total = regionScopedCustomers.length;
@@ -804,6 +823,79 @@ function CustomersPage() {
           tone="brand"
         />
       </div>
+
+      <AdvancedFilters
+        activeCount={countActiveFilters(advancedFilters)}
+        onClearAll={clearAdvancedFilters}
+      >
+        <AdvancedFilterTextField
+          label="Company or owner"
+          id="customers-filter-text"
+          value={advancedFilters.text ?? ""}
+          onChange={(event) => updateAdvancedFilter("text", event.target.value)}
+          placeholder="Search company or owner"
+        />
+        <AdvancedFilterSelectField
+          label="Status"
+          id="customers-filter-status"
+          value={advancedFilters.status ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("status", value)}
+          options={editOptions.statuses.map((value) => ({ label: value, value }))}
+          placeholder="All statuses"
+        />
+        <AdvancedFilterSelectField
+          label="Country"
+          id="customers-filter-country"
+          value={advancedFilters.country ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("country", value)}
+          options={editOptions.countries.map((value) => ({ label: value, value }))}
+          placeholder="All countries"
+        />
+        <AdvancedFilterSelectField
+          label="Region"
+          id="customers-filter-region"
+          value={advancedFilters.region ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("region", value)}
+          options={editOptions.regions.map((value) => ({ label: value, value }))}
+          placeholder="All regions"
+        />
+        <AdvancedFilterSelectField
+          label="Segment"
+          id="customers-filter-segment"
+          value={advancedFilters.segment ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("segment", value)}
+          options={editOptions.segments.map((value) => ({ label: value, value }))}
+          placeholder="All segments"
+        />
+        <AdvancedFilterSelectField
+          label="Renewal type"
+          id="customers-filter-renewal-type"
+          value={advancedFilters.renewalType ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("renewalType", value)}
+          options={RENEWAL_TYPES.map((value) => ({ label: value, value }))}
+          placeholder="All renewal types"
+        />
+        <AdvancedFilterNumericRangeField
+          label="Credibility"
+          id="customers-filter-credibility"
+          minValue={String(advancedFilters.credibilityMin ?? "")}
+          maxValue={String(advancedFilters.credibilityMax ?? "")}
+          onMinChange={(event) => updateAdvancedFilter("credibilityMin", event.target.value)}
+          onMaxChange={(event) => updateAdvancedFilter("credibilityMax", event.target.value)}
+          minPlaceholder="Minimum %"
+          maxPlaceholder="Maximum %"
+        />
+        <AdvancedFilterNumericRangeField
+          label="Employee count"
+          id="customers-filter-employee-count"
+          minValue={String(advancedFilters.employeeCountMin ?? "")}
+          maxValue={String(advancedFilters.employeeCountMax ?? "")}
+          onMinChange={(event) => updateAdvancedFilter("employeeCountMin", event.target.value)}
+          onMaxChange={(event) => updateAdvancedFilter("employeeCountMax", event.target.value)}
+          minPlaceholder="Minimum"
+          maxPlaceholder="Maximum"
+        />
+      </AdvancedFilters>
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_0.95fr]">
         <Card>
