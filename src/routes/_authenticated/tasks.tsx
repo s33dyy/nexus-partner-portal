@@ -3,6 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckSquare, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  AdvancedFilterDateRangeField,
+  AdvancedFilterSelectField,
+  AdvancedFilterTextField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { RecordList, RecordListSkeleton, RecordRow } from "@/components/record-list";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +36,8 @@ import {
   updateTask,
 } from "@/integrations/local/task-commands";
 import { formatDateLabel, formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
+import { countActiveFilters } from "@/lib/advanced-filters";
+import { filterTasksByView, isTaskOverdue, type TaskAdvancedFilters } from "@/lib/task-filters";
 import type { TaskAssignee, TaskStatus } from "@/server/task-commands.server";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
@@ -79,6 +87,13 @@ const PRIORITY_TONE: Record<string, BadgeTone> = {
   urgent: "danger",
 };
 
+const PRIORITY_LABEL: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  urgent: "Urgent",
+};
+
 const EMPTY_DRAFT = {
   title: "",
   description: "",
@@ -104,6 +119,7 @@ function TasksPage() {
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"all" | TaskStatus>("all");
+  const [advancedFilters, setAdvancedFilters] = useState<TaskAdvancedFilters>({});
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -147,9 +163,52 @@ function TasksPage() {
   }, [load]);
 
   const visibleTasks = useMemo(
-    () => (tab === "all" ? tasks : tasks.filter((task) => task.status === tab)),
-    [tasks, tab],
+    () =>
+      filterTasksByView(tasks, {
+        status: tab === "all" ? undefined : tab,
+        advanced: advancedFilters,
+      }),
+    [advancedFilters, tasks, tab],
   );
+
+  const advancedFilterOptions = useMemo(() => {
+    const assigneeOptions = new Map<string, string>();
+    for (const assignee of assignees) {
+      assigneeOptions.set(assignee.id, assignee.full_name || assignee.email);
+    }
+    for (const task of tasks) {
+      if (task.assignee_id) {
+        assigneeOptions.set(task.assignee_id, task.assignee_name || task.assignee_id);
+      }
+    }
+
+    const creatorOptions = new Map<string, string>();
+    for (const task of tasks) {
+      if (task.creator_id) {
+        creatorOptions.set(task.creator_id, task.creator_name || task.creator_id);
+      }
+    }
+
+    return {
+      assignees: Array.from(assigneeOptions, ([value, label]) => ({ label, value })).sort((a, b) =>
+        a.label.localeCompare(b.label),
+      ),
+      creators: Array.from(creatorOptions, ([value, label]) => ({ label, value })).sort((a, b) =>
+        a.label.localeCompare(b.label),
+      ),
+    };
+  }, [assignees, tasks]);
+
+  const updateAdvancedFilter = useCallback(
+    (key: keyof TaskAdvancedFilters, value: string | boolean) => {
+      setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+    },
+    [],
+  );
+
+  const clearAdvancedFilters = useCallback(() => {
+    setAdvancedFilters({});
+  }, []);
 
   const create = async () => {
     if (!draft.title.trim()) {
@@ -520,9 +579,78 @@ function TasksPage() {
       </Tabs>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Tasks</CardTitle>
-          <CardDescription>Structured filters replace free-text search.</CardDescription>
+        <CardHeader className="space-y-3 border-b">
+          <div>
+            <CardTitle>Tasks</CardTitle>
+            <CardDescription>
+              Filter the tasks already visible to you by ownership, priority, status, and due date.
+            </CardDescription>
+          </div>
+          <AdvancedFilters
+            activeCount={countActiveFilters(advancedFilters)}
+            onClearAll={clearAdvancedFilters}
+          >
+            <AdvancedFilterTextField
+              label="Title or description"
+              id="task-filter-text"
+              value={advancedFilters.text ?? ""}
+              onChange={(event) => updateAdvancedFilter("text", event.target.value)}
+              placeholder="Search tasks"
+            />
+            <AdvancedFilterSelectField
+              label="Status"
+              id="task-filter-status"
+              value={advancedFilters.status ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("status", value)}
+              options={(Object.keys(STATUS_LABEL) as TaskStatus[]).map((value) => ({
+                label: STATUS_LABEL[value],
+                value,
+              }))}
+              placeholder="All statuses"
+            />
+            <AdvancedFilterSelectField
+              label="Priority"
+              id="task-filter-priority"
+              value={advancedFilters.priority ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("priority", value)}
+              options={Object.entries(PRIORITY_LABEL).map(([value, label]) => ({ label, value }))}
+              placeholder="All priorities"
+            />
+            <AdvancedFilterSelectField
+              label="Assignee"
+              id="task-filter-assignee"
+              value={advancedFilters.assigneeId ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("assigneeId", value)}
+              options={advancedFilterOptions.assignees}
+              placeholder="All assignees"
+              disabled={advancedFilterOptions.assignees.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Creator"
+              id="task-filter-creator"
+              value={advancedFilters.creatorId ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("creatorId", value)}
+              options={advancedFilterOptions.creators}
+              placeholder="All creators"
+              disabled={advancedFilterOptions.creators.length === 0}
+            />
+            <AdvancedFilterDateRangeField
+              label="Due date"
+              id="task-filter-due-date"
+              fromValue={advancedFilters.dueDateFrom ?? ""}
+              toValue={advancedFilters.dueDateTo ?? ""}
+              onFromChange={(event) => updateAdvancedFilter("dueDateFrom", event.target.value)}
+              onToChange={(event) => updateAdvancedFilter("dueDateTo", event.target.value)}
+            />
+            <AdvancedFilterSelectField
+              label="Due status"
+              id="task-filter-due-status"
+              value={advancedFilters.overdueOnly ? "overdue" : ""}
+              onValueChange={(value) => updateAdvancedFilter("overdueOnly", value === "overdue")}
+              options={[{ label: "Overdue only", value: "overdue" }]}
+              placeholder="All due statuses"
+            />
+          </AdvancedFilters>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
@@ -558,6 +686,7 @@ function TasksPage() {
                       <Badge tone={PRIORITY_TONE[task.priority] ?? "neutral"}>
                         {task.priority}
                       </Badge>
+                      {isTaskOverdue(task) ? <Badge tone="danger">Overdue</Badge> : null}
                       <span>
                         {task.due_at ? `Due ${formatDateTimeLabel(task.due_at)}` : "No due date"}
                       </span>
