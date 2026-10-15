@@ -15,11 +15,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { filterAdvancedFilterOptions, type AdvancedFilterOption } from "./advanced-filters.utils";
 
-export type AdvancedFilterOption = {
-  label: string;
-  value: string;
-};
+export type { AdvancedFilterOption } from "./advanced-filters.utils";
 
 export type AdvancedFiltersProps = {
   children: React.ReactNode;
@@ -154,7 +152,7 @@ export function AdvancedFilterSelectField({
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
-          {options.map((option) => (
+          {filterAdvancedFilterOptions(options).map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
             </SelectItem>
