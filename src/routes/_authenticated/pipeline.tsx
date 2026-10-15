@@ -38,6 +38,7 @@ import {
   moveDealStageBackward,
   moveDealStageForward,
 } from "@/integrations/local/deal-commands";
+import { loadDashboardPipeline } from "@/integrations/local/dashboard-metrics";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   DEAL_STAGE_ORDER,
@@ -61,7 +62,7 @@ import {
 } from "@/lib/deal-filters";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
-import { summarizeOpenPipeline } from "@/lib/pipeline-metrics";
+import { summarizeOpenPipeline, type PipelineMetricDeal } from "@/lib/pipeline-metrics";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { formatRegionalCurrency } from "@/lib/regional-display";
 
@@ -133,6 +134,9 @@ function PipelinePage() {
   // DealOutcomeDialog for why that assumption was wrong under §9.15.
   const [outcomeDeal, setOutcomeDeal] = useState<DealRecord | null>(null);
   const [outcomeBusy, setOutcomeBusy] = useState(false);
+  const [effectiveDtpByDealId, setEffectiveDtpByDealId] = useState<Map<string, PipelineMetricDeal>>(
+    new Map(),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,12 +153,13 @@ function PipelinePage() {
         bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
-      const [dealRes, collaboratorRes, roleRes] = await Promise.all([
+      const [dealRes, collaboratorRes, pipelineMetricRes, roleRes] = await Promise.all([
         queryBuilder,
         supabase
           .from("portal_deal_collaborators")
           .select("*")
           .order("sort_order", { ascending: true }),
+        loadDashboardPipeline(selectedRegion),
         supabase.from("user_roles").select("user_id, role"),
       ]);
       if (dealRes.error || collaboratorRes.error || roleRes.error)
@@ -193,14 +198,17 @@ function PipelinePage() {
       );
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
+      const metricDeals = pipelineMetricRes.ok ? (pipelineMetricRes.metrics.dealMetrics ?? []) : [];
+      setEffectiveDtpByDealId(new Map(metricDeals.map((deal) => [deal.id, deal])));
     } catch {
       setDeals([]);
       setSource("empty");
+      setEffectiveDtpByDealId(new Map());
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id, roleKey]);
+  }, [hasRole, profile?.id, profile?.partner_id, roleKey, selectedRegion]);
 
   useEffect(() => {
     void load();
@@ -278,16 +286,19 @@ function PipelinePage() {
   const visiblePipelineMetric = useMemo(
     () =>
       summarizeOpenPipeline(
-        visibleDeals.map((deal) => ({
-          id: deal.id,
-          stage: deal.stage,
-          effectiveDtpUsd: null,
-          amountUsd: deal.amount_usd,
-          amountValue: deal.amount_value,
-          currencyCode: deal.currency_code,
-        })),
+        visibleDeals.map((deal) => {
+          const metric = effectiveDtpByDealId.get(deal.id);
+          return {
+            id: deal.id,
+            stage: deal.stage,
+            effectiveDtpUsd: metric?.effectiveDtpUsd ?? null,
+            amountUsd: metric?.amountUsd ?? deal.amount_usd,
+            amountValue: metric?.amountValue ?? deal.amount_value,
+            currencyCode: metric?.currencyCode ?? deal.currency_code,
+          };
+        }),
       ),
-    [visibleDeals],
+    [effectiveDtpByDealId, visibleDeals],
   );
 
   // Won and Lost share one terminal column.

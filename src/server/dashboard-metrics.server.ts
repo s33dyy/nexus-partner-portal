@@ -1,5 +1,9 @@
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
-import { isOpenPipelineStage, summarizeOpenPipeline } from "@/lib/pipeline-metrics";
+import {
+  isOpenPipelineStage,
+  summarizeOpenPipeline,
+  type PipelineMetricDeal,
+} from "@/lib/pipeline-metrics";
 import { matchesSelectedRegion, type RegionFilterValue } from "@/lib/region-filter";
 import { queryTableWithAuthContext } from "@/server/livey-service.server";
 import { pool } from "@/server/postgres.server";
@@ -24,6 +28,7 @@ export type DashboardPipelineResult =
         pipelineValueUsd: number;
         openDealCount: number;
         missingDtpCount: number;
+        dealMetrics?: PipelineMetricDeal[];
       };
     }
   | { ok: false; code: "POLICY_DENIED" | "QUERY_FAILED"; message: string };
@@ -78,7 +83,7 @@ export async function loadDashboardPipelineMetrics(input: {
     if (visibleDeals.length === 0) {
       return {
         ok: true,
-        metrics: { pipelineValueUsd: 0, openDealCount: 0, missingDtpCount: 0 },
+        metrics: { pipelineValueUsd: 0, openDealCount: 0, missingDtpCount: 0, dealMetrics: [] },
       };
     }
 
@@ -96,18 +101,18 @@ export async function loadDashboardPipelineMetrics(input: {
       ).map((row) => [row.deal_id, row.total_dtp_usd == null ? null : Number(row.total_dtp_usd)]),
     );
 
+    const dealMetrics: PipelineMetricDeal[] = visibleDeals.map((deal) => ({
+      id: deal.id,
+      stage: deal.stage,
+      effectiveDtpUsd: dtpByDeal.get(deal.id) ?? null,
+      amountUsd: deal.amount_usd == null ? null : Number(deal.amount_usd),
+      amountValue: deal.amount_value == null ? null : Number(deal.amount_value),
+      currencyCode: deal.currency_code,
+    }));
+
     return {
       ok: true,
-      metrics: summarizeOpenPipeline(
-        visibleDeals.map((deal) => ({
-          id: deal.id,
-          stage: deal.stage,
-          effectiveDtpUsd: dtpByDeal.get(deal.id) ?? null,
-          amountUsd: deal.amount_usd == null ? null : Number(deal.amount_usd),
-          amountValue: deal.amount_value == null ? null : Number(deal.amount_value),
-          currencyCode: deal.currency_code,
-        })),
-      ),
+      metrics: { ...summarizeOpenPipeline(dealMetrics), dealMetrics },
     };
   } catch {
     return { ok: false, code: "QUERY_FAILED", message: "Pipeline metrics could not be loaded" };

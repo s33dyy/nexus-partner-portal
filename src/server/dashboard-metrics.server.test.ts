@@ -123,6 +123,14 @@ test("loadDashboardPipelineMetrics sums effective DTP for visible open deals and
       expect(result.metrics.pipelineValueUsd).toBe(2500);
       expect(result.metrics.openDealCount).toBe(2);
       expect(result.metrics.missingDtpCount).toBe(0);
+      expect(result.metrics.dealMetrics?.find((deal) => deal.id === "deal-visible-1")).toEqual({
+        id: "deal-visible-1",
+        stage: "negotiation",
+        effectiveDtpUsd: 1500,
+        amountUsd: null,
+        amountValue: null,
+        currencyCode: "USD",
+      });
     }
 
     const pricingCall = harness.observed.find((entry) =>

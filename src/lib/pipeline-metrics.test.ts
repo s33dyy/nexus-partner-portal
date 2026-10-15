@@ -85,7 +85,8 @@ test("pipeline summary metrics are derived from the advanced-filtered visible de
 
   expect(source).toContain("summarizeOpenPipeline(");
   expect(source).toContain("visibleDeals.map");
+  expect(source).toContain("loadDashboardPipeline");
+  expect(source).toContain("effectiveDtpByDealId.get(deal.id)");
   expect(source).toContain("return { weighted, count: visibleDeals.length }");
-  expect(source).not.toContain("loadDashboardPipeline");
   expect(source).not.toContain("regionScopedDeals.reduce");
 });
