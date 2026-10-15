@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Target,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +36,7 @@ import { supabase } from "@/integrations/local/client";
 import {
   markDealLost,
   markDealWon,
+  deleteDeal,
   moveDealStageBackward,
   moveDealStageForward,
 } from "@/integrations/local/deal-commands";
@@ -107,7 +109,7 @@ const PIPELINE_EXPORT_COLUMNS: CsvColumn[] = [
 
 function PipelinePage() {
   const navigate = useNavigate();
-  const { profile, hasRole, roleKey } = useAuth();
+  const { profile, hasRole, roleKey, can } = useAuth();
   const access = useRequireAccess("full");
   const { selectedRegion } = useRegionFilter();
 
@@ -392,6 +394,21 @@ function PipelinePage() {
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move deal");
+    }
+  };
+
+  const removeDeal = async (deal: DealRecord) => {
+    if (!window.confirm(`Delete “${deal.account_name}”?`)) return;
+    try {
+      const result = await deleteDeal({ dealId: deal.id });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success("Deal deleted");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete deal");
     }
   };
 
@@ -877,6 +894,17 @@ function PipelinePage() {
                             >
                               Notes
                             </Button>
+                            {can("deals", "delete") ? (
+                              <Button
+                                className="h-11 gap-1 px-2 text-[11px] lg:h-7"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => void removeDeal(deal)}
+                              >
+                                <Trash2 className="size-3.5" />
+                                Delete
+                              </Button>
+                            ) : null}
                           </>
                         }
                       />

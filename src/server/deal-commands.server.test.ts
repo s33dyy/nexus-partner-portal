@@ -102,6 +102,7 @@ function installFakePool(dealRow: DealRow | null) {
         calls.push(verb);
 
         if (verb === "SELECT") {
+          if (sql.includes("stock_requests")) return { rows: [], rowCount: 0 };
           return { rows: currentRow ? [currentRow] : [], rowCount: currentRow ? 1 : 0 };
         }
         if (verb === "UPDATE" && sql.includes("portal_deals")) {
@@ -1080,6 +1081,18 @@ test("commands deny access without leaking whether the deal exists when the deal
         expect(result.failure.mayRevealRecordExistence).toBe(false);
       }
     }
+  } finally {
+    harness.restore();
+  }
+});
+
+test("deleteDeal removes an accessible deal through the governed command", async () => {
+  const harness = await installFakePool(baseDealRow())();
+  try {
+    const { deleteDeal } = await import("@/server/deal-commands.server");
+    const result = await deleteDeal({ actor: buildActor(), dealId: "deal-1" });
+    expect(result.ok).toBe(true);
+    expect(harness.calls).toContain("DELETE");
   } finally {
     harness.restore();
   }

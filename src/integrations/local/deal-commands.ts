@@ -91,6 +91,15 @@ const createDealFn = createServerFn({ method: "POST" })
     return createDeal({ actor: actorResult.actor, data });
   });
 
+const deleteDealFn = createServerFn({ method: "POST" })
+  .validator((input: { dealId: string }) => input)
+  .handler(async ({ data }): Promise<CommandExecutionResult> => {
+    const actorResult = await resolveActorOrDenial();
+    if (!actorResult.ok) return actorDenialResult(actorResult.failure);
+    const { deleteDeal } = await import("@/server/deal-commands.server");
+    return deleteDeal({ actor: actorResult.actor, dealId: data.dealId });
+  });
+
 const markDealLostFn = createServerFn({ method: "POST" })
   .validator(
     (input: {
@@ -137,6 +146,10 @@ const setDealProposedCompletionFn = createServerFn({ method: "POST" })
 
 export async function createDeal(input: CreateDealInput): Promise<CommandExecutionResult> {
   return createDealFn({ data: input });
+}
+
+export async function deleteDeal(input: { dealId: string }): Promise<CommandExecutionResult> {
+  return deleteDealFn({ data: input });
 }
 
 export async function moveDealStageForward(input: {

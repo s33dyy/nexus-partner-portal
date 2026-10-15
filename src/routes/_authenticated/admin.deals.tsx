@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -43,7 +44,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { DealOutcomeReview } from "@/components/deal-outcome-review";
 import { supabase } from "@/integrations/local/client";
-import { reviewDealRegistration } from "@/integrations/local/deal-commands";
+import { deleteDeal, reviewDealRegistration } from "@/integrations/local/deal-commands";
 import { dealRegionLookupField } from "@/lib/deal-lookups";
 import { formatDateLabel, toDateInputValue } from "@/lib/date-utils";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
@@ -72,7 +73,7 @@ export const Route = createFileRoute("/_authenticated/admin/deals")({
 });
 
 function AdminDealsPage() {
-  const { profile, hasRole } = useAuth();
+  const { profile, hasRole, can } = useAuth();
   const { selectedRegion } = useRegionFilter();
   const [deals, setDeals] = useState<DealRecord[]>([]);
   const [collaboratorsByDealId, setCollaboratorsByDealId] = useState<
@@ -315,6 +316,26 @@ function AdminDealsPage() {
     } catch (error) {
       console.error("Failed to save deal collaborators", error);
       return false;
+    }
+  };
+
+  const removeSelectedDeal = async () => {
+    if (!selectedDeal || !window.confirm(`Delete “${selectedDeal.account_name}”?`)) return;
+    setSaving(true);
+    try {
+      const result = await deleteDeal({ dealId: selectedDeal.id });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success("Deal deleted");
+      setReviewOpen(false);
+      setSelectedId(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete deal");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -923,6 +944,16 @@ function AdminDealsPage() {
                       <XCircle className="mr-2 h-4 w-4" />
                       Reject
                     </Button>
+                    {can("deals", "delete") ? (
+                      <Button
+                        variant="destructive"
+                        onClick={() => void removeSelectedDeal()}
+                        disabled={saving}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete deal
+                      </Button>
+                    ) : null}
                   </div>
                   <Separator />
                   <DealOutcomeReview

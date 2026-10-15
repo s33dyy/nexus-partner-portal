@@ -1191,6 +1191,74 @@ export async function createDeal(input: {
   });
 }
 
+export async function deleteDeal(input: {
+  actor: DealCommandActor;
+  dealId: string;
+}): Promise<CommandExecutionResult> {
+  const correlationId = createCorrelationId();
+  const capabilities = await loadEffectiveCapabilities(
+    input.actor.userId,
+    input.actor.assignment.roleKey,
+  );
+  if (!hasCapability(capabilities, "deals", "delete")) {
+    return {
+      ok: false,
+      failure: makePolicyDenial(null, "You do not have permission to delete deals"),
+      correlationId,
+    };
+  }
+
+  return withTransaction(async (tx) => {
+    const deal = await loadDealForUpdate(tx, input.dealId);
+    if (!deal) {
+      return {
+        ok: false,
+        failure: makePolicyDenial(null, "Deal is not accessible"),
+        correlationId,
+      };
+    }
+
+    const policy = await authorizeDealActor(input.actor, deal, tx);
+    if (!policy.allowed) return { ok: false, failure: policy.denial, correlationId };
+
+    const stockRequest = await tx.query(`SELECT 1 FROM stock_requests WHERE deal_id = $1 LIMIT 1`, [
+      deal.id,
+    ]);
+    if (stockRequest.rows.length > 0) {
+      return {
+        ok: false,
+        failure: validationFailure(
+          "This deal cannot be deleted because it has linked stock requests",
+        ),
+        correlationId,
+      };
+    }
+
+    await recordTransitionAndOutbox({
+      tx,
+      actor: input.actor,
+      correlationId,
+      commandName: "deal.delete",
+      eventName: "deal.deleted",
+      deal,
+      toStage: deal.stage,
+      toStatus: deal.status,
+      reason: "Deal deleted",
+      payload: { accountName: deal.account_name, stage: deal.stage, status: deal.status },
+    });
+    await tx.query(`DELETE FROM portal_deals WHERE id = $1`, [deal.id]);
+
+    return {
+      ok: true,
+      commandName: "deal.delete",
+      subjectId: deal.id,
+      newVersion: deal.version + 1,
+      nextAuthorisedActions: [],
+      correlationId,
+    };
+  });
+}
+
 export type SubmitDealForRegistrationInput = {
   dealId: string;
 };

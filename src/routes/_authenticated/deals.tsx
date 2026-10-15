@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Target,
+  Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -70,6 +71,7 @@ import { upsertLookupValue } from "@/integrations/local/lookups";
 import { supabase } from "@/integrations/local/client";
 import {
   createDeal as createDealCommand,
+  deleteDeal,
   markDealLost,
   markDealWon,
   moveDealStageBackward,
@@ -739,6 +741,7 @@ function DealsPage() {
   }, [deals, search.dealId]);
   const canEditSelectedDeal =
     hasRole("super_admin") || hasRole("partner_admin") || selectedDeal?.user_id === profile?.id;
+  const canDeleteSelectedDeal = can("deals", "delete");
   const selectedDealCollaboratorEditingLocked = selectedDeal
     ? isDealCollaboratorEditingLocked(selectedDeal)
     : false;
@@ -1549,6 +1552,26 @@ function DealsPage() {
     }
   };
 
+  const removeSelectedDeal = async () => {
+    if (!selectedDeal || !window.confirm(`Delete “${selectedDeal.account_name}”?`)) return;
+    setSaving(true);
+    try {
+      const result = await deleteDeal({ dealId: selectedDeal.id });
+      if (!result.ok) {
+        toast.error(result.failure.message);
+        return;
+      }
+      toast.success("Deal deleted");
+      setSelectedDealOpen(false);
+      setSelectedId(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete deal");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveSelectedDeal = async () => {
     if (!selectedDeal || !selectedDealDraft) return;
 
@@ -2176,23 +2199,40 @@ function DealsPage() {
                   Inspect and advance the selected opportunity without expanding the page.
                 </DialogDescription>
               </div>
-              {selectedDeal && canEditSelectedDeal ? (
-                <Button
-                  variant={selectedDealEditing ? "outline" : "secondary"}
-                  size="sm"
-                  onClick={() => {
-                    if (!selectedDealDraft) return;
-                    if (selectedDealEditing) {
-                      setSelectedDealDraft(dealToEditForm(selectedDeal));
-                      setSelectedDealCollaborators(collaboratorsByDealId[selectedDeal.id] ?? []);
-                      setSelectedDealEditing(false);
-                      return;
-                    }
-                    setSelectedDealEditing(true);
-                  }}
-                >
-                  {selectedDealEditing ? "Cancel edit" : "Edit details"}
-                </Button>
+              {selectedDeal && (canEditSelectedDeal || canDeleteSelectedDeal) ? (
+                <div className="flex gap-2">
+                  {canEditSelectedDeal ? (
+                    <Button
+                      variant={selectedDealEditing ? "outline" : "secondary"}
+                      size="sm"
+                      onClick={() => {
+                        if (!selectedDealDraft) return;
+                        if (selectedDealEditing) {
+                          setSelectedDealDraft(dealToEditForm(selectedDeal));
+                          setSelectedDealCollaborators(
+                            collaboratorsByDealId[selectedDeal.id] ?? [],
+                          );
+                          setSelectedDealEditing(false);
+                          return;
+                        }
+                        setSelectedDealEditing(true);
+                      }}
+                    >
+                      {selectedDealEditing ? "Cancel edit" : "Edit details"}
+                    </Button>
+                  ) : null}
+                  {canDeleteSelectedDeal ? (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => void removeSelectedDeal()}
+                      disabled={saving}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete deal
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </DialogHeader>
