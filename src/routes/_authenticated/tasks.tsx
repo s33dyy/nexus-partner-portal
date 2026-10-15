@@ -621,7 +621,7 @@ function TasksPage() {
               placeholder="All priorities"
             />
             <AdvancedFilterSelectField
-              label="Assignee"
+              label="User / assignee"
               id="task-filter-assignee"
               value={advancedFilters.assigneeId ?? ""}
               onValueChange={(value) => updateAdvancedFilter("assigneeId", value)}

@@ -836,6 +836,14 @@ function CustomersPage() {
           placeholder="Search company or owner"
         />
         <AdvancedFilterSelectField
+          label="User"
+          id="customers-filter-user"
+          value={advancedFilters.owner ?? ""}
+          onValueChange={(value) => updateAdvancedFilter("owner", value)}
+          options={editOptions.owners.map((value) => ({ label: value, value }))}
+          placeholder="All users"
+        />
+        <AdvancedFilterSelectField
           label="Status"
           id="customers-filter-status"
           value={advancedFilters.status ?? ""}

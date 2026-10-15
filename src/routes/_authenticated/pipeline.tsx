@@ -249,6 +249,9 @@ function PipelinePage() {
 
   const advancedFilterOptions = useMemo(
     () => ({
+      owners: [...new Set(deals.map((deal) => deal.owner_name.trim()).filter(Boolean))].map(
+        (value) => ({ label: value, value }),
+      ),
       countries: [...new Set(deals.map((deal) => deal.country.trim()).filter(Boolean))].map(
         (value) => ({ label: value, value }),
       ),
@@ -703,6 +706,15 @@ function PipelinePage() {
             activeCount={countActiveFilters(advancedFilters)}
             onClearAll={clearAdvancedFilters}
           >
+            <AdvancedFilterSelectField
+              label="User"
+              id="pipeline-filter-user"
+              value={advancedFilters.owner ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("owner", value)}
+              options={advancedFilterOptions.owners}
+              disabled={advancedFilterOptions.owners.length === 0}
+              placeholder="All users"
+            />
             <AdvancedFilterSelectField
               label="Country"
               id="pipeline-filter-country"

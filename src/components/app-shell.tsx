@@ -83,6 +83,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canReadDealApprovals = can("deals", "read");
   const canReadTasks = can("tasks", "read");
 
+  const dismissAttention = (kind: keyof ShellNotificationDots) => {
+    setNotificationDots((current) => ({ ...current, [kind]: false }));
+  };
+
   useEffect(() => {
     let active = true;
     const loadAttention = async () => {
@@ -146,7 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
-      <AppSidebar notificationDots={notificationDots} />
+      <AppSidebar notificationDots={notificationDots} onAttentionClick={dismissAttention} />
       <SidebarInset>
         {isAgreementAttention && <AgreementPendingBanner />}
         {/*
@@ -257,7 +261,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               className="shrink-0"
               aria-label="Notifications"
             >
-              <Link to="/notifications" className="relative">
+              <Link
+                to="/notifications"
+                className="relative"
+                onClick={() => dismissAttention("notifications")}
+              >
                 <Bell className="h-4 w-4" />
                 {unreadCount > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">

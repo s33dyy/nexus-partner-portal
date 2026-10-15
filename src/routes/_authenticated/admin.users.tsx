@@ -649,6 +649,16 @@ function AdminUsersPage() {
                 placeholder="Name, email, company, or role"
               />
               <AdvancedFilterSelectField
+                label="User"
+                id="admin-users-filter-user"
+                value={advancedFilters.user ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({ ...current, user: value || undefined }))
+                }
+                options={users.map((user) => ({ label: user.full_name, value: user.id }))}
+                placeholder="All users"
+              />
+              <AdvancedFilterSelectField
                 label="Role"
                 id="admin-users-filter-role"
                 value={roleFilter === "all" ? "" : roleFilter}

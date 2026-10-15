@@ -92,7 +92,13 @@ const partnerAdmin: Item[] = [
   { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
 ];
 
-export function AppSidebar({ notificationDots }: { notificationDots: ShellNotificationDots }) {
+export function AppSidebar({
+  notificationDots,
+  onAttentionClick,
+}: {
+  notificationDots: ShellNotificationDots;
+  onAttentionClick?: (kind: keyof ShellNotificationDots) => void;
+}) {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -173,6 +179,15 @@ export function AppSidebar({ notificationDots }: { notificationDots: ShellNotifi
     ) : null;
   };
 
+  const attentionKindForUrl = (url: string): keyof ShellNotificationDots | null =>
+    url === "/admin/deals"
+      ? "dealApprovals"
+      : url === "/tasks"
+        ? "tasks"
+        : url === "/notifications"
+          ? "notifications"
+          : null;
+
   const renderGroup = (label: string, items: Item[]) => {
     const list = visible(items);
     if (!list.length) return null;
@@ -190,7 +205,14 @@ export function AppSidebar({ notificationDots }: { notificationDots: ShellNotifi
               return (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={active} tooltip={item.title}>
-                    <Link to={item.url} className="flex items-center gap-2">
+                    <Link
+                      to={item.url}
+                      className="flex items-center gap-2"
+                      onClick={() => {
+                        const kind = attentionKindForUrl(item.url);
+                        if (kind) onAttentionClick?.(kind);
+                      }}
+                    >
                       <item.icon className="h-4 w-4 shrink-0" />
                       {!collapsed && <span className="truncate">{item.title}</span>}
                       {renderAttentionDot(item.url, item.title)}
@@ -255,7 +277,11 @@ export function AppSidebar({ notificationDots }: { notificationDots: ShellNotifi
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Notifications">
-              <Link to="/notifications" className="flex items-center gap-2">
+              <Link
+                to="/notifications"
+                className="flex items-center gap-2"
+                onClick={() => onAttentionClick?.("notifications")}
+              >
                 <Bell className="h-4 w-4" />
                 {!collapsed && <span>Notifications</span>}
                 {renderAttentionDot("/notifications", "Notifications")}

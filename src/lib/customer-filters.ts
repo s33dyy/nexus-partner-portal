@@ -15,6 +15,7 @@ export type CustomerFilterRecord = {
 
 export type CustomerAdvancedFilters = {
   text?: string;
+  owner?: string;
   status?: string;
   country?: string;
   region?: string;
@@ -74,6 +75,7 @@ export function filterCustomersByView<T extends CustomerFilterRecord>(
 ) {
   const advancedFilters: AdvancedFilterValues = {
     text: filters.text,
+    owner: filters.owner,
     status: filters.status,
     country: filters.country,
     region: filters.region,
@@ -87,6 +89,7 @@ export function filterCustomersByView<T extends CustomerFilterRecord>(
     const matchesStandardFilters = matchesAdvancedFilters(
       {
         company_name: customer.company_name,
+        owner: customer.account_owner,
         account_owner: customer.account_owner,
         status: customer.status,
         country: customer.country,

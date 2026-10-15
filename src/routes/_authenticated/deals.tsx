@@ -764,6 +764,10 @@ function DealsPage() {
 
   const advancedFilterOptions = useMemo(
     () => ({
+      owners: uniqueStrings(deals.map((deal) => deal.owner_name)).map((value) => ({
+        label: value,
+        value,
+      })),
       countries: uniqueStrings(deals.map((deal) => deal.country)).map((value) => ({
         label: value,
         value,
@@ -2024,6 +2028,15 @@ function DealsPage() {
             activeCount={countActiveFilters(advancedFilters)}
             onClearAll={clearAdvancedFilters}
           >
+            <AdvancedFilterSelectField
+              label="User"
+              id="deals-filter-user"
+              value={advancedFilters.owner ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("owner", value)}
+              options={advancedFilterOptions.owners}
+              disabled={advancedFilterOptions.owners.length === 0}
+              placeholder="All users"
+            />
             <AdvancedFilterSelectField
               label="Country"
               id="deals-filter-country"

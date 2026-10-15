@@ -1,6 +1,7 @@
 import { normalizeFilterText } from "./advanced-filters";
 
 export type AdminUserFilterRecord = {
+  id: string;
   full_name: string;
   email: string;
   company_name: string | null;
@@ -14,6 +15,7 @@ export type AdminUserFilterRecord = {
 
 export type AdminUserFilters = {
   text?: string;
+  user?: string;
   role?: string;
   partner?: string;
   region?: string;
@@ -28,6 +30,7 @@ export function filterAdminUsers<T extends AdminUserFilterRecord>(
 ): T[] {
   const text = normalizeFilterText(filters.text);
   return users.filter((user) => {
+    if (filters.user && user.id !== filters.user) return false;
     if (
       text &&
       ![user.full_name, user.email, user.company_name ?? "", user.roles.join(" ")]

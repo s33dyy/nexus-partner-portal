@@ -525,7 +525,7 @@ function AdminDealsPage() {
                 placeholder="Company, contact, owner, or product"
               />
               <AdvancedFilterSelectField
-                label="Owner"
+                label="User"
                 id="admin-deals-filter-owner"
                 value={advancedFilters.owner ?? ""}
                 onValueChange={(value) => updateAdvancedFilter("owner", value)}
