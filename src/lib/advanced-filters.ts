@@ -3,8 +3,8 @@ export type FilterScalar = string | number | boolean | null | undefined;
 export type AdvancedFilterValues = Record<string, FilterScalar | readonly unknown[]>;
 
 export type NumericRange = {
-  min?: number | null;
-  max?: number | null;
+  min?: number | string | null;
+  max?: number | string | null;
 };
 
 export type IsoDateRange = {
@@ -44,9 +44,18 @@ export function matchesInclusiveNumericRange(value: unknown, range: NumericRange
   const numericValue = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numericValue)) return false;
 
-  if (range.min !== null && range.min !== undefined && numericValue < range.min) return false;
-  if (range.max !== null && range.max !== undefined && numericValue > range.max) return false;
+  const min = parseNumericRangeBound(range.min);
+  const max = parseNumericRangeBound(range.max);
+  if ((min !== undefined && Number.isNaN(min)) || (max !== undefined && Number.isNaN(max))) return false;
+  if (min !== undefined && numericValue < min) return false;
+  if (max !== undefined && numericValue > max) return false;
   return true;
+}
+
+function parseNumericRangeBound(value: number | string | null | undefined): number | undefined {
+  if (isEmptyFilterValue(value)) return undefined;
+  const numericValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numericValue) ? numericValue : Number.NaN;
 }
 
 export function matchesInclusiveIsoDateRange(value: unknown, range: IsoDateRange): boolean {
@@ -117,8 +126,8 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
       if (hasNumericRange && (range.suffix === "Min" || range.suffix === "Max")) {
         if (
           !matchesInclusiveNumericRange(record[field], {
-            min: filters[`${range.base}Min`] as number | null | undefined,
-            max: filters[`${range.base}Max`] as number | null | undefined,
+            min: filters[`${range.base}Min`] as NumericRange["min"],
+            max: filters[`${range.base}Max`] as NumericRange["max"],
           })
         ) {
           return false;

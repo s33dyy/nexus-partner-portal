@@ -28,6 +28,7 @@ describe("advanced filter primitives", () => {
         ["status"],
       ),
     ).toBe(false);
+    expect(matchesAdvancedFilters({ amount: 100 }, { amountMin: "not-a-number" }, [])).toBe(false);
     expect(matchesAdvancedFilters({ amount: 0 }, { amountMin: 0, amountMax: 0 }, [])).toBe(true);
   });
 
