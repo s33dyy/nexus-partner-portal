@@ -41,6 +41,7 @@ import {
   filterTasksByView,
   getTaskEmptyState,
   isTaskOverdue,
+  serializeTaskDateInput,
   type TaskAdvancedFilters,
 } from "@/lib/task-filters";
 import type { TaskAssignee, TaskStatus } from "@/server/task-commands.server";
@@ -108,14 +109,10 @@ const EMPTY_DRAFT = {
   assignee_id: "",
 };
 
-// A date input yields "YYYY-MM-DD" with no time. Anchoring it at midday
-// rather than midnight means the stored instant lands on the intended
-// calendar day in every timezone from UTC-11 to UTC+13, instead of silently
-// slipping to the day before for anyone west of Greenwich.
+// Date-only inputs use the shared UTC-noon TIMESTAMPTZ sentinel so the
+// serialized Z value retains the selected calendar date after round-tripping.
 function dateInputToIso(value: string): string | null {
-  if (!value) return null;
-  const parsed = new Date(`${value}T12:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  return serializeTaskDateInput(value);
 }
 
 function TasksPage() {

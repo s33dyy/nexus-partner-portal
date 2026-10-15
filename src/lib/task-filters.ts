@@ -42,12 +42,33 @@ export type TaskEmptyState = {
 };
 
 const TERMINAL_TASK_STATUSES = new Set(["completed", "cancelled"]);
+const TASK_DATE_ONLY_SENTINEL_PATTERN = /^\d{4}-\d{2}-\d{2}T12:00:00\.000Z$/;
+
+/**
+ * Date-only task inputs are persisted as UTC noon so TIMESTAMPTZ round-trips
+ * preserve the selected calendar date in the serialized Z value.
+ */
+export function serializeTaskDateInput(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const calendarDate = normalizeCalendarDate(value);
+  return calendarDate ? `${calendarDate}T12:00:00.000Z` : null;
+}
+
+export function isTaskDateOnlySentinel(value: unknown): value is string {
+  return typeof value === "string" && TASK_DATE_ONLY_SENTINEL_PATTERN.test(value);
+}
 
 export function isTaskOverdue(task: Pick<TaskFilterRecord, "status" | "due_at">, now = new Date()) {
   if (!task.due_at || TERMINAL_TASK_STATUSES.has(task.status)) return false;
-  const dueDate = normalizeCalendarDate(task.due_at);
-  const today = normalizeCalendarDate(now);
-  return Boolean(dueDate && today && dueDate < today);
+
+  if (isTaskDateOnlySentinel(task.due_at)) {
+    const dueDate = normalizeCalendarDate(task.due_at);
+    const today = normalizeCalendarDate(now);
+    return Boolean(dueDate && today && dueDate < today);
+  }
+
+  const dueAt = Date.parse(task.due_at);
+  return Number.isFinite(dueAt) && dueAt < now.getTime();
 }
 
 export function getTaskEmptyState(
