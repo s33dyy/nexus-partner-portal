@@ -5,7 +5,6 @@ import {
   Download,
   Loader2,
   RefreshCw,
-  Search,
   ShieldCheck,
   Upload,
   UserRoundCog,
@@ -14,7 +13,12 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
-import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
+import {
+  AdvancedFilterSelectField,
+  AdvancedFilterTextField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
+import { EmptyState, PageHeader, StatTile } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +60,8 @@ import {
   salesRegionNodeId,
 } from "@/domain/contracts/governance";
 import { SALES_REGIONS, WORLD_COUNTRIES } from "@/domain/contracts/world-geography";
+import { countActiveFilters } from "@/lib/advanced-filters";
+import { filterAdminUsers, type AdminUserFilters } from "@/lib/admin-filters";
 import {
   Select,
   SelectContent,
@@ -73,6 +79,7 @@ type Profile = {
   partner_id: string | null;
   partner_status: PartnerStatus;
   is_seed: boolean;
+  whatsapp_verified_at: string | null;
   created_at: string;
 };
 
@@ -84,6 +91,10 @@ type RoleRow = {
 type UserRow = Profile & {
   roles: string[];
   geographyCeilingNodeId: string | null;
+  region: string | null;
+  country: string | null;
+  account_status: PartnerStatus;
+  verification_status: "verified" | "unverified";
 };
 
 type AssignmentRow = {
@@ -178,6 +189,7 @@ function AdminUsersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [advancedFilters, setAdvancedFilters] = useState<AdminUserFilters>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -207,7 +219,7 @@ function AdminUsersPage() {
         supabase
           .from("profiles")
           .select(
-            "id, email, full_name, phone, company_name, partner_id, partner_status, is_seed, created_at",
+            "id, email, full_name, phone, company_name, partner_id, partner_status, is_seed, whatsapp_verified_at, created_at",
           )
           .order("created_at", { ascending: false }),
         supabase
@@ -230,11 +242,20 @@ function AdminUsersPage() {
       for (const row of assignmentRows) {
         if (row.status === "active") geographyMap.set(row.user_id, row.geography_ceiling_node_id);
       }
-      const rows = profileRows.map((profile) => ({
-        ...profile,
-        roles: roleMap.get(profile.id) ?? [],
-        geographyCeilingNodeId: geographyMap.get(profile.id) ?? null,
-      }));
+      const rows = profileRows.map((profile) => {
+        const geography = decodeGeographyCeiling(geographyMap.get(profile.id) ?? null);
+        return {
+          ...profile,
+          roles: roleMap.get(profile.id) ?? [],
+          geographyCeilingNodeId: geographyMap.get(profile.id) ?? null,
+          region: geography.regionKey || null,
+          country: geography.countryCode || null,
+          account_status: profile.partner_status,
+          verification_status: profile.whatsapp_verified_at
+            ? ("verified" as const)
+            : ("unverified" as const),
+        };
+      });
       setUsers(rows);
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch (error) {
@@ -251,18 +272,44 @@ function AdminUsersPage() {
   }, []);
 
   const filteredUsers = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return users.filter((user) => {
-      const matchesRole = roleFilter === "all" || user.roles.includes(roleFilter);
-      const matchesQuery =
-        !term ||
-        [user.full_name, user.email, user.company_name ?? "", user.roles.join(" ")]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-      return matchesRole && matchesQuery;
+    return filterAdminUsers(users, {
+      ...advancedFilters,
+      text: query,
+      role: roleFilter === "all" ? undefined : roleFilter,
     });
-  }, [query, roleFilter, users]);
+  }, [advancedFilters, query, roleFilter, users]);
+
+  const advancedFilterOptions = useMemo(
+    () => ({
+      partners: [
+        ...(users.some((user) => user.partner_id === null)
+          ? [{ label: "No partner", value: "__none__" }]
+          : []),
+        ...Array.from(
+          new Set(users.flatMap((user) => (user.partner_id ? [user.partner_id] : []))),
+        ).map((value) => ({ label: value, value })),
+      ],
+      regions: SALES_REGIONS.filter((region) =>
+        users.some((user) => user.region === region.key),
+      ).map((region) => ({ label: region.name, value: region.key })),
+      countries: WORLD_COUNTRIES.filter((country) =>
+        users.some((user) => user.country === country.code),
+      ).map((country) => ({ label: country.name, value: country.code })),
+    }),
+    [users],
+  );
+
+  const activeFilterCount = countActiveFilters({
+    text: query,
+    role: roleFilter === "all" ? undefined : roleFilter,
+    ...advancedFilters,
+  });
+
+  const clearAllFilters = () => {
+    setQuery("");
+    setRoleFilter("all");
+    setAdvancedFilters({});
+  };
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === selectedId) ?? null,
@@ -589,19 +636,92 @@ function AdminUsersPage() {
               <CardTitle>User directory</CardTitle>
               <CardDescription>Search and switch between live access records.</CardDescription>
             </div>
-            <Toolbar>
-              <LookupCombobox
-                fieldName={LOOKUP_FIELDS.userRole}
+            <AdvancedFilters
+              ariaLabel="Advanced user filters"
+              activeCount={activeFilterCount}
+              onClearAll={clearAllFilters}
+            >
+              <AdvancedFilterTextField
+                label="Search"
+                id="admin-users-filter-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Name, email, company, or role"
+              />
+              <AdvancedFilterSelectField
                 label="Role"
+                id="admin-users-filter-role"
                 value={roleFilter === "all" ? "" : roleFilter}
                 onValueChange={(value) => setRoleFilter(value || "all")}
+                options={[...ROLE_OPTIONS].map((value) => ({
+                  label: ROLE_KEY_LABELS[value],
+                  value,
+                }))}
                 placeholder="All roles"
-                clearLabel="All roles"
-                allowClear
-                options={[...ROLE_OPTIONS]}
-                triggerClassName="w-44"
               />
-            </Toolbar>
+              <AdvancedFilterSelectField
+                label="Partner"
+                id="admin-users-filter-partner"
+                value={advancedFilters.partner ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({ ...current, partner: value || undefined }))
+                }
+                options={advancedFilterOptions.partners}
+                placeholder="All partners"
+                disabled={advancedFilterOptions.partners.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Region"
+                id="admin-users-filter-region"
+                value={advancedFilters.region ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({ ...current, region: value || undefined }))
+                }
+                options={advancedFilterOptions.regions}
+                placeholder="All regions"
+                disabled={advancedFilterOptions.regions.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Country"
+                id="admin-users-filter-country"
+                value={advancedFilters.country ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({ ...current, country: value || undefined }))
+                }
+                options={advancedFilterOptions.countries}
+                placeholder="All countries"
+                disabled={advancedFilterOptions.countries.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Account status"
+                id="admin-users-filter-account-status"
+                value={advancedFilters.accountStatus ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({
+                    ...current,
+                    accountStatus: value || undefined,
+                  }))
+                }
+                options={PARTNER_STATUS_OPTIONS.map((value) => ({ label: value, value }))}
+                placeholder="All account statuses"
+              />
+              <AdvancedFilterSelectField
+                label="Verification"
+                id="admin-users-filter-verification"
+                value={advancedFilters.verificationStatus ?? ""}
+                onValueChange={(value) =>
+                  setAdvancedFilters((current) => ({
+                    ...current,
+                    verificationStatus: value || undefined,
+                  }))
+                }
+                options={[
+                  { label: "Verified", value: "verified" },
+                  { label: "Unverified", value: "unverified" },
+                ]}
+                placeholder="All verification states"
+              />
+            </AdvancedFilters>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (

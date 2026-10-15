@@ -1,8 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, ShieldQuestion } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  AdvancedFilterSelectField,
+  AdvancedFilterTextField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { PageHeader, Toolbar } from "@/components/page-header";
 import { AccessDeniedPage } from "@/components/route-placeholder";
 import { Button } from "@/components/ui/button";
@@ -28,6 +33,8 @@ import {
   FEATURE_KEYS,
   FEATURE_LABELS,
   ROLE_KEY_LABELS,
+  roleAccessDomain,
+  type AccessDomain,
   type CrudOperation,
   type FeatureKey,
 } from "@/domain/contracts/features";
@@ -40,6 +47,8 @@ import {
 } from "@/integrations/local/role-permission-commands";
 import type { AccessControlSnapshot } from "@/server/rbac-policy.server";
 import { useAuth } from "@/hooks/use-auth";
+import { countActiveFilters } from "@/lib/advanced-filters";
+import { filterAdminRoles, type AdminRoleFilters } from "@/lib/admin-filters";
 
 const CRUD_OPERATIONS: CrudOperation[] = ["create", "read", "update", "delete"];
 const CRUD_LABELS: Record<CrudOperation, string> = {
@@ -82,6 +91,7 @@ function AdminRolesPage() {
   const [snapshot, setSnapshot] = useState<AccessControlSnapshot | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [selectedRole, setSelectedRole] = useState<RoleKey>("rm");
+  const [roleFilters, setRoleFilters] = useState<AdminRoleFilters>({});
   const [capabilitiesByRole, setCapabilitiesByRole] = useState<Record<RoleKey, RoleCapabilities>>(
     {} as Record<RoleKey, RoleCapabilities>,
   );
@@ -110,6 +120,40 @@ function AdminRolesPage() {
   }, []);
 
   const draftCapabilities = capabilitiesByRole[selectedRole] ?? emptyCapabilities();
+
+  const filteredRoleKeys = useMemo(() => {
+    const roles = ROLE_KEYS.map((roleKey) => {
+      const capabilities = capabilitiesByRole[roleKey] ?? emptyCapabilities();
+      const allowedCount = FEATURE_KEYS.reduce(
+        (count, feature) =>
+          count +
+          CRUD_OPERATIONS.filter((operation) => capabilities[feature]?.[operation] ?? false).length,
+        0,
+      );
+      const capabilityState =
+        roleKey === "super_admin" || allowedCount === FEATURE_KEYS.length * CRUD_OPERATIONS.length
+          ? "full"
+          : allowedCount === 0
+            ? "none"
+            : "partial";
+      return {
+        roleKey,
+        label: ROLE_KEY_LABELS[roleKey],
+        scope: roleAccessDomain(roleKey),
+        capabilityState,
+      };
+    });
+    return filterAdminRoles(roles, roleFilters).map((role) => role.roleKey as RoleKey);
+  }, [capabilitiesByRole, roleFilters]);
+
+  useEffect(() => {
+    if (filteredRoleKeys.length > 0 && !filteredRoleKeys.includes(selectedRole)) {
+      setSelectedRole(filteredRoleKeys[0]);
+    }
+  }, [filteredRoleKeys, selectedRole]);
+
+  const roleFilterCount = countActiveFilters(roleFilters);
+  const clearRoleFilters = () => setRoleFilters({});
 
   if (!hasRole("super_admin")) {
     return <AccessDeniedPage title="Role permissions" roleLabel="Super Admin" />;
@@ -329,7 +373,7 @@ function AdminRolesPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_KEYS.map((role) => (
+                  {filteredRoleKeys.map((role) => (
                     <SelectItem key={role} value={role}>
                       {ROLE_KEY_LABELS[role]}
                     </SelectItem>
@@ -338,40 +382,92 @@ function AdminRolesPage() {
               </Select>
               {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </Toolbar>
+            <AdvancedFilters
+              ariaLabel="Advanced role filters"
+              activeCount={roleFilterCount}
+              onClearAll={clearRoleFilters}
+            >
+              <AdvancedFilterTextField
+                label="Search roles"
+                id="admin-roles-filter-search"
+                value={roleFilters.text ?? ""}
+                onChange={(event) =>
+                  setRoleFilters((current) => ({
+                    ...current,
+                    text: event.target.value || undefined,
+                  }))
+                }
+                placeholder="Role name or key"
+              />
+              <AdvancedFilterSelectField
+                label="Scope"
+                id="admin-roles-filter-scope"
+                value={roleFilters.scope ?? ""}
+                onValueChange={(value) =>
+                  setRoleFilters((current) => ({ ...current, scope: value || undefined }))
+                }
+                options={[
+                  { label: "LIVEY internal", value: "livey_internal" satisfies AccessDomain },
+                  { label: "Partner external", value: "partner_external" satisfies AccessDomain },
+                ]}
+                placeholder="All scopes"
+              />
+              <AdvancedFilterSelectField
+                label="Capability state"
+                id="admin-roles-filter-capability-state"
+                value={roleFilters.capabilityState ?? ""}
+                onValueChange={(value) =>
+                  setRoleFilters((current) => ({
+                    ...current,
+                    capabilityState: value || undefined,
+                  }))
+                }
+                options={[
+                  { label: "Full access", value: "full" },
+                  { label: "Partial access", value: "partial" },
+                  { label: "No access", value: "none" },
+                ]}
+                placeholder="All capability states"
+              />
+            </AdvancedFilters>
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Feature</TableHead>
-                  {CRUD_OPERATIONS.map((operation) => (
-                    <TableHead key={operation} className="w-24 text-center">
-                      {CRUD_LABELS[operation]}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {FEATURE_KEYS.map((feature) => (
-                  <TableRow key={feature}>
-                    <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+            {filteredRoleKeys.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">No roles match these filters.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Feature</TableHead>
                     {CRUD_OPERATIONS.map((operation) => (
-                      <TableCell key={operation} className="text-center">
-                        <Checkbox
-                          className="mx-auto"
-                          aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
-                          checked={draftCapabilities[feature]?.[operation] ?? false}
-                          disabled={selectedRole === "super_admin"}
-                          onCheckedChange={(value) =>
-                            setCapability(feature, operation, value === true)
-                          }
-                        />
-                      </TableCell>
+                      <TableHead key={operation} className="w-24 text-center">
+                        {CRUD_LABELS[operation]}
+                      </TableHead>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {FEATURE_KEYS.map((feature) => (
+                    <TableRow key={feature}>
+                      <TableCell className="font-medium">{FEATURE_LABELS[feature]}</TableCell>
+                      {CRUD_OPERATIONS.map((operation) => (
+                        <TableCell key={operation} className="text-center">
+                          <Checkbox
+                            className="mx-auto"
+                            aria-label={`${CRUD_LABELS[operation]} ${FEATURE_LABELS[feature]}`}
+                            checked={draftCapabilities[feature]?.[operation] ?? false}
+                            disabled={selectedRole === "super_admin"}
+                            onCheckedChange={(value) =>
+                              setCapability(feature, operation, value === true)
+                            }
+                          />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       ) : null}
