@@ -1,20 +1,18 @@
 import type { DealRecord, DealStage } from "@/lib/portal-records";
 import { matchesAdvancedFilters, type AdvancedFilterValues } from "@/lib/advanced-filters";
 
-export type DealListStatusFilter =
+export type DealListStatusFilter = "all" | "open" | "won" | "lost" | "approved" | "submitted";
+export type DealApprovalStateFilter =
   | "all"
-  | "open"
   | "draft"
   | "submitted"
   | "approved"
   | "need_more_info"
-  | "rejected"
-  | "won"
-  | "lost";
+  | "rejected";
 export type DealOwnerRoleFilter = "all" | "kam" | "pam" | "partner_admin" | "partner_user";
 
 export type DealAdvancedFilters = {
-  approvalState?: string;
+  approvalState?: Exclude<DealApprovalStateFilter, "all">;
   stage?: DealStage | "all";
   owner?: string;
   partner?: string;
@@ -35,7 +33,7 @@ export type DealAdvancedFilters = {
 export type DealListFilters = {
   query: string;
   stage: DealStage | "all";
-  status: DealListStatusFilter;
+  status: DealListStatusFilter | DealApprovalStateFilter;
   ownerRole?: DealOwnerRoleFilter;
   advanced?: DealAdvancedFilters;
 };

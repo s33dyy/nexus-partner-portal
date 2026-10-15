@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { filterDealsByView, type DealListFilters } from "@/lib/deal-filters";
+import {
+  filterDealsByView,
+  type DealApprovalStateFilter,
+  type DealListFilters,
+} from "@/lib/deal-filters";
 import type { DealRecord } from "@/lib/portal-records";
 
 function buildDeal(overrides: Partial<DealRecord>): DealRecord {
@@ -245,4 +249,21 @@ test("filterDealsByView applies approval owner, partner, and submission-date fil
       },
     }).map((deal) => deal.id),
   ).toEqual(["match"]);
+});
+
+test("approval-state filters match registration status, not an open stage view", () => {
+  const approvalState: DealApprovalStateFilter = "rejected";
+  const deals = [
+    buildDeal({ id: "rejected", status: "rejected", stage: "demo" }),
+    buildDeal({ id: "submitted", status: "submitted", stage: "demo" }),
+  ];
+
+  expect(
+    filterDealsByView(deals, {
+      query: "",
+      stage: "all",
+      status: "all",
+      advanced: { approvalState },
+    }).map((deal) => deal.id),
+  ).toEqual(["rejected"]);
 });

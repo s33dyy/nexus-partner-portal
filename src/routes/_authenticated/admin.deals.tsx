@@ -62,9 +62,9 @@ import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { countActiveFilters } from "@/lib/advanced-filters";
 import {
+  type DealApprovalStateFilter,
   filterDealsByView,
   type DealAdvancedFilters,
-  type DealListStatusFilter,
 } from "@/lib/deal-filters";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
@@ -84,7 +84,7 @@ function AdminDealsPage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<DealListStatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<DealApprovalStateFilter>("all");
   const [advancedFilters, setAdvancedFilters] = useState<DealAdvancedFilters>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -256,10 +256,17 @@ function AdminDealsPage() {
     setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
   }, []);
 
-  const activeFilterCount = countActiveFilters({ text: query, ...advancedFilters });
+  const activeFilterCount = countActiveFilters({
+    text: query,
+    stage: stageFilter === "all" ? undefined : stageFilter,
+    approvalState: statusFilter === "all" ? undefined : statusFilter,
+    ...advancedFilters,
+  });
 
   const clearAllFilters = useCallback(() => {
     setQuery("");
+    setStageFilter("all");
+    setStatusFilter("all");
     setAdvancedFilters({});
   }, []);
 
@@ -494,20 +501,13 @@ function AdminDealsPage() {
                   fieldName={LOOKUP_FIELDS.dealStatus}
                   label="Approval state"
                   value={statusFilter === "all" ? "" : statusFilter}
-                  onValueChange={(value) => setStatusFilter(value || "all")}
+                  onValueChange={(value) =>
+                    setStatusFilter((value || "all") as DealApprovalStateFilter)
+                  }
                   placeholder="All approval states"
                   clearLabel="All approval states"
                   allowClear
-                  options={[
-                    "open",
-                    "draft",
-                    "submitted",
-                    "approved",
-                    "need_more_info",
-                    "rejected",
-                    "won",
-                    "lost",
-                  ]}
+                  options={["draft", "submitted", "approved", "need_more_info", "rejected"]}
                   triggerClassName="w-44"
                 />
               </div>
