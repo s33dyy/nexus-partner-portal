@@ -40,9 +40,8 @@ export function matchesExactOption(value: unknown, expected: unknown): boolean {
 }
 
 export function matchesInclusiveNumericRange(value: unknown, range: NumericRange): boolean {
-  if (isEmptyFilterValue(value)) return false;
-  const numericValue = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numericValue)) return false;
+  const numericValue = parseNumericValue(value);
+  if (numericValue === undefined || Number.isNaN(numericValue)) return false;
 
   const min = parseNumericRangeBound(range.min);
   const max = parseNumericRangeBound(range.max);
@@ -53,8 +52,14 @@ export function matchesInclusiveNumericRange(value: unknown, range: NumericRange
 }
 
 function parseNumericRangeBound(value: number | string | null | undefined): number | undefined {
+  return parseNumericValue(value);
+}
+
+function parseNumericValue(value: unknown): number | undefined {
   if (isEmptyFilterValue(value)) return undefined;
-  const numericValue = typeof value === "number" ? value : Number(value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value !== "string") return Number.NaN;
+  const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : Number.NaN;
 }
 
