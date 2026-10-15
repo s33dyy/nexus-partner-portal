@@ -76,3 +76,16 @@ test("dashboard consumes governed Pipeline metrics instead of parsing Deal amoun
   expect(source).not.toContain("parseDealAmount");
   expect(source).toContain("Open opportunities at current DTP");
 });
+
+test("pipeline summary metrics are derived from the advanced-filtered visible deal population", () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, "../routes/_authenticated/pipeline.tsx"),
+    "utf8",
+  );
+
+  expect(source).toContain("summarizeOpenPipeline(");
+  expect(source).toContain("visibleDeals.map");
+  expect(source).toContain("return { weighted, count: visibleDeals.length }");
+  expect(source).not.toContain("loadDashboardPipeline");
+  expect(source).not.toContain("regionScopedDeals.reduce");
+});

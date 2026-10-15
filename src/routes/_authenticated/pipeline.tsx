@@ -38,7 +38,6 @@ import {
   moveDealStageBackward,
   moveDealStageForward,
 } from "@/integrations/local/deal-commands";
-import { loadDashboardPipeline } from "@/integrations/local/dashboard-metrics";
 import { LOOKUP_FIELDS } from "@/lib/lookup-fields";
 import {
   DEAL_STAGE_ORDER,
@@ -62,6 +61,7 @@ import {
 } from "@/lib/deal-filters";
 import { type CsvColumn } from "@/lib/csv-export";
 import { formatDealProbability } from "@/lib/deal-probability";
+import { summarizeOpenPipeline } from "@/lib/pipeline-metrics";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { formatRegionalCurrency } from "@/lib/regional-display";
 
@@ -133,11 +133,6 @@ function PipelinePage() {
   // DealOutcomeDialog for why that assumption was wrong under §9.15.
   const [outcomeDeal, setOutcomeDeal] = useState<DealRecord | null>(null);
   const [outcomeBusy, setOutcomeBusy] = useState(false);
-  const [pipelineMetric, setPipelineMetric] = useState<{
-    pipelineValueUsd: number;
-    openDealCount: number;
-    missingDtpCount: number;
-  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,17 +149,12 @@ function PipelinePage() {
         bypassOwnershipFilter: hasDealsScopeBypass(roleKey),
       });
 
-      const [dealRes, collaboratorRes, pipelineMetricRes, roleRes] = await Promise.all([
+      const [dealRes, collaboratorRes, roleRes] = await Promise.all([
         queryBuilder,
         supabase
           .from("portal_deal_collaborators")
           .select("*")
           .order("sort_order", { ascending: true }),
-        // Reuses the exact same server-side canonical metric the dashboard
-        // shows — open stages (Sourced..Negotiation) only, priced from
-        // effective DTP, never the free-text amount — instead of
-        // maintaining a third, divergent client-side sum here.
-        loadDashboardPipeline(selectedRegion),
         supabase.from("user_roles").select("user_id, role"),
       ]);
       if (dealRes.error || collaboratorRes.error || roleRes.error)
@@ -203,16 +193,14 @@ function PipelinePage() {
       );
       setDeals(rows);
       setSource(rows.length > 0 ? "database" : "empty");
-      setPipelineMetric(pipelineMetricRes.ok ? pipelineMetricRes.metrics : null);
     } catch {
       setDeals([]);
       setSource("empty");
-      setPipelineMetric(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hasRole, profile?.id, profile?.partner_id, roleKey, selectedRegion]);
+  }, [hasRole, profile?.id, profile?.partner_id, roleKey]);
 
   useEffect(() => {
     void load();
@@ -287,6 +275,21 @@ function PipelinePage() {
     setAdvancedFilters({});
   }, []);
 
+  const visiblePipelineMetric = useMemo(
+    () =>
+      summarizeOpenPipeline(
+        visibleDeals.map((deal) => ({
+          id: deal.id,
+          stage: deal.stage,
+          effectiveDtpUsd: null,
+          amountUsd: deal.amount_usd,
+          amountValue: deal.amount_value,
+          currencyCode: deal.currency_code,
+        })),
+      ),
+    [visibleDeals],
+  );
+
   // Won and Lost share one terminal column.
   //
   // Neither can be moved on from, so as separate columns they were two mostly
@@ -320,14 +323,13 @@ function PipelinePage() {
   }, [visibleDeals]);
 
   const totals = useMemo(() => {
-    const weighted = regionScopedDeals.length
+    const weighted = visibleDeals.length
       ? Math.round(
-          regionScopedDeals.reduce((sum, deal) => sum + deal.probability, 0) /
-            regionScopedDeals.length,
+          visibleDeals.reduce((sum, deal) => sum + deal.probability, 0) / visibleDeals.length,
         )
       : 0;
-    return { weighted, count: regionScopedDeals.length };
-  }, [regionScopedDeals]);
+    return { weighted, count: visibleDeals.length };
+  }, [visibleDeals]);
 
   const moveDeal = async (deal: DealRecord) => {
     const stage = nextDealStage(deal.stage);
@@ -623,24 +625,18 @@ function PipelinePage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatTile
           label="Pipeline value"
-          value={
-            pipelineMetric
-              ? new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  maximumFractionDigits: 2,
-                }).format(pipelineMetric.pipelineValueUsd)
-              : "Unavailable"
-          }
+          value={new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            maximumFractionDigits: 2,
+          }).format(visiblePipelineMetric.pipelineValueUsd)}
           hint={
-            pipelineMetric
-              ? pipelineMetric.missingDtpCount > 0
-                ? `Open (Sourced–Negotiation) at current DTP · ${pipelineMetric.missingDtpCount} missing DTP`
-                : "Open (Sourced–Negotiation) at current DTP"
-              : "Unable to load scoped pipeline"
+            visiblePipelineMetric.missingDtpCount > 0
+              ? `Open visible deals · ${visiblePipelineMetric.missingDtpCount} missing structured USD value`
+              : "Open visible deals from structured USD values"
           }
           icon={<DollarSign className="h-4 w-4" />}
-          tone={pipelineMetric ? "brand" : "warning"}
+          tone="brand"
         />
         <StatTile
           label="Deal count"
