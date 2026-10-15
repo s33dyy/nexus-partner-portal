@@ -1675,6 +1675,30 @@ INSERT INTO role_permissions (role_key, feature_key, can_create, can_read, can_u
   ('partner_user', 'assistant', true, true, false, false)
 ON CONFLICT (role_key, feature_key) DO NOTHING;
 
+-- Deal deletion is available to roles that already have deal update access.
+-- Apply this once to existing installations without overwriting later admin
+-- decisions made in the RBAC panel.
+CREATE TABLE IF NOT EXISTS app_policy_migrations (
+  migration_id TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM app_policy_migrations
+    WHERE migration_id = 'deal-delete-for-update-enabled-roles-v1'
+  ) THEN
+    UPDATE role_permissions
+    SET can_delete = TRUE, updated_at = now()
+    WHERE feature_key = 'deals'
+      AND can_update = TRUE;
+
+    INSERT INTO app_policy_migrations (migration_id)
+    VALUES ('deal-delete-for-update-enabled-roles-v1');
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS learning_assessments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   subject_id UUID NOT NULL REFERENCES learning_subjects(id) ON DELETE CASCADE,
