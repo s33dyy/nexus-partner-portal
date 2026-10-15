@@ -159,3 +159,90 @@ test("filterDealsByView applies advanced deal filters with inclusive ranges", ()
     }).map((deal) => deal.id),
   ).toEqual(["match"]);
 });
+
+test("filterDealsByView applies approval owner, partner, and submission-date filters", () => {
+  const deals = [
+    buildDeal({
+      id: "match",
+      account_name: "Northwind Ltd",
+      owner_name: "Priya Rao",
+      partner_id: "partner-1",
+      country: "India",
+      region: "India West",
+      amount_value: 5000,
+      status: "submitted",
+      stage: "proposal",
+      created_at: "2026-10-15T23:45:00.000Z",
+    }),
+    buildDeal({
+      id: "wrong-submission-date",
+      account_name: "Northwind Ltd",
+      owner_name: "Priya Rao",
+      partner_id: "partner-1",
+      amount_value: 5000,
+      status: "submitted",
+      stage: "proposal",
+      created_at: "2026-10-16T00:15:00.000Z",
+    }),
+    buildDeal({
+      id: "wrong-owner",
+      account_name: "Northwind Ltd",
+      owner_name: "Anika Shah",
+      partner_id: "partner-1",
+      amount_value: 5000,
+      status: "submitted",
+      stage: "proposal",
+      created_at: "2026-10-15T12:00:00.000Z",
+    }),
+    buildDeal({
+      id: "wrong-partner",
+      account_name: "Northwind Ltd",
+      owner_name: "Priya Rao",
+      partner_id: "partner-2",
+      amount_value: 5000,
+      status: "submitted",
+      stage: "proposal",
+      created_at: "2026-10-15T12:00:00.000Z",
+    }),
+    buildDeal({
+      id: "wrong-approval-state",
+      account_name: "Northwind Ltd",
+      owner_name: "Priya Rao",
+      partner_id: "partner-1",
+      amount_value: 5000,
+      status: "approved",
+      stage: "proposal",
+      created_at: "2026-10-15T12:00:00.000Z",
+    }),
+    buildDeal({
+      id: "wrong-stage",
+      account_name: "Northwind Ltd",
+      owner_name: "Priya Rao",
+      partner_id: "partner-1",
+      amount_value: 5000,
+      status: "submitted",
+      stage: "demo",
+      created_at: "2026-10-15T12:00:00.000Z",
+    }),
+  ];
+
+  expect(
+    filterDealsByView(deals, {
+      query: "northwind",
+      stage: "all",
+      status: "all",
+      advanced: {
+        approvalState: "submitted",
+        stage: "proposal",
+        owner: "Priya Rao",
+        partner: "partner-1",
+        country: "India",
+        region: "India West",
+        amountMin: "5000",
+        amountMax: "5000",
+        submissionDateFrom: "2026-10-15",
+        submissionDateTo: "2026-10-15",
+      },
+    }).map((deal) => deal.id),
+  ).toEqual(["match"]);
+});

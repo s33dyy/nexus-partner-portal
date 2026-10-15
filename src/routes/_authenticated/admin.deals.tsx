@@ -14,6 +14,13 @@ import {
 import { toast } from "sonner";
 
 import { AccessDeniedPage } from "@/components/route-placeholder";
+import {
+  AdvancedFilterDateRangeField,
+  AdvancedFilterNumericRangeField,
+  AdvancedFilterSelectField,
+  AdvancedFilterTextField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { DealCollaboratorEditor } from "@/components/deal-collaborator-editor";
 import { DealProbabilitySelect } from "@/components/deal-probability-select";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
@@ -53,7 +60,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
-import { filterDealsByView, type DealListStatusFilter } from "@/lib/deal-filters";
+import { countActiveFilters } from "@/lib/advanced-filters";
+import {
+  filterDealsByView,
+  type DealAdvancedFilters,
+  type DealListStatusFilter,
+} from "@/lib/deal-filters";
 
 export const Route = createFileRoute("/_authenticated/admin/deals")({
   component: AdminDealsPage,
@@ -73,6 +85,7 @@ function AdminDealsPage() {
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
   const [statusFilter, setStatusFilter] = useState<DealListStatusFilter>("all");
+  const [advancedFilters, setAdvancedFilters] = useState<DealAdvancedFilters>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -160,8 +173,9 @@ function AdminDealsPage() {
       query,
       stage: stageFilter,
       status: statusFilter,
+      advanced: advancedFilters,
     });
-  }, [regionScopedDeals, query, stageFilter, statusFilter]);
+  }, [advancedFilters, regionScopedDeals, query, stageFilter, statusFilter]);
 
   const selectedDeal = useMemo(
     () => deals.find((deal) => deal.id === selectedId) ?? null,
@@ -216,6 +230,38 @@ function AdminDealsPage() {
       ),
     [deals, reviewDraft?.country],
   );
+  const advancedFilterOptions = useMemo(
+    () => ({
+      owners: uniqueStrings(regionScopedDeals.map((deal) => deal.owner_name)).map((value) => ({
+        label: value,
+        value,
+      })),
+      partners: uniqueStrings(regionScopedDeals.map((deal) => deal.partner_id)).map((value) => ({
+        label: value,
+        value,
+      })),
+      regions: uniqueStrings(regionScopedDeals.map((deal) => deal.region)).map((value) => ({
+        label: value,
+        value,
+      })),
+      countries: uniqueStrings(regionScopedDeals.map((deal) => deal.country)).map((value) => ({
+        label: value,
+        value,
+      })),
+    }),
+    [regionScopedDeals],
+  );
+
+  const updateAdvancedFilter = useCallback((key: keyof DealAdvancedFilters, value: string) => {
+    setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+  }, []);
+
+  const activeFilterCount = countActiveFilters({ text: query, ...advancedFilters });
+
+  const clearAllFilters = useCallback(() => {
+    setQuery("");
+    setAdvancedFilters({});
+  }, []);
 
   const publishDealNotification = async (
     deal: DealRecord,
@@ -446,17 +492,89 @@ function AdminDealsPage() {
                 />
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.dealStatus}
-                  label="Status"
+                  label="Approval state"
                   value={statusFilter === "all" ? "" : statusFilter}
                   onValueChange={(value) => setStatusFilter(value || "all")}
-                  placeholder="All statuses"
-                  clearLabel="All statuses"
+                  placeholder="All approval states"
+                  clearLabel="All approval states"
                   allowClear
-                  options={["open", "approved", "submitted", "won", "lost"]}
+                  options={[
+                    "open",
+                    "draft",
+                    "submitted",
+                    "approved",
+                    "need_more_info",
+                    "rejected",
+                    "won",
+                    "lost",
+                  ]}
                   triggerClassName="w-44"
                 />
               </div>
             </div>
+            <AdvancedFilters
+              ariaLabel="Advanced approval filters"
+              activeCount={activeFilterCount}
+              onClearAll={clearAllFilters}
+            >
+              <AdvancedFilterTextField
+                label="Search"
+                id="admin-deals-filter-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Company, contact, owner, or product"
+              />
+              <AdvancedFilterSelectField
+                label="Owner"
+                id="admin-deals-filter-owner"
+                value={advancedFilters.owner ?? ""}
+                onValueChange={(value) => updateAdvancedFilter("owner", value)}
+                options={advancedFilterOptions.owners}
+                disabled={advancedFilterOptions.owners.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Partner"
+                id="admin-deals-filter-partner"
+                value={advancedFilters.partner ?? ""}
+                onValueChange={(value) => updateAdvancedFilter("partner", value)}
+                options={advancedFilterOptions.partners}
+                disabled={advancedFilterOptions.partners.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Region"
+                id="admin-deals-filter-region"
+                value={advancedFilters.region ?? ""}
+                onValueChange={(value) => updateAdvancedFilter("region", value)}
+                options={advancedFilterOptions.regions}
+                disabled={advancedFilterOptions.regions.length === 0}
+              />
+              <AdvancedFilterSelectField
+                label="Country"
+                id="admin-deals-filter-country"
+                value={advancedFilters.country ?? ""}
+                onValueChange={(value) => updateAdvancedFilter("country", value)}
+                options={advancedFilterOptions.countries}
+                disabled={advancedFilterOptions.countries.length === 0}
+              />
+              <AdvancedFilterNumericRangeField
+                label="Amount"
+                id="admin-deals-filter-amount"
+                minValue={String(advancedFilters.amountMin ?? "")}
+                maxValue={String(advancedFilters.amountMax ?? "")}
+                onMinChange={(event) => updateAdvancedFilter("amountMin", event.target.value)}
+                onMaxChange={(event) => updateAdvancedFilter("amountMax", event.target.value)}
+              />
+              <AdvancedFilterDateRangeField
+                label="Submission date"
+                id="admin-deals-filter-submission-date"
+                fromValue={advancedFilters.submissionDateFrom ?? ""}
+                toValue={advancedFilters.submissionDateTo ?? ""}
+                onFromChange={(event) =>
+                  updateAdvancedFilter("submissionDateFrom", event.target.value)
+                }
+                onToChange={(event) => updateAdvancedFilter("submissionDateTo", event.target.value)}
+              />
+            </AdvancedFilters>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
