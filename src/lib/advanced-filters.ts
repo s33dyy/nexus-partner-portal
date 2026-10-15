@@ -13,13 +13,14 @@ export type IsoDateRange = {
 };
 
 export type AdvancedFilterMatchOptions<T extends Record<string, unknown>> = {
-  dateFields?: readonly (keyof T & string)[];
+  /** Required when dateFrom/dateTo filters are active; never inferred from textFields. */
+  dateFields: readonly (keyof T & string)[];
 };
 
 const RANGE_SUFFIXES = ["Min", "Max", "From", "To"] as const;
 
 export function normalizeFilterText(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLocaleLowerCase() : "";
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 export function isEmptyFilterValue(value: unknown): boolean {
@@ -71,13 +72,11 @@ export function matchesInclusiveIsoDateRange(value: unknown, range: IsoDateRange
 function getRecordField<T extends Record<string, unknown>>(
   record: T,
   base: string,
-  textFields: readonly (keyof T & string)[],
   options: AdvancedFilterMatchOptions<T>,
 ): string | undefined {
   if (base in record) return base;
   if (base === "date") {
-    const configuredFields = options.dateFields ?? textFields;
-    return configuredFields.find((field) => field in record);
+    return options.dateFields?.find((field) => field in record);
   }
   return undefined;
 }
@@ -96,7 +95,7 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
   record: T,
   filters: AdvancedFilterValues,
   textFields: readonly (keyof T & string)[],
-  options: AdvancedFilterMatchOptions<T> = {},
+  options: AdvancedFilterMatchOptions<T> = { dateFields: [] },
 ): boolean {
   const text = filters.text;
   if (!isEmptyFilterValue(text)) {
@@ -110,7 +109,7 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
 
     const range = getRangeBase(key);
     if (range) {
-      const field = getRecordField(record, range.base, textFields, options);
+      const field = getRecordField(record, range.base, options);
       if (!field) return false;
 
       const hasNumericRange = hasRangeValue(filters, range.base, "Min") || hasRangeValue(filters, range.base, "Max");

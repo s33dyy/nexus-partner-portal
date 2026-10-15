@@ -37,6 +37,7 @@ describe("advanced filter primitives", () => {
         { closeDate: "2026-10-15" },
         { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
         ["closeDate"],
+        { dateFields: ["closeDate"] },
       ),
     ).toBe(true);
     expect(
@@ -44,6 +45,7 @@ describe("advanced filter primitives", () => {
         { closeDate: "2026-10-14" },
         { dateFrom: "2026-10-15" },
         ["closeDate"],
+        { dateFields: ["closeDate"] },
       ),
     ).toBe(false);
     expect(
@@ -51,6 +53,7 @@ describe("advanced filter primitives", () => {
         { closeDate: "2026-10-15T23:59:59.000Z" },
         { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
         ["closeDate"],
+        { dateFields: ["closeDate"] },
       ),
     ).toBe(true);
     expect(
@@ -59,6 +62,13 @@ describe("advanced filter primitives", () => {
         { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
         ["closeDate"],
         { dateFields: ["closeDate"] },
+      ),
+    ).toBe(false);
+    expect(
+      matchesAdvancedFilters(
+        { closeDate: "2026-10-15" },
+        { dateFrom: "2026-10-15", dateTo: "2026-10-15" },
+        ["closeDate"],
       ),
     ).toBe(false);
   });
