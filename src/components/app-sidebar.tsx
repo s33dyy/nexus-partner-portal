@@ -43,6 +43,7 @@ import {
 import { useAuth, type AppRole } from "@/hooks/use-auth";
 import { BrandLogo } from "@/components/brand-logo";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
+import type { ShellNotificationDots } from "@/components/app-shell.utils";
 
 type Item = {
   title: string;
@@ -91,7 +92,7 @@ const partnerAdmin: Item[] = [
   { title: "Team", url: "/partner/team", icon: Users, roles: ["partner_admin"] },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ notificationDots }: { notificationDots: ShellNotificationDots }) {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -158,6 +159,20 @@ export function AppSidebar() {
     ...(can("calls", "read") ? [{ title: "Calls", url: "/calls", icon: Phone }] : []),
   ];
 
+  const renderAttentionDot = (url: string, title: string) => {
+    const hasAttention =
+      (url === "/admin/deals" && notificationDots.dealApprovals) ||
+      (url === "/tasks" && notificationDots.tasks) ||
+      (url === "/notifications" && notificationDots.notifications);
+    return hasAttention ? (
+      <span
+        role="img"
+        aria-label={`${title} has items needing attention`}
+        className="ml-auto h-2 w-2 shrink-0 rounded-full bg-destructive"
+      />
+    ) : null;
+  };
+
   const renderGroup = (label: string, items: Item[]) => {
     const list = visible(items);
     if (!list.length) return null;
@@ -178,6 +193,7 @@ export function AppSidebar() {
                     <Link to={item.url} className="flex items-center gap-2">
                       <item.icon className="h-4 w-4 shrink-0" />
                       {!collapsed && <span className="truncate">{item.title}</span>}
+                      {renderAttentionDot(item.url, item.title)}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -242,6 +258,7 @@ export function AppSidebar() {
               <Link to="/notifications" className="flex items-center gap-2">
                 <Bell className="h-4 w-4" />
                 {!collapsed && <span>Notifications</span>}
+                {renderAttentionDot("/notifications", "Notifications")}
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

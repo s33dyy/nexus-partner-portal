@@ -25,7 +25,12 @@ import { RegionFilterSelect } from "@/components/region-filter-select";
 import { supabase } from "@/integrations/local/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePartnerAccess } from "@/hooks/use-partner-access";
-import { buildShellContextSummary } from "@/components/app-shell.utils";
+import { listTasks } from "@/integrations/local/task-commands";
+import {
+  buildShellContextSummary,
+  getShellNotificationDots,
+  type ShellNotificationDots,
+} from "@/components/app-shell.utils";
 import { cn } from "@/lib/utils";
 
 const statusLabel: Record<string, string> = {
@@ -54,6 +59,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const access = usePartnerAccess();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationDots, setNotificationDots] = useState<ShellNotificationDots>({
+    dealApprovals: false,
+    tasks: false,
+    notifications: false,
+  });
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -70,30 +80,59 @@ export function AppShell({ children }: { children: ReactNode }) {
   const contextLabel = activeContext
     ? `${contextSummary.roleLabel}${activeContext.workingScope ? ` · ${contextSummary.scopeLabel}` : ""}`
     : contextSummary.title;
+  const canReadDealApprovals = can("deals", "read");
+  const canReadTasks = can("tasks", "read");
 
   useEffect(() => {
     let active = true;
-    const loadUnreadCount = async () => {
-      let query = supabase.from("notifications").select("id, read").eq("read", false);
+    const loadAttention = async () => {
+      let notificationsQuery = supabase.from("notifications").select("id, read").eq("read", false);
       if (profile?.partner_id) {
-        query = query.eq("partner_id", profile.partner_id);
+        notificationsQuery = notificationsQuery.eq("partner_id", profile.partner_id);
       }
       if (profile?.id && !profile?.partner_id) {
-        query = query.eq("user_id", profile.id);
+        notificationsQuery = notificationsQuery.eq("user_id", profile.id);
       }
       if (access.isLiveyInternal) {
-        query = supabase.from("notifications").select("id, read").eq("read", false);
+        notificationsQuery = supabase.from("notifications").select("id, read").eq("read", false);
       }
-      const { data } = await query;
+      const [notificationsResult, dealResult, taskResult] = await Promise.all([
+        notificationsQuery,
+        canReadDealApprovals
+          ? supabase.from("portal_deals").select("id").eq("status", "submitted")
+          : Promise.resolve({ data: null }),
+        canReadTasks ? listTasks() : Promise.resolve(null),
+      ]);
       if (active) {
-        setUnreadCount(Array.isArray(data) ? data.length : 0);
+        const unreadNotifications = Array.isArray(notificationsResult.data)
+          ? notificationsResult.data.length
+          : 0;
+        const pendingDealApprovals = Array.isArray(dealResult.data) ? dealResult.data.length : 0;
+        const tasks = taskResult?.ok ? taskResult.data : [];
+        setUnreadCount(unreadNotifications);
+        setNotificationDots(
+          getShellNotificationDots({
+            canReadDealApprovals,
+            pendingDealApprovals,
+            canReadTasks,
+            currentUserId: profile?.id ?? null,
+            tasks,
+            unreadNotifications,
+          }),
+        );
       }
     };
-    void loadUnreadCount();
+    void loadAttention();
     return () => {
       active = false;
     };
-  }, [profile?.id, profile?.partner_id, roles]);
+  }, [
+    access.isLiveyInternal,
+    canReadDealApprovals,
+    canReadTasks,
+    profile?.id,
+    profile?.partner_id,
+  ]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -107,7 +146,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <AppSidebar notificationDots={notificationDots} />
       <SidebarInset>
         {isAgreementAttention && <AgreementPendingBanner />}
         {/*

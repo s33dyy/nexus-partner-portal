@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildShellContextSummary } from "@/components/app-shell.utils";
+import { buildShellContextSummary, getShellNotificationDots } from "@/components/app-shell.utils";
 import type { AssignmentRecord } from "@/domain/contracts/governance";
 
 test("buildShellContextSummary flags missing assignments explicitly", () => {
@@ -63,4 +63,62 @@ test("buildShellContextSummary surfaces the active governed context", () => {
   expect(summary.scopeLabel).toBe("north zone");
   expect(summary.statusLabel).toBe("Assignment active");
   expect(summary.tenantLabel).toBe("Tenant tenant-1");
+});
+
+test("getShellNotificationDots marks pending approvals, actionable tasks, and unread notifications", () => {
+  expect(
+    getShellNotificationDots({
+      canReadDealApprovals: true,
+      pendingDealApprovals: 1,
+      canReadTasks: true,
+      currentUserId: "user-1",
+      tasks: [
+        { status: "to_do", creator_id: "user-1", assignee_id: null },
+        { status: "completed", creator_id: "user-1", assignee_id: null },
+      ],
+      unreadNotifications: 2,
+    }),
+  ).toEqual({ dealApprovals: true, tasks: true, notifications: true });
+});
+
+test("getShellNotificationDots ignores completed and cancelled tasks", () => {
+  expect(
+    getShellNotificationDots({
+      canReadDealApprovals: true,
+      pendingDealApprovals: 0,
+      canReadTasks: true,
+      currentUserId: "user-1",
+      tasks: [
+        { status: "completed", creator_id: "user-1", assignee_id: null },
+        { status: "cancelled", creator_id: "user-1", assignee_id: null },
+      ],
+      unreadNotifications: 0,
+    }),
+  ).toEqual({ dealApprovals: false, tasks: false, notifications: false });
+});
+
+test("getShellNotificationDots does not expose indicators without read access", () => {
+  expect(
+    getShellNotificationDots({
+      canReadDealApprovals: false,
+      pendingDealApprovals: 3,
+      canReadTasks: false,
+      currentUserId: "user-1",
+      tasks: [{ status: "in_progress", creator_id: "user-1", assignee_id: null }],
+      unreadNotifications: 1,
+    }),
+  ).toEqual({ dealApprovals: false, tasks: false, notifications: true });
+});
+
+test("getShellNotificationDots ignores open tasks unrelated to the current user", () => {
+  expect(
+    getShellNotificationDots({
+      canReadDealApprovals: false,
+      pendingDealApprovals: 0,
+      canReadTasks: true,
+      currentUserId: "user-1",
+      tasks: [{ status: "in_progress", creator_id: "user-2", assignee_id: "user-3" }],
+      unreadNotifications: 0,
+    }),
+  ).toEqual({ dealApprovals: false, tasks: false, notifications: false });
 });

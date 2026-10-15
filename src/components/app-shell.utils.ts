@@ -15,6 +15,40 @@ export type ShellContextSummary = {
   state: "ready" | "assignment-pending" | "context-pending";
 };
 
+export type ShellNotificationDots = {
+  dealApprovals: boolean;
+  tasks: boolean;
+  notifications: boolean;
+};
+
+type ShellTaskStatus = {
+  status: string;
+  creator_id: string | null;
+  assignee_id: string | null;
+};
+
+export function getShellNotificationDots(input: {
+  canReadDealApprovals: boolean;
+  pendingDealApprovals: number;
+  canReadTasks: boolean;
+  currentUserId: string | null;
+  tasks: ShellTaskStatus[];
+  unreadNotifications: number;
+}): ShellNotificationDots {
+  return {
+    dealApprovals: input.canReadDealApprovals && input.pendingDealApprovals > 0,
+    tasks:
+      input.canReadTasks &&
+      input.currentUserId !== null &&
+      input.tasks.some(
+        (task) =>
+          (task.creator_id === input.currentUserId || task.assignee_id === input.currentUserId) &&
+          !["completed", "cancelled"].includes(task.status),
+      ),
+    notifications: input.unreadNotifications > 0,
+  };
+}
+
 function formatRoleLabel(roleKey: string | null | undefined) {
   if (!roleKey) return "Assignment pending";
   return roleKey.replace(/_/g, " ");
