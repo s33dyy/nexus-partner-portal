@@ -62,7 +62,7 @@ import { matchesSelectedRegion, useRegionFilter } from "@/lib/region-filter";
 import { sanitizeDecimal, sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { countActiveFilters } from "@/lib/advanced-filters";
 import {
-  type DealApprovalStateFilter,
+  type DealListStatusFilter,
   filterDealsByView,
   type DealAdvancedFilters,
 } from "@/lib/deal-filters";
@@ -84,7 +84,7 @@ function AdminDealsPage() {
   const [source, setSource] = useState<"database" | "empty">("empty");
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<DealApprovalStateFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<DealListStatusFilter>("all");
   const [advancedFilters, setAdvancedFilters] = useState<DealAdvancedFilters>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -259,7 +259,7 @@ function AdminDealsPage() {
   const activeFilterCount = countActiveFilters({
     text: query,
     stage: stageFilter === "all" ? undefined : stageFilter,
-    approvalState: statusFilter === "all" ? undefined : statusFilter,
+    status: statusFilter === "all" ? undefined : statusFilter,
     ...advancedFilters,
   });
 
@@ -499,15 +499,15 @@ function AdminDealsPage() {
                 />
                 <LookupCombobox
                   fieldName={LOOKUP_FIELDS.dealStatus}
-                  label="Approval state"
+                  label="Status"
                   value={statusFilter === "all" ? "" : statusFilter}
                   onValueChange={(value) =>
-                    setStatusFilter((value || "all") as DealApprovalStateFilter)
+                    setStatusFilter((value || "all") as DealListStatusFilter)
                   }
                   placeholder="All approval states"
                   clearLabel="All approval states"
                   allowClear
-                  options={["draft", "submitted", "approved", "need_more_info", "rejected"]}
+                  options={["open", "approved", "submitted", "won", "lost"]}
                   triggerClassName="w-44"
                 />
               </div>
@@ -565,7 +565,7 @@ function AdminDealsPage() {
                 onMaxChange={(event) => updateAdvancedFilter("amountMax", event.target.value)}
               />
               <AdvancedFilterDateRangeField
-                label="Submission date"
+                label="Created date"
                 id="admin-deals-filter-submission-date"
                 fromValue={advancedFilters.submissionDateFrom ?? ""}
                 toValue={advancedFilters.submissionDateTo ?? ""}
