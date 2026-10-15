@@ -58,19 +58,37 @@ describe("task filters", () => {
     ).toEqual(["task-1"]);
   });
 
+  it("compares date-only ranges by the date encoded in the task value", () => {
+    const taskWithPositiveOffset: TaskFilterRecord = {
+      ...TASKS[0],
+      id: "task-positive-offset",
+      due_at: "2026-10-10T12:00:00+14:00",
+    };
+
+    expect(
+      filterTasksByView([taskWithPositiveOffset], {
+        advanced: { dueDateFrom: "2026-10-10", dueDateTo: "2026-10-10" },
+      }).map((task) => task.id),
+    ).toEqual(["task-positive-offset"]);
+  });
+
   it("applies the existing tab status after the scoped task set", () => {
     expect(filterTasksByView(TASKS, { status: "to_do" }).map((task) => task.id)).toEqual([
       "task-2",
     ]);
   });
 
-  it("marks only unfinished tasks with a past due date as overdue", () => {
-    const now = new Date("2026-10-15T12:00:00.000Z");
+  it("starts a date-only task overdue after its calendar day ends", () => {
+    const dateOnlyTask = { ...TASKS[0], due_at: "2026-10-15" };
 
-    expect(isTaskOverdue(TASKS[0], now)).toBe(true);
-    expect(isTaskOverdue(TASKS[2], now)).toBe(false);
+    expect(isTaskOverdue(dateOnlyTask, new Date("2026-10-15T23:59:59.999Z"))).toBe(false);
+    expect(isTaskOverdue(dateOnlyTask, new Date("2026-10-16T00:00:00.000Z"))).toBe(true);
+    expect(isTaskOverdue(TASKS[2], new Date("2026-10-15T12:00:00.000Z"))).toBe(false);
     expect(
-      filterTasksByView(TASKS, { advanced: { overdueOnly: true }, now }).map((task) => task.id),
+      filterTasksByView([dateOnlyTask], {
+        advanced: { overdueOnly: true },
+        now: new Date("2026-10-16T00:00:00.000Z"),
+      }).map((task) => task.id),
     ).toEqual(["task-1"]);
   });
 });

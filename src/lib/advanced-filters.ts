@@ -45,7 +45,8 @@ export function matchesInclusiveNumericRange(value: unknown, range: NumericRange
 
   const min = parseNumericRangeBound(range.min);
   const max = parseNumericRangeBound(range.max);
-  if ((min !== undefined && Number.isNaN(min)) || (max !== undefined && Number.isNaN(max))) return false;
+  if ((min !== undefined && Number.isNaN(min)) || (max !== undefined && Number.isNaN(max)))
+    return false;
   if (min !== undefined && numericValue < min) return false;
   if (max !== undefined && numericValue > max) return false;
   return true;
@@ -64,23 +65,50 @@ function parseNumericValue(value: unknown): number | undefined {
 }
 
 export function matchesInclusiveIsoDateRange(value: unknown, range: IsoDateRange): boolean {
-  if (isEmptyFilterValue(value)) return false;
-  const dateValue = Date.parse(String(value));
-  if (!Number.isFinite(dateValue)) return false;
+  const dateValue = normalizeCalendarDate(value);
+  if (!dateValue) return false;
 
   if (!isEmptyFilterValue(range.from)) {
-    const from = Date.parse(String(range.from));
-    if (!Number.isFinite(from) || dateValue < from) return false;
+    const from = normalizeCalendarDate(range.from);
+    if (!from || dateValue < from) return false;
   }
   if (!isEmptyFilterValue(range.to)) {
-    const toValue = String(range.to);
-    const to = Date.parse(toValue);
-    if (!Number.isFinite(to)) return false;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(toValue) ? dateValue >= to + 24 * 60 * 60 * 1000 : dateValue > to) {
-      return false;
-    }
+    const to = normalizeCalendarDate(range.to);
+    if (!to || dateValue > to) return false;
   }
   return true;
+}
+
+/**
+ * Returns the calendar date encoded by a date value rather than comparing
+ * instants. This keeps a date-only filter boundary and a timestamp produced
+ * from local noon on the same calendar day aligned across timezones.
+ */
+export function normalizeCalendarDate(value: unknown): string | undefined {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return undefined;
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const match = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(trimmed);
+    if (match?.[1] && isValidCalendarDate(match[1])) return match[1];
+  }
+
+  if (isEmptyFilterValue(value)) return undefined;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : undefined;
+}
+
+function isValidCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
 }
 
 function getRecordField<T extends Record<string, unknown>>(
@@ -95,13 +123,19 @@ function getRecordField<T extends Record<string, unknown>>(
   return undefined;
 }
 
-function getRangeBase(key: string): { base: string; suffix: (typeof RANGE_SUFFIXES)[number] } | undefined {
+function getRangeBase(
+  key: string,
+): { base: string; suffix: (typeof RANGE_SUFFIXES)[number] } | undefined {
   const suffix = RANGE_SUFFIXES.find((candidate) => key.endsWith(candidate));
   if (!suffix) return undefined;
   return { base: key.slice(0, -suffix.length), suffix };
 }
 
-function hasRangeValue(filters: AdvancedFilterValues, base: string, suffix: "Min" | "Max" | "From" | "To") {
+function hasRangeValue(
+  filters: AdvancedFilterValues,
+  base: string,
+  suffix: "Min" | "Max" | "From" | "To",
+) {
   return !isEmptyFilterValue(filters[`${base}${suffix}`]);
 }
 
@@ -114,7 +148,9 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
   const text = filters.text;
   if (!isEmptyFilterValue(text)) {
     const normalizedText = normalizeFilterText(text);
-    const textMatches = textFields.some((field) => normalizeFilterText(record[field]).includes(normalizedText));
+    const textMatches = textFields.some((field) =>
+      normalizeFilterText(record[field]).includes(normalizedText),
+    );
     if (!textMatches) return false;
   }
 
@@ -126,8 +162,10 @@ export function matchesAdvancedFilters<T extends Record<string, unknown>>(
       const field = getRecordField(record, range.base, options);
       if (!field) return false;
 
-      const hasNumericRange = hasRangeValue(filters, range.base, "Min") || hasRangeValue(filters, range.base, "Max");
-      const hasDateRange = hasRangeValue(filters, range.base, "From") || hasRangeValue(filters, range.base, "To");
+      const hasNumericRange =
+        hasRangeValue(filters, range.base, "Min") || hasRangeValue(filters, range.base, "Max");
+      const hasDateRange =
+        hasRangeValue(filters, range.base, "From") || hasRangeValue(filters, range.base, "To");
       if (hasNumericRange && (range.suffix === "Min" || range.suffix === "Max")) {
         if (
           !matchesInclusiveNumericRange(record[field], {

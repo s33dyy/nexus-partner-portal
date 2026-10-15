@@ -1,4 +1,9 @@
-import { matchesAdvancedFilters, type AdvancedFilterValues } from "@/lib/advanced-filters";
+import {
+  countActiveFilters,
+  matchesAdvancedFilters,
+  normalizeCalendarDate,
+  type AdvancedFilterValues,
+} from "@/lib/advanced-filters";
 
 export type TaskFilterRecord = {
   id: string;
@@ -30,12 +35,47 @@ export type TaskListFilters = {
   now?: Date;
 };
 
+export type TaskEmptyState = {
+  title: string;
+  description: string;
+  action: "clearFilters" | "createTask" | null;
+};
+
 const TERMINAL_TASK_STATUSES = new Set(["completed", "cancelled"]);
 
 export function isTaskOverdue(task: Pick<TaskFilterRecord, "status" | "due_at">, now = new Date()) {
   if (!task.due_at || TERMINAL_TASK_STATUSES.has(task.status)) return false;
-  const dueAt = Date.parse(task.due_at);
-  return Number.isFinite(dueAt) && dueAt < now.getTime();
+  const dueDate = normalizeCalendarDate(task.due_at);
+  const today = normalizeCalendarDate(now);
+  return Boolean(dueDate && today && dueDate < today);
+}
+
+export function getTaskEmptyState(
+  tab: string,
+  advancedFilters: TaskAdvancedFilters = {},
+): TaskEmptyState {
+  if (countActiveFilters(advancedFilters) > 0) {
+    return {
+      title: "No tasks match these filters",
+      description: "Clear the filters or adjust them to see more of your accessible tasks.",
+      action: "clearFilters",
+    };
+  }
+
+  if (tab === "all") {
+    return {
+      title: "No tasks in this view",
+      description:
+        "Create a task to start tracking work and get reminders on its proposed completion date.",
+      action: "createTask",
+    };
+  }
+
+  return {
+    title: "No tasks in this view",
+    description: "Nothing sits in this status right now. Try another tab.",
+    action: null,
+  };
 }
 
 export function filterTasksByView<T extends TaskFilterRecord>(

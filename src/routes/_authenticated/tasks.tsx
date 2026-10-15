@@ -37,7 +37,12 @@ import {
 } from "@/integrations/local/task-commands";
 import { formatDateLabel, formatDateTimeLabel, toDateInputValue } from "@/lib/date-utils";
 import { countActiveFilters } from "@/lib/advanced-filters";
-import { filterTasksByView, isTaskOverdue, type TaskAdvancedFilters } from "@/lib/task-filters";
+import {
+  filterTasksByView,
+  getTaskEmptyState,
+  isTaskOverdue,
+  type TaskAdvancedFilters,
+} from "@/lib/task-filters";
 import type { TaskAssignee, TaskStatus } from "@/server/task-commands.server";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
@@ -170,6 +175,8 @@ function TasksPage() {
       }),
     [advancedFilters, tasks, tab],
   );
+
+  const emptyState = useMemo(() => getTaskEmptyState(tab, advancedFilters), [advancedFilters, tab]);
 
   const advancedFilterOptions = useMemo(() => {
     const assigneeOptions = new Map<string, string>();
@@ -658,14 +665,14 @@ function TasksPage() {
           ) : visibleTasks.length === 0 ? (
             <EmptyState
               icon={<CheckSquare className="h-5 w-5" />}
-              title="No tasks in this view"
-              description={
-                tab === "all"
-                  ? "Create a task to start tracking work and get reminders on its proposed completion date."
-                  : "Nothing sits in this status right now. Try another tab."
-              }
+              title={emptyState.title}
+              description={emptyState.description}
               action={
-                tab === "all" ? (
+                emptyState.action === "clearFilters" ? (
+                  <Button size="sm" variant="outline" onClick={clearAdvancedFilters}>
+                    Clear filters
+                  </Button>
+                ) : emptyState.action === "createTask" ? (
                   <Button size="sm" onClick={() => setCreateOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" /> New task
                   </Button>
