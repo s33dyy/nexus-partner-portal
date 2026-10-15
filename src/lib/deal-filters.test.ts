@@ -110,3 +110,52 @@ test("filterDealsByView searches the canonical company name when a deal provides
     }).map((deal) => deal.id),
   ).toEqual(["company"]);
 });
+
+test("filterDealsByView applies advanced deal filters with inclusive ranges", () => {
+  const deals = [
+    buildDeal({
+      id: "match",
+      country: "India",
+      region: "India West",
+      product: "LIVEY WC350 QHD Webcam",
+      currency_code: "INR",
+      amount_value: 1000,
+      probability: 50,
+      close_date: "2026-10-15",
+    }),
+    buildDeal({
+      id: "wrong-country",
+      country: "Germany",
+      currency_code: "EUR",
+      amount_value: 1000,
+      probability: 50,
+      close_date: "2026-10-15",
+    }),
+    buildDeal({
+      id: "outside-range",
+      amount_value: 1001,
+      probability: 49,
+      close_date: "2026-10-16",
+    }),
+  ];
+
+  expect(
+    filterDealsByView(deals, {
+      query: "",
+      stage: "all",
+      status: "all",
+      advanced: {
+        country: "India",
+        region: "India West",
+        product: "LIVEY WC350 QHD Webcam",
+        currency: "INR",
+        amountMin: "1000",
+        amountMax: "1000",
+        probabilityMin: "50",
+        probabilityMax: "50",
+        closeDateFrom: "2026-10-15",
+        closeDateTo: "2026-10-15",
+      },
+    }).map((deal) => deal.id),
+  ).toEqual(["match"]);
+});

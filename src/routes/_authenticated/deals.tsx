@@ -21,6 +21,12 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { contextualStockAction } from "@/components/distribution/distribution-navigation";
+import {
+  AdvancedFilterDateRangeField,
+  AdvancedFilterNumericRangeField,
+  AdvancedFilterSelectField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { DealProductSuggestions } from "@/components/recommendations/deal-product-suggestions";
 import {
   newRequestForDealUrl,
@@ -80,8 +86,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { formatCsvDate, type CsvColumn } from "@/lib/csv-export";
+import { countActiveFilters } from "@/lib/advanced-filters";
 import {
   filterDealsByView,
+  type DealAdvancedFilters,
   type DealListStatusFilter,
   type DealOwnerRoleFilter,
 } from "@/lib/deal-filters";
@@ -392,6 +400,7 @@ function DealsPage() {
   const [selectedCurrencyPreviewError, setSelectedCurrencyPreviewError] = useState<string | null>(
     null,
   );
+  const [advancedFilters, setAdvancedFilters] = useState<DealAdvancedFilters>({});
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const { profile, hasRole, can, roleKey, surfaces } = useAuth();
   const canCreateDeals = can("deals", "create");
@@ -753,14 +762,45 @@ function DealsPage() {
     [deals, selectedRegion],
   );
 
+  const advancedFilterOptions = useMemo(
+    () => ({
+      countries: uniqueStrings(deals.map((deal) => deal.country)).map((value) => ({
+        label: value,
+        value,
+      })),
+      regions: uniqueStrings(deals.map((deal) => deal.region)).map((value) => ({
+        label: value,
+        value,
+      })),
+      products: uniqueStrings(deals.map((deal) => deal.product)).map((value) => ({
+        label: value,
+        value,
+      })),
+      currencies: uniqueStrings(deals.map((deal) => deal.currency_code)).map((value) => ({
+        label: value,
+        value,
+      })),
+    }),
+    [deals],
+  );
+
   const filteredDeals = useMemo(() => {
     return filterDealsByView(regionScopedDeals, {
       query,
       stage: stageFilter,
       status: statusFilter,
       ownerRole: ownerRoleFilter,
+      advanced: advancedFilters,
     });
-  }, [regionScopedDeals, query, stageFilter, statusFilter, ownerRoleFilter]);
+  }, [advancedFilters, regionScopedDeals, query, stageFilter, statusFilter, ownerRoleFilter]);
+
+  const updateAdvancedFilter = useCallback((key: keyof DealAdvancedFilters, value: string) => {
+    setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+  }, []);
+
+  const clearAdvancedFilters = useCallback(() => {
+    setAdvancedFilters({});
+  }, []);
 
   const groupedDeals = useMemo(() => {
     const byStage = new Map<DealStage, DealRecord[]>();
@@ -1980,6 +2020,69 @@ function DealsPage() {
               triggerClassName="w-52"
             />
           </Toolbar>
+          <AdvancedFilters
+            activeCount={countActiveFilters(advancedFilters)}
+            onClearAll={clearAdvancedFilters}
+          >
+            <AdvancedFilterSelectField
+              label="Country"
+              id="deals-filter-country"
+              value={advancedFilters.country ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("country", value)}
+              options={advancedFilterOptions.countries}
+              disabled={advancedFilterOptions.countries.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Region"
+              id="deals-filter-region"
+              value={advancedFilters.region ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("region", value)}
+              options={advancedFilterOptions.regions}
+              disabled={advancedFilterOptions.regions.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Product"
+              id="deals-filter-product"
+              value={advancedFilters.product ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("product", value)}
+              options={advancedFilterOptions.products}
+              disabled={advancedFilterOptions.products.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Currency"
+              id="deals-filter-currency"
+              value={advancedFilters.currency ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("currency", value)}
+              options={advancedFilterOptions.currencies}
+              disabled={advancedFilterOptions.currencies.length === 0}
+            />
+            <AdvancedFilterNumericRangeField
+              label="Amount"
+              id="deals-filter-amount"
+              minValue={String(advancedFilters.amountMin ?? "")}
+              maxValue={String(advancedFilters.amountMax ?? "")}
+              onMinChange={(event) => updateAdvancedFilter("amountMin", event.target.value)}
+              onMaxChange={(event) => updateAdvancedFilter("amountMax", event.target.value)}
+            />
+            <AdvancedFilterNumericRangeField
+              label="Probability"
+              id="deals-filter-probability"
+              minValue={String(advancedFilters.probabilityMin ?? "")}
+              maxValue={String(advancedFilters.probabilityMax ?? "")}
+              onMinChange={(event) => updateAdvancedFilter("probabilityMin", event.target.value)}
+              onMaxChange={(event) => updateAdvancedFilter("probabilityMax", event.target.value)}
+              minPlaceholder="0%"
+              maxPlaceholder="100%"
+            />
+            <AdvancedFilterDateRangeField
+              label="Close date"
+              id="deals-filter-close-date"
+              fromValue={advancedFilters.closeDateFrom ?? ""}
+              toValue={advancedFilters.closeDateTo ?? ""}
+              onFromChange={(event) => updateAdvancedFilter("closeDateFrom", event.target.value)}
+              onToChange={(event) => updateAdvancedFilter("closeDateTo", event.target.value)}
+            />
+          </AdvancedFilters>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (

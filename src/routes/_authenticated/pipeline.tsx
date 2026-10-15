@@ -14,6 +14,12 @@ import {
 import { toast } from "sonner";
 
 import { CsvExportButton } from "@/components/csv-export-button";
+import {
+  AdvancedFilterDateRangeField,
+  AdvancedFilterNumericRangeField,
+  AdvancedFilterSelectField,
+  AdvancedFilters,
+} from "@/components/advanced-filters";
 import { LookupCombobox } from "@/components/lookup-combobox";
 import { EmptyState, PageHeader, StatTile, Toolbar } from "@/components/page-header";
 import { BoardCard, BoardColumn } from "@/components/record-list";
@@ -47,9 +53,11 @@ import { useRequireAccess } from "@/hooks/use-partner-access";
 import { recordAuditEvent } from "@/lib/workflow-events";
 import { applyPartnerScope, hasDealsScopeBypass } from "@/lib/partner-scope";
 import { filterVisibleDeals, groupCollaboratorIdsByDeal } from "@/lib/deal-visibility";
+import { countActiveFilters } from "@/lib/advanced-filters";
 import {
   filterDealsByView,
   getDealCompanyName,
+  type DealAdvancedFilters,
   type DealOwnerRoleFilter,
 } from "@/lib/deal-filters";
 import { type CsvColumn } from "@/lib/csv-export";
@@ -109,6 +117,7 @@ function PipelinePage() {
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<DealRecord["stage"] | "all">("all");
   const [ownerRoleFilter, setOwnerRoleFilter] = useState<DealOwnerRoleFilter>("all");
+  const [advancedFilters, setAdvancedFilters] = useState<DealAdvancedFilters>({});
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDeal, setNoteDeal] = useState<DealRecord | null>(null);
@@ -242,14 +251,41 @@ function PipelinePage() {
     [deals, selectedRegion],
   );
 
+  const advancedFilterOptions = useMemo(
+    () => ({
+      countries: [...new Set(deals.map((deal) => deal.country.trim()).filter(Boolean))].map(
+        (value) => ({ label: value, value }),
+      ),
+      regions: [...new Set(deals.map((deal) => deal.region.trim()).filter(Boolean))].map(
+        (value) => ({ label: value, value }),
+      ),
+      products: [...new Set(deals.map((deal) => deal.product.trim()).filter(Boolean))].map(
+        (value) => ({ label: value, value }),
+      ),
+      currencies: [...new Set(deals.map((deal) => deal.currency_code.trim()).filter(Boolean))].map(
+        (value) => ({ label: value, value }),
+      ),
+    }),
+    [deals],
+  );
+
   const visibleDeals = useMemo(() => {
     return filterDealsByView(regionScopedDeals, {
       query,
       stage: stageFilter,
       status: "all",
       ownerRole: ownerRoleFilter,
+      advanced: advancedFilters,
     });
-  }, [regionScopedDeals, query, stageFilter, ownerRoleFilter]);
+  }, [advancedFilters, regionScopedDeals, query, stageFilter, ownerRoleFilter]);
+
+  const updateAdvancedFilter = useCallback((key: keyof DealAdvancedFilters, value: string) => {
+    setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+  }, []);
+
+  const clearAdvancedFilters = useCallback(() => {
+    setAdvancedFilters({});
+  }, []);
 
   // Won and Lost share one terminal column.
   //
@@ -656,6 +692,69 @@ function PipelinePage() {
               triggerClassName="w-full sm:w-52"
             />
           </Toolbar>
+          <AdvancedFilters
+            activeCount={countActiveFilters(advancedFilters)}
+            onClearAll={clearAdvancedFilters}
+          >
+            <AdvancedFilterSelectField
+              label="Country"
+              id="pipeline-filter-country"
+              value={advancedFilters.country ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("country", value)}
+              options={advancedFilterOptions.countries}
+              disabled={advancedFilterOptions.countries.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Region"
+              id="pipeline-filter-region"
+              value={advancedFilters.region ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("region", value)}
+              options={advancedFilterOptions.regions}
+              disabled={advancedFilterOptions.regions.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Product"
+              id="pipeline-filter-product"
+              value={advancedFilters.product ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("product", value)}
+              options={advancedFilterOptions.products}
+              disabled={advancedFilterOptions.products.length === 0}
+            />
+            <AdvancedFilterSelectField
+              label="Currency"
+              id="pipeline-filter-currency"
+              value={advancedFilters.currency ?? ""}
+              onValueChange={(value) => updateAdvancedFilter("currency", value)}
+              options={advancedFilterOptions.currencies}
+              disabled={advancedFilterOptions.currencies.length === 0}
+            />
+            <AdvancedFilterNumericRangeField
+              label="Amount"
+              id="pipeline-filter-amount"
+              minValue={String(advancedFilters.amountMin ?? "")}
+              maxValue={String(advancedFilters.amountMax ?? "")}
+              onMinChange={(event) => updateAdvancedFilter("amountMin", event.target.value)}
+              onMaxChange={(event) => updateAdvancedFilter("amountMax", event.target.value)}
+            />
+            <AdvancedFilterNumericRangeField
+              label="Probability"
+              id="pipeline-filter-probability"
+              minValue={String(advancedFilters.probabilityMin ?? "")}
+              maxValue={String(advancedFilters.probabilityMax ?? "")}
+              onMinChange={(event) => updateAdvancedFilter("probabilityMin", event.target.value)}
+              onMaxChange={(event) => updateAdvancedFilter("probabilityMax", event.target.value)}
+              minPlaceholder="0%"
+              maxPlaceholder="100%"
+            />
+            <AdvancedFilterDateRangeField
+              label="Close date"
+              id="pipeline-filter-close-date"
+              fromValue={advancedFilters.closeDateFrom ?? ""}
+              toValue={advancedFilters.closeDateTo ?? ""}
+              onFromChange={(event) => updateAdvancedFilter("closeDateFrom", event.target.value)}
+              onToChange={(event) => updateAdvancedFilter("closeDateTo", event.target.value)}
+            />
+          </AdvancedFilters>
         </CardHeader>
         <CardContent className="overflow-x-auto p-4">
           {loading ? (
