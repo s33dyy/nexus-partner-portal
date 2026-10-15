@@ -30,9 +30,6 @@ export function matchesExactOption(value: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) {
     return expected.some((option) => matchesExactOption(value, option));
   }
-  if (typeof value === "string" && typeof expected === "string") {
-    return normalizeFilterText(value) === normalizeFilterText(expected);
-  }
   return value === expected;
 }
 

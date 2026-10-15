@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { countActiveFilters, matchesAdvancedFilters, normalizeFilterText } from "./advanced-filters";
+import {
+  countActiveFilters,
+  matchesAdvancedFilters,
+  matchesExactOption,
+  normalizeFilterText,
+} from "./advanced-filters";
 
 describe("advanced filter primitives", () => {
   it("matches text without case or whitespace sensitivity", () => {
@@ -8,6 +13,7 @@ describe("advanced filter primitives", () => {
   });
 
   it("applies exact options and inclusive numeric ranges", () => {
+    expect(matchesExactOption("Open", "open")).toBe(false);
     expect(
       matchesAdvancedFilters(
         { status: "open", amount: 100 },
