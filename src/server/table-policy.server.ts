@@ -96,6 +96,10 @@ const GOVERNANCE_TABLES = new Set([
   "role_geography_access",
 ]);
 
+// Partner Companies are shared administration records. They intentionally
+// have no tenant/owner scope: only Super Admin may list or mutate them.
+const SUPER_ADMIN_ONLY_TABLES = new Set(["companies"]);
+
 // Tables that must NEVER be reachable through the generic
 // queryTable()/supabase.from() path by anyone, including super_admin.
 // They are registered in TABLE_COLUMNS (so the inventory analyzer and the
@@ -411,6 +415,10 @@ export function decideGenericTableAccess(
       return { allowed: false, reason: "Access denied", scope: null };
     }
     return { allowed: true, scope: null };
+  }
+
+  if (SUPER_ADMIN_ONLY_TABLES.has(query.table) && !isGenericSuperAdmin(auth)) {
+    return { allowed: false, reason: "Access denied", scope: null };
   }
 
   if (GOVERNANCE_TABLES.has(query.table) && !isGenericSuperAdmin(auth)) {
@@ -819,6 +827,11 @@ async function applyTablePolicyInner(
     if (!superAdmin) {
       throw new Error("Access denied");
     }
+    return { ...query, filters: normalizeFilters(query.filters) };
+  }
+
+  if (SUPER_ADMIN_ONLY_TABLES.has(query.table)) {
+    if (!superAdmin) throw new Error("Access denied");
     return { ...query, filters: normalizeFilters(query.filters) };
   }
 

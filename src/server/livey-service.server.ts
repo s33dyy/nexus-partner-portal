@@ -101,6 +101,18 @@ export type TableQuery = {
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
+  companies: [
+    "id",
+    "name",
+    "legal_name",
+    "country",
+    "region",
+    "status",
+    "owner_user_id",
+    "is_seed",
+    "created_at",
+    "updated_at",
+  ],
   profiles: [
     "id",
     "email",

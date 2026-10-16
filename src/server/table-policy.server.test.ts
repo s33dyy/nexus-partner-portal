@@ -97,6 +97,57 @@ test("generic table policy denies anonymous business reads", async () => {
   ).rejects.toThrow("Access denied");
 });
 
+test("partner companies are registered in the generic data layer and remain super-admin only", async () => {
+  const { applyTablePolicy } = await import("@/server/table-policy.server");
+
+  const adminQuery = await applyTablePolicy(
+    { table: "companies", operation: "insert", values: { name: "Acme" } },
+    SUPER_ADMIN_AUTH,
+  );
+  expect(adminQuery.table).toBe("companies");
+  expect(adminQuery.filters).toEqual([]);
+
+  await expect(
+    applyTablePolicy(
+      { table: "companies", operation: "select", filters: [] },
+      {
+        userId: "user-a",
+        roles: ["partner_admin"],
+        partnerId: "partner-a",
+        companyName: "Acme Labs",
+        hasGovernedContext: true,
+        governedRoleKey: "partner_admin",
+      },
+    ),
+  ).rejects.toThrow("Access denied");
+});
+
+test("partner company table queries reach the database allowlist", async () => {
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  const observed: string[] = [];
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    observed.push(String(sql));
+    if (String(sql).includes('FROM "companies"')) {
+      return { rows: [{ id: "company-1", name: "Acme" }], rowCount: 1 };
+    }
+    return originalQuery(sql, params);
+  }) as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      { table: "companies", operation: "select", filters: [] },
+      SUPER_ADMIN_AUTH,
+    );
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([{ id: "company-1", name: "Acme" }]);
+    expect(observed.some((sql) => sql.includes('FROM "companies"'))).toBe(true);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
 test("queryTableWithAuthContext scopes partner reads and denies anonymous access", async () => {
   const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
   const { pool } = await import("@/server/postgres.server");
