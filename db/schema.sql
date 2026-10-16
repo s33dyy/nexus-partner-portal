@@ -405,6 +405,64 @@ CREATE TABLE IF NOT EXISTS portal_customers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS companies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  legal_name TEXT,
+  country TEXT,
+  region TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  owner_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  is_seed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS companies_active_name_lower_idx
+  ON companies (lower(name)) WHERE status <> 'deleted';
+
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE RESTRICT;
+ALTER TABLE portal_customers
+  ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE RESTRICT;
+
+-- Backfill the shared company identity from the legacy text fields. The
+-- normalized name check and nullable links make this block safe to rerun.
+INSERT INTO companies (name, is_seed)
+SELECT MIN(legacy_name), TRUE
+  FROM (
+    SELECT btrim(company_name) AS legacy_name
+      FROM profiles
+     WHERE NULLIF(btrim(company_name), '') IS NOT NULL
+    UNION ALL
+    SELECT btrim(company_name) AS legacy_name
+      FROM portal_customers
+     WHERE NULLIF(btrim(company_name), '') IS NOT NULL
+  ) legacy_names
+ WHERE NOT EXISTS (
+   SELECT 1
+     FROM companies existing
+    WHERE existing.status <> 'deleted'
+      AND lower(existing.name) = lower(legacy_names.legacy_name)
+ )
+ GROUP BY lower(legacy_name);
+
+UPDATE profiles p
+   SET company_id = companies.id
+  FROM companies
+ WHERE p.company_id IS NULL
+   AND NULLIF(btrim(p.company_name), '') IS NOT NULL
+   AND companies.status <> 'deleted'
+   AND lower(companies.name) = lower(btrim(p.company_name));
+
+UPDATE portal_customers c
+   SET company_id = companies.id
+  FROM companies
+ WHERE c.company_id IS NULL
+   AND NULLIF(btrim(c.company_name), '') IS NOT NULL
+   AND companies.status <> 'deleted'
+   AND lower(companies.name) = lower(btrim(c.company_name));
+
 ALTER TABLE portal_customers
   ALTER COLUMN renewal_date TYPE TEXT USING renewal_date::text;
 
@@ -957,6 +1015,12 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS portal_customers_updated_at ON portal_customers;
 CREATE TRIGGER portal_customers_updated_at
 BEFORE UPDATE ON portal_customers
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS companies_updated_at ON companies;
+CREATE TRIGGER companies_updated_at
+BEFORE UPDATE ON companies
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
