@@ -144,6 +144,7 @@ export function AppSidebar({
       ? [
           { title: "Users & Roles", url: "/admin/users", icon: Users },
           { title: "Role Permissions", url: "/admin/roles", icon: ShieldQuestion },
+          { title: "Partner Companies", url: "/admin/companies", icon: Building2 },
         ]
       : []),
     ...(can("catalog", "read")

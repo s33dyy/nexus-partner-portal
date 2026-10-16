@@ -76,6 +76,7 @@ type Profile = {
   full_name: string;
   phone: string | null;
   company_name: string | null;
+  company_id: string | null;
   partner_id: string | null;
   partner_status: PartnerStatus;
   is_seed: boolean;
@@ -185,6 +186,7 @@ export const Route = createFileRoute("/_authenticated/admin/users")({
 function AdminUsersPage() {
   const { hasRole } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [partnerCompanies, setPartnerCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -198,6 +200,7 @@ function AdminUsersPage() {
   const [draftGeographyMode, setDraftGeographyMode] = useState<GeographyMode>("global");
   const [draftGeographyRegion, setDraftGeographyRegion] = useState("");
   const [draftGeographyCountry, setDraftGeographyCountry] = useState("");
+  const [draftCompanyId, setDraftCompanyId] = useState("");
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportValidationError[]>([]);
@@ -207,6 +210,7 @@ function AdminUsersPage() {
     email: "",
     phone: "",
     company_name: "",
+    company_id: "",
     password: "",
     role: "partner_admin" as RoleKey,
   });
@@ -215,11 +219,11 @@ function AdminUsersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [profilesRes, rolesRes, assignmentsRes] = await Promise.all([
+      const [profilesRes, rolesRes, assignmentsRes, companiesRes] = await Promise.all([
         supabase
           .from("profiles")
           .select(
-            "id, email, full_name, phone, company_name, partner_id, partner_status, is_seed, whatsapp_verified_at, created_at",
+            "id, email, full_name, phone, company_name, company_id, partner_id, partner_status, is_seed, whatsapp_verified_at, created_at",
           )
           .order("created_at", { ascending: false }),
         supabase
@@ -227,6 +231,7 @@ function AdminUsersPage() {
           .select("user_id, role")
           .order("created_at", { ascending: true }),
         supabase.from("assignments").select("user_id, geography_ceiling_node_id, status"),
+        supabase.from("companies").select("id, name").eq("status", "active").order("name"),
       ]);
       if (profilesRes.error || rolesRes.error || assignmentsRes.error) {
         throw profilesRes.error ?? rolesRes.error ?? assignmentsRes.error;
@@ -257,6 +262,7 @@ function AdminUsersPage() {
         };
       });
       setUsers(rows);
+      setPartnerCompanies((companiesRes.data as Array<{ id: string; name: string }> | null) ?? []);
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load users");
@@ -324,6 +330,7 @@ function AdminUsersPage() {
     setDraftGeographyMode(decoded.mode);
     setDraftGeographyRegion(decoded.regionKey);
     setDraftGeographyCountry(decoded.countryCode);
+    setDraftCompanyId(selectedUser.company_id ?? "");
   }, [selectedUser]);
 
   if (!hasRole("super_admin")) {
@@ -350,7 +357,11 @@ function AdminUsersPage() {
       const nextStatus = draftStatus;
       const profileRes = await supabase
         .from("profiles")
-        .update({ partner_status: nextStatus, updated_at: new Date().toISOString() })
+        .update({
+          partner_status: nextStatus,
+          company_id: draftCompanyId || null,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", selectedUser.id);
       if (profileRes.error) throw profileRes.error;
       toast.success("User roles updated");
@@ -433,6 +444,7 @@ function AdminUsersPage() {
         email: newUser.email.trim(),
         phone: newUser.phone.trim(),
         company_name: newUser.company_name.trim() || null,
+        company_id: newUser.company_id || null,
         password: newUser.password,
         role: (legacyRole ? newUser.role : "partner_admin") as AppRole,
         partner_status: legacyRole
@@ -456,6 +468,7 @@ function AdminUsersPage() {
         email: "",
         phone: "",
         company_name: "",
+        company_id: "",
         password: "",
         role: "partner_admin",
       });
@@ -837,6 +850,29 @@ function AdminUsersPage() {
                     placeholder="Techilla"
                   />
                 </Field>
+                <Field label="Partner Company" htmlFor="new-user-partner-company">
+                  <Select
+                    value={newUser.company_id || "none"}
+                    onValueChange={(value) =>
+                      setNewUser((current) => ({
+                        ...current,
+                        company_id: value === "none" ? "" : value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="new-user-partner-company">
+                      <SelectValue placeholder="Select Partner Company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Partner Company</SelectItem>
+                      {partnerCompanies.map((company) => (
+                        <SelectItem key={company.id} value={company.id}>
+                          {company.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
                 <Field label="Password" htmlFor="new-user-password" className="sm:col-span-2">
                   <Input
                     id="new-user-password"
@@ -920,6 +956,24 @@ function AdminUsersPage() {
                 </div>
               </div>
               <FieldGrid columns={2}>
+                <Field label="Partner Company">
+                  <Select
+                    value={draftCompanyId || "none"}
+                    onValueChange={(value) => setDraftCompanyId(value === "none" ? "" : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Partner Company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Partner Company</SelectItem>
+                      {partnerCompanies.map((company) => (
+                        <SelectItem key={company.id} value={company.id}>
+                          {company.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
                 <Field
                   label="Primary role"
                   hint={ROLE_KEY_LABELS[draftRole as RoleKey] ?? draftRole}

@@ -545,6 +545,7 @@ type AuthApi = {
     email: string;
     phone: string;
     company_name: string | null;
+    company_id?: string | null;
     password: string;
     role: AppRole;
     partner_status?: PartnerStatus;
@@ -557,6 +558,7 @@ type AuthApi = {
       full_name: string;
       phone: string | null;
       company_name: string | null;
+      company_id?: string | null;
       role: AppRole;
       partner_status: PartnerStatus;
     }>

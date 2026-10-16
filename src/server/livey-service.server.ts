@@ -54,6 +54,7 @@ type WorkspaceUserInput = {
   email: string;
   phone: string;
   company_name: string | null;
+  company_id?: string | null;
   password: string;
   role: AppRole;
   partner_status?: PartnerStatus;
@@ -2350,8 +2351,8 @@ async function insertWorkspaceUserRecord(
   const partnerId = callerIsSuperAdmin ? (input.partner_id ?? ownPartnerId ?? null) : ownPartnerId;
 
   await client.query(
-    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, partner_status, partner_id, must_reset_password, is_seed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)`,
+    `INSERT INTO profiles (id, email, password_hash, full_name, phone, company_name, company_id, partner_status, partner_id, must_reset_password, is_seed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)`,
     [
       id,
       normalizedEmail,
@@ -2359,6 +2360,7 @@ async function insertWorkspaceUserRecord(
       input.full_name.trim(),
       input.phone.trim() || null,
       input.company_name?.trim() || null,
+      input.company_id ?? null,
       partnerStatus,
       partnerId,
       input.must_reset_password ?? false,

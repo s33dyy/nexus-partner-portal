@@ -80,6 +80,7 @@ export type DealCollaboratorRecord = {
 export type CustomerRecord = {
   id: string;
   company_name: string;
+  company_id?: string | null;
   account_owner: string;
   country?: string | null;
   region: string;

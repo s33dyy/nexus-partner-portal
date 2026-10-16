@@ -92,6 +92,7 @@ import { filterCustomersByView, type CustomerAdvancedFilters } from "@/lib/custo
 
 type CustomerForm = {
   company_name: string;
+  company_id: string;
   account_owner: string;
   country: string;
   region: string;
@@ -106,6 +107,7 @@ type CustomerForm = {
 
 const EMPTY_FORM: CustomerForm = {
   company_name: "",
+  company_id: "",
   account_owner: "",
   country: "India",
   region: "India West",
@@ -156,6 +158,7 @@ function CustomersPage() {
   const { selectedRegion } = useRegionFilter();
 
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [partnerCompanies, setPartnerCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<"database" | "empty">("empty");
@@ -239,6 +242,16 @@ function CustomersPage() {
       setCustomers(rows);
       setActivities(activityRows);
       setParticipants(participantRows);
+      const companyResult = await supabase
+        .from("companies")
+        .select("id, name")
+        .eq("status", "active")
+        .order("name");
+      if (!companyResult.error) {
+        setPartnerCompanies(
+          (companyResult.data as Array<{ id: string; name: string }> | null) ?? [],
+        );
+      }
       setSource(rows.length > 0 ? "database" : "empty");
       setSelectedId((current) => current ?? rows[0]?.id ?? null);
     } catch {
@@ -389,6 +402,7 @@ function CustomersPage() {
       const payload = {
         id: newId(),
         ...draft,
+        company_id: draft.company_id || null,
         health_score: Number(draft.health_score) || 0,
         user_id: profile?.id,
         partner_id: profile?.partner_id,
@@ -423,6 +437,7 @@ function CustomersPage() {
         .from("portal_customers")
         .update({
           company_name: draft.company_name,
+          company_id: draft.company_id || null,
           account_owner: draft.account_owner,
           country: draft.country,
           region: draft.region,
@@ -463,6 +478,7 @@ function CustomersPage() {
     setMergeCandidateId(null);
     setDraft({
       company_name: selectedCustomer.company_name,
+      company_id: selectedCustomer.company_id ?? "",
       account_owner: selectedCustomer.account_owner,
       country: selectedCustomer.country ?? "India",
       region: selectedCustomer.region,
@@ -987,6 +1003,29 @@ function CustomersPage() {
                     placeholder="Acme Infra"
                   />
                 </Field>
+                <Field label="Partner Company">
+                  <Select
+                    value={draft.company_id || "none"}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        company_id: value === "none" ? "" : value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Partner Company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Partner Company</SelectItem>
+                      {partnerCompanies.map((company) => (
+                        <SelectItem key={company.id} value={company.id}>
+                          {company.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
                 <Field label="Owner">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.customerOwner}
@@ -1149,6 +1188,29 @@ function CustomersPage() {
                     }
                     placeholder="Acme Infra"
                   />
+                </Field>
+                <Field label="Partner Company">
+                  <Select
+                    value={draft.company_id || "none"}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        company_id: value === "none" ? "" : value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Partner Company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Partner Company</SelectItem>
+                      {partnerCompanies.map((company) => (
+                        <SelectItem key={company.id} value={company.id}>
+                          {company.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Owner">
                   <LookupCombobox
@@ -1521,6 +1583,7 @@ function CustomersPage() {
                     selectedCustomer &&
                     setDraft({
                       company_name: selectedCustomer.company_name,
+                      company_id: selectedCustomer.company_id ?? "",
                       account_owner: selectedCustomer.account_owner,
                       country: selectedCustomer.country ?? "India",
                       region: selectedCustomer.region,
