@@ -135,10 +135,25 @@ function installFakePool(state: CompanyHarnessState) {
           };
         }
 
-        if (text.startsWith("SELECT id, name, legal_name FROM companies WHERE id")) {
+        if (text.startsWith("SELECT id, name, legal_name, country, region, status")) {
           const [companyId] = params as [string];
           const company = state.companies.find((candidate) => candidate.id === companyId);
-          return { rows: company ? [{ ...company }] : [], rowCount: company ? 1 : 0 };
+          return {
+            rows: company
+              ? [
+                  {
+                    ...company,
+                    linked_user_count: state.profiles.filter(
+                      (profile) => profile.company_id === company.id,
+                    ).length,
+                    linked_customer_count: state.customers.filter(
+                      (customer) => customer.company_id === company.id,
+                    ).length,
+                  },
+                ]
+              : [],
+            rowCount: company ? 1 : 0,
+          };
         }
 
         if (text.startsWith("INSERT INTO companies (name, is_seed)")) {
@@ -378,6 +393,43 @@ test("deleteCompany reports linked users and customers without deleting", async 
       expect(result.linkedUserCount).toBe(1);
       expect(result.linkedCustomerCount).toBe(1);
       expect(result.failure.code).toBe("VALIDATION_FAILED");
+    }
+    expect(state.companies[0]?.status).toBe("active");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("updateCompany refuses status deleted when users or customers are linked", async () => {
+  const state = emptyState({
+    companies: [
+      {
+        id: "company-1",
+        name: "Acme Systems",
+        legal_name: null,
+        country: null,
+        region: null,
+        status: "active",
+        owner_user_id: null,
+        is_seed: false,
+      },
+    ],
+    profiles: [{ company_name: "Acme Systems", company_id: "company-1" }],
+    customers: [{ company_name: "Acme Systems", company_id: "company-1" }],
+  });
+  const harness = await installFakePool(state)();
+  try {
+    const { updateCompany } = await import("@/server/company-commands.server");
+    const result = await updateCompany({
+      actor: buildActor(),
+      companyId: "company-1",
+      data: { status: "deleted" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("VALIDATION_FAILED");
+      expect(result.failure.message).toContain("Use deleteCompany");
     }
     expect(state.companies[0]?.status).toBe("active");
   } finally {

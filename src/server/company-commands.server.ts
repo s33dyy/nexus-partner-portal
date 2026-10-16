@@ -259,6 +259,12 @@ export async function updateCompany(input: {
 }): Promise<CompanyMutationResult> {
   const correlationId = createCorrelationId();
   if (!isSuperAdmin(input.actor)) return deny(correlationId);
+  if (input.data.status?.trim().toLowerCase() === "deleted") {
+    return {
+      ...validationFailure("Use deleteCompany to delete a company", "status"),
+      correlationId,
+    };
+  }
 
   return withTransaction(async (tx) => {
     const current = await loadCompany(tx, input.companyId);
