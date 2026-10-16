@@ -427,7 +427,7 @@ ALTER TABLE portal_customers
   ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE RESTRICT;
 
 -- Backfill the shared company identity from the legacy text fields. The
--- normalized name check and nullable links make this block safe to rerun.
+-- active-name unique index makes this block safe to rerun concurrently.
 INSERT INTO companies (name, is_seed)
 SELECT MIN(legacy_name), TRUE
   FROM (
@@ -439,13 +439,8 @@ SELECT MIN(legacy_name), TRUE
       FROM portal_customers
      WHERE NULLIF(btrim(company_name), '') IS NOT NULL
   ) legacy_names
- WHERE NOT EXISTS (
-   SELECT 1
-     FROM companies existing
-    WHERE existing.status <> 'deleted'
-      AND lower(existing.name) = lower(legacy_names.legacy_name)
- )
- GROUP BY lower(legacy_name);
+ GROUP BY lower(legacy_name)
+ON CONFLICT (lower(name)) WHERE status <> 'deleted' DO NOTHING;
 
 UPDATE profiles p
    SET company_id = companies.id

@@ -76,6 +76,7 @@ type CompanyHarnessState = {
   profiles: Array<{ company_name: string | null; company_id: string | null }>;
   customers: Array<{ company_name: string; company_id: string | null }>;
   calls: string[];
+  failUniqueOnUpdate: boolean;
 };
 
 function installFakePool(state: CompanyHarnessState) {
@@ -118,20 +119,24 @@ function installFakePool(state: CompanyHarnessState) {
           };
         }
 
-        if (text.startsWith("SELECT COUNT(*)::int AS linked_user_count")) {
+        if (text.startsWith("SELECT c.id,")) {
           const [companyId] = params as [string];
+          const company = state.companies.find((candidate) => candidate.id === companyId);
           return {
-            rows: [
-              {
-                linked_user_count: state.profiles.filter(
-                  (profile) => profile.company_id === companyId,
-                ).length,
-                linked_customer_count: state.customers.filter(
-                  (customer) => customer.company_id === companyId,
-                ).length,
-              },
-            ],
-            rowCount: 1,
+            rows: company
+              ? [
+                  {
+                    id: companyId,
+                    linked_user_count: state.profiles.filter(
+                      (profile) => profile.company_id === companyId,
+                    ).length,
+                    linked_customer_count: state.customers.filter(
+                      (customer) => customer.company_id === companyId,
+                    ).length,
+                  },
+                ]
+              : [],
+            rowCount: company ? 1 : 0,
           };
         }
 
@@ -211,7 +216,21 @@ function installFakePool(state: CompanyHarnessState) {
           return { rows: [{ ...company }], rowCount: 1 };
         }
 
-        if (text.startsWith("UPDATE companies SET")) {
+        if (text.startsWith("UPDATE companies SET status = 'deleted'")) {
+          const [companyId] = params as [string];
+          const company = state.companies.find((candidate) => candidate.id === companyId);
+          const hasLinks =
+            state.profiles.some((profile) => profile.company_id === companyId) ||
+            state.customers.some((customer) => customer.company_id === companyId);
+          if (!company || company.status === "deleted" || hasLinks) {
+            return { rows: [], rowCount: 0 };
+          }
+          company.status = "deleted";
+          return { rows: [{ id: companyId }], rowCount: 1 };
+        }
+
+        if (text.startsWith("UPDATE companies SET name")) {
+          if (state.failUniqueOnUpdate) throw { code: "23505" };
           const [name, legalName, country, region, status, companyId] = params as [
             string,
             string | null,
@@ -268,14 +287,6 @@ function installFakePool(state: CompanyHarnessState) {
           return { rows: [], rowCount };
         }
 
-        if (text.startsWith("UPDATE companies SET status = 'deleted'")) {
-          const [companyId] = params as [string];
-          const company = state.companies.find((candidate) => candidate.id === companyId);
-          if (!company) return { rows: [], rowCount: 0 };
-          company.status = "deleted";
-          return { rows: [], rowCount: 1 };
-        }
-
         throw new Error(`Unhandled statement: ${text}`);
       },
       release: () => undefined,
@@ -296,6 +307,7 @@ function emptyState(overrides: Partial<CompanyHarnessState> = {}): CompanyHarnes
     profiles: [],
     customers: [],
     calls: [],
+    failUniqueOnUpdate: false,
     ...overrides,
   };
 }
@@ -400,6 +412,109 @@ test("deleteCompany reports linked users and customers without deleting", async 
   }
 });
 
+test("deleteCompany atomically deletes an unlinked partner company", async () => {
+  const state = emptyState({
+    companies: [
+      {
+        id: "company-1",
+        name: "Acme Systems",
+        legal_name: null,
+        country: null,
+        region: null,
+        status: "active",
+        owner_user_id: null,
+        is_seed: false,
+      },
+    ],
+  });
+  const harness = await installFakePool(state)();
+  try {
+    const { deleteCompany } = await import("@/server/company-commands.server");
+    const result = await deleteCompany({ actor: buildActor(), companyId: "company-1" });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.deleted).toBe(true);
+    expect(state.companies[0]?.status).toBe("deleted");
+    const deleteSql = state.calls.find((sql) => sql.startsWith("UPDATE companies SET status"));
+    expect(deleteSql).toContain("NOT EXISTS");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("updateCompany returns current linked counts after a successful update", async () => {
+  const state = emptyState({
+    companies: [
+      {
+        id: "company-1",
+        name: "Acme Systems",
+        legal_name: null,
+        country: null,
+        region: null,
+        status: "active",
+        owner_user_id: null,
+        is_seed: false,
+      },
+    ],
+    profiles: [{ company_name: "Acme Systems", company_id: "company-1" }],
+    customers: [{ company_name: "Acme Systems", company_id: "company-1" }],
+  });
+  const harness = await installFakePool(state)();
+  try {
+    const { updateCompany } = await import("@/server/company-commands.server");
+    const result = await updateCompany({
+      actor: buildActor(),
+      companyId: "company-1",
+      data: { name: "Acme Global" },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.company.name).toBe("Acme Global");
+      expect(result.company.linkedUserCount).toBe(1);
+      expect(result.company.linkedCustomerCount).toBe(1);
+    }
+    expect(state.calls.some((sql) => sql.startsWith("UPDATE companies SET name"))).toBe(true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("updateCompany translates a concurrent unique-index conflict into a duplicate error", async () => {
+  const state = emptyState({
+    companies: [
+      {
+        id: "company-1",
+        name: "Acme Systems",
+        legal_name: null,
+        country: null,
+        region: null,
+        status: "active",
+        owner_user_id: null,
+        is_seed: false,
+      },
+    ],
+    failUniqueOnUpdate: true,
+  });
+  const harness = await installFakePool(state)();
+  try {
+    const { updateCompany } = await import("@/server/company-commands.server");
+    const result = await updateCompany({
+      actor: buildActor(),
+      companyId: "company-1",
+      data: { name: "Acme Global" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe("VALIDATION_FAILED");
+      expect(result.failure.message).toContain("Partner Company");
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
 test("updateCompany refuses status deleted when users or customers are linked", async () => {
   const state = emptyState({
     companies: [
@@ -429,7 +544,7 @@ test("updateCompany refuses status deleted when users or customers are linked", 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.failure.code).toBe("VALIDATION_FAILED");
-      expect(result.failure.message).toContain("Use deleteCompany");
+      expect(result.failure.message).toContain("Partner Company");
     }
     expect(state.companies[0]?.status).toBe("active");
   } finally {
@@ -462,7 +577,15 @@ test("backfillLegacyCompanyNames is idempotent and preserves legacy text", async
     expect(state.profiles[0]?.company_id).toBe(state.companies[0]?.id);
     expect(state.profiles[1]?.company_id).toBe(state.companies[0]?.id);
     expect(state.customers[0]?.company_id).toBe(state.companies[1]?.id);
+    expect(state.calls.filter((sql) => sql.startsWith("INSERT INTO companies"))[0]).toContain(
+      "ON CONFLICT",
+    );
   } finally {
     harness.restore();
   }
+});
+
+test("schema backfill uses the active-name unique index for concurrent safety", async () => {
+  const schema = await Bun.file("db/schema.sql").text();
+  expect(schema).toContain("ON CONFLICT (lower(name)) WHERE status <> 'deleted' DO NOTHING");
 });

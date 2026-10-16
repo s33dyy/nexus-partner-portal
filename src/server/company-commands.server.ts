@@ -87,7 +87,7 @@ function isSuperAdmin(actor: CompanyCommandActor): boolean {
 function deny(correlationId: string): CompanyFailure {
   return {
     ok: false,
-    failure: makePolicyDenial(null, "Only Super Admin can manage companies"),
+    failure: makePolicyDenial(null, "Only Super Admin can manage Partner Companies"),
     correlationId,
   };
 }
@@ -193,7 +193,7 @@ export async function createCompany(input: {
   const name = input.data.name.trim();
   if (!name || name.length > 160) {
     return {
-      ...validationFailure("Company name is required and must be 160 characters or fewer"),
+      ...validationFailure("Partner Company name is required and must be 160 characters or fewer"),
       correlationId,
     };
   }
@@ -202,7 +202,7 @@ export async function createCompany(input: {
     return await withTransaction(async (tx) => {
       if (await findDuplicate(tx, name)) {
         return {
-          ...validationFailure("An active company with this name already exists"),
+          ...validationFailure("An active Partner Company with this name already exists"),
           correlationId,
         };
       }
@@ -227,7 +227,7 @@ export async function createCompany(input: {
       const row = result.rows[0] as CompanyRow | undefined;
       if (!row) {
         return {
-          ...validationFailure("Company could not be created"),
+          ...validationFailure("Partner Company could not be created"),
           correlationId,
         };
       }
@@ -244,7 +244,7 @@ export async function createCompany(input: {
   } catch (error) {
     if ((error as { code?: string }).code === "23505") {
       return {
-        ...validationFailure("An active company with this name already exists"),
+        ...validationFailure("An active Partner Company with this name already exists"),
         correlationId,
       };
     }
@@ -261,33 +261,36 @@ export async function updateCompany(input: {
   if (!isSuperAdmin(input.actor)) return deny(correlationId);
   if (input.data.status?.trim().toLowerCase() === "deleted") {
     return {
-      ...validationFailure("Use deleteCompany to delete a company", "status"),
+      ...validationFailure("Use the delete action to remove a Partner Company", "status"),
       correlationId,
     };
   }
 
-  return withTransaction(async (tx) => {
-    const current = await loadCompany(tx, input.companyId);
-    if (!current) {
-      return { ...validationFailure("Company not found", "companyId"), correlationId };
-    }
+  try {
+    return await withTransaction(async (tx) => {
+      const current = await loadCompany(tx, input.companyId);
+      if (!current) {
+        return { ...validationFailure("Partner Company not found", "companyId"), correlationId };
+      }
 
-    const name = input.data.name === undefined ? current.name : input.data.name.trim();
-    if (!name || name.length > 160) {
-      return {
-        ...validationFailure("Company name is required and must be 160 characters or fewer"),
-        correlationId,
-      };
-    }
-    if (await findDuplicate(tx, name, input.companyId)) {
-      return {
-        ...validationFailure("An active company with this name already exists"),
-        correlationId,
-      };
-    }
+      const name = input.data.name === undefined ? current.name : input.data.name.trim();
+      if (!name || name.length > 160) {
+        return {
+          ...validationFailure(
+            "Partner Company name is required and must be 160 characters or fewer",
+          ),
+          correlationId,
+        };
+      }
+      if (await findDuplicate(tx, name, input.companyId)) {
+        return {
+          ...validationFailure("An active Partner Company with this name already exists"),
+          correlationId,
+        };
+      }
 
-    const result = await tx.query(
-      `UPDATE companies
+      const result = await tx.query(
+        `UPDATE companies
           SET name = $1,
               legal_name = $2,
               country = $3,
@@ -296,27 +299,44 @@ export async function updateCompany(input: {
         WHERE id = $6
         RETURNING id, name, legal_name, country, region, status, owner_user_id, is_seed,
                   created_at, updated_at`,
-      [
-        name,
-        input.data.legalName === undefined ? current.legalName : optionalText(input.data.legalName),
-        input.data.country === undefined ? current.country : optionalText(input.data.country),
-        input.data.region === undefined ? current.region : optionalText(input.data.region),
-        input.data.status?.trim() || current.status,
-        input.companyId,
-      ],
-    );
-    const row = result.rows[0] as CompanyRow | undefined;
-    if (!row) return { ...validationFailure("Company not found", "companyId"), correlationId };
-    return {
-      ok: true,
-      commandName: "company.update",
-      subjectId: input.companyId,
-      newVersion: 1,
-      nextAuthorisedActions: ["company.update", "company.delete"],
-      correlationId,
-      company: mapCompany(row),
-    };
-  });
+        [
+          name,
+          input.data.legalName === undefined
+            ? current.legalName
+            : optionalText(input.data.legalName),
+          input.data.country === undefined ? current.country : optionalText(input.data.country),
+          input.data.region === undefined ? current.region : optionalText(input.data.region),
+          input.data.status?.trim() || current.status,
+          input.companyId,
+        ],
+      );
+      const row = result.rows[0] as CompanyRow | undefined;
+      if (!row) {
+        return { ...validationFailure("Partner Company not found", "companyId"), correlationId };
+      }
+      const updatedCompany = await loadCompany(tx, input.companyId);
+      if (!updatedCompany) {
+        return { ...validationFailure("Partner Company not found", "companyId"), correlationId };
+      }
+      return {
+        ok: true,
+        commandName: "company.update",
+        subjectId: input.companyId,
+        newVersion: 1,
+        nextAuthorisedActions: ["company.update", "company.delete"],
+        correlationId,
+        company: updatedCompany,
+      };
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      return {
+        ...validationFailure("An active Partner Company with this name already exists"),
+        correlationId,
+      };
+    }
+    throw error;
+  }
 }
 
 export async function deleteCompany(input: {
@@ -329,46 +349,55 @@ export async function deleteCompany(input: {
   }
 
   return withTransaction(async (tx) => {
-    const countsResult = await tx.query(
-      `SELECT COUNT(*)::int AS linked_user_count,
-              (SELECT COUNT(*)::int FROM portal_customers c WHERE c.company_id = $1) AS linked_customer_count
-         FROM profiles p
-        WHERE p.company_id = $1`,
-      [input.companyId],
-    );
-    const counts = countsResult.rows[0] as
-      | { linked_user_count: number | string; linked_customer_count: number | string }
-      | undefined;
-    if (!counts) {
-      return {
-        ...validationFailure("Company not found", "companyId"),
-        correlationId,
-        linkedUserCount: 0,
-        linkedCustomerCount: 0,
-      };
-    }
-
-    const linkedUserCount = Number(counts.linked_user_count);
-    const linkedCustomerCount = Number(counts.linked_customer_count);
-    if (linkedUserCount > 0 || linkedCustomerCount > 0) {
-      return {
-        ...validationFailure(
-          `Company cannot be deleted while linked to ${linkedUserCount} user(s) and ${linkedCustomerCount} customer(s)`,
-          "companyId",
-        ),
-        correlationId,
-        linkedUserCount,
-        linkedCustomerCount,
-      };
-    }
-
     const deleted = await tx.query(
-      `UPDATE companies SET status = 'deleted' WHERE id = $1 AND status <> 'deleted'`,
+      `UPDATE companies
+          SET status = 'deleted'
+        WHERE id = $1
+          AND status <> 'deleted'
+          AND NOT EXISTS (
+            SELECT 1 FROM profiles p WHERE p.company_id = companies.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM portal_customers c WHERE c.company_id = companies.id
+          )
+        RETURNING id`,
       [input.companyId],
     );
     if ((deleted.rowCount ?? 0) === 0) {
+      const companyResult = await tx.query(
+        `SELECT c.id,
+                (SELECT COUNT(*)::int FROM profiles p WHERE p.company_id = c.id) AS linked_user_count,
+                (SELECT COUNT(*)::int FROM portal_customers pc WHERE pc.company_id = c.id) AS linked_customer_count
+           FROM companies c
+          WHERE c.id = $1`,
+        [input.companyId],
+      );
+      const company = companyResult.rows[0] as
+        | { id: string; linked_user_count: number | string; linked_customer_count: number | string }
+        | undefined;
+      if (!company) {
+        return {
+          ...validationFailure("Partner Company not found", "companyId"),
+          correlationId,
+          linkedUserCount: 0,
+          linkedCustomerCount: 0,
+        };
+      }
+      const linkedUserCount = Number(company.linked_user_count);
+      const linkedCustomerCount = Number(company.linked_customer_count);
+      if (linkedUserCount > 0 || linkedCustomerCount > 0) {
+        return {
+          ...validationFailure(
+            `Partner Company cannot be deleted while linked to ${linkedUserCount} user(s) and ${linkedCustomerCount} customer(s)`,
+            "companyId",
+          ),
+          correlationId,
+          linkedUserCount,
+          linkedCustomerCount,
+        };
+      }
       return {
-        ...validationFailure("Company not found", "companyId"),
+        ...validationFailure("Partner Company not found", "companyId"),
         correlationId,
         linkedUserCount: 0,
         linkedCustomerCount: 0,
@@ -405,13 +434,8 @@ export async function backfillLegacyCompanyNames(input: {
              FROM portal_customers
             WHERE NULLIF(btrim(company_name), '') IS NOT NULL
          ) legacy_names
-        WHERE NOT EXISTS (
-          SELECT 1
-            FROM companies existing
-           WHERE existing.status <> 'deleted'
-             AND lower(existing.name) = lower(legacy_names.legacy_name)
-        )
-        GROUP BY lower(legacy_name)`,
+        GROUP BY lower(legacy_name)
+       ON CONFLICT (lower(name)) WHERE status <> 'deleted' DO NOTHING`,
     );
     const linkedProfiles = await tx.query(
       `UPDATE profiles p
