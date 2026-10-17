@@ -560,7 +560,7 @@ export async function createCustomerFromDropdown(input: {
   ) {
     throw new Error("Health score must be a whole number from 0 to 100");
   }
-  if (!isRenewalType(input.renewal_date)) {
+  if (input.renewal_date && !isRenewalType(input.renewal_date)) {
     throw new Error("Renewal type must be LIVEYfy or RC");
   }
 

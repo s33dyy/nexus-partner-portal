@@ -14,7 +14,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomerRecord } from "@/lib/portal-records";
 import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
-import { normalizeOptionalRenewalType } from "@/lib/customer-form";
 import { toast } from "sonner";
 
 type CustomerQuickCreateDialogProps = {
@@ -24,8 +23,6 @@ type CustomerQuickCreateDialogProps = {
   initialAccountOwner?: string;
   initialRegion?: string;
   initialSegment?: string;
-  initialMrr?: string;
-  initialRenewalDate?: string;
   initialStatus?: string;
   initialNextStep?: string;
   initialLastTouch?: string;
@@ -41,8 +38,7 @@ type Draft = {
   region: string;
   segment: string;
   health_score: string;
-  mrr: string;
-  renewal_date: string;
+  employee_count: string;
   status: string;
   next_step: string;
   last_touch: string;
@@ -55,8 +51,6 @@ export function CustomerQuickCreateDialog({
   initialAccountOwner = "",
   initialRegion = "India West",
   initialSegment = "Mid-market",
-  initialMrr = "$0",
-  initialRenewalDate = "",
   initialStatus = "active",
   initialNextStep = "Intro call",
   initialLastTouch = "New",
@@ -71,8 +65,7 @@ export function CustomerQuickCreateDialog({
     region: initialRegion,
     segment: initialSegment,
     health_score: String(initialHealthScore),
-    mrr: initialMrr,
-    renewal_date: initialRenewalDate,
+    employee_count: "",
     status: initialStatus,
     next_step: initialNextStep,
     last_touch: initialLastTouch,
@@ -87,8 +80,7 @@ export function CustomerQuickCreateDialog({
       region: initialRegion,
       segment: initialSegment,
       health_score: String(initialHealthScore),
-      mrr: initialMrr,
-      renewal_date: initialRenewalDate,
+      employee_count: "",
       status: initialStatus,
       next_step: initialNextStep,
       last_touch: initialLastTouch,
@@ -99,10 +91,8 @@ export function CustomerQuickCreateDialog({
     initialCompanyName,
     initialHealthScore,
     initialLastTouch,
-    initialMrr,
     initialNextStep,
     initialRegion,
-    initialRenewalDate,
     initialSegment,
     initialStatus,
   ]);
@@ -134,8 +124,8 @@ export function CustomerQuickCreateDialog({
         region: draft.region,
         segment: draft.segment,
         health_score: Number(draft.health_score) || 0,
-        mrr: draft.mrr,
-        renewal_date: normalizeOptionalRenewalType(draft.renewal_date),
+        mrr: draft.employee_count.trim(),
+        renewal_date: "",
         status: draft.status,
         next_step: draft.next_step,
         last_touch: draft.last_touch,
@@ -195,20 +185,13 @@ export function CustomerQuickCreateDialog({
               placeholder="Mid-market"
             />
           </Field>
-          <Field label="MRR *">
+          <Field label="Employee Count">
             <Input
-              value={draft.mrr}
-              onChange={(e) => setDraft((current) => ({ ...current, mrr: e.target.value }))}
-              placeholder="$0"
-            />
-          </Field>
-          <Field label="Renewal date (optional)">
-            <Input
-              type="date"
-              value={draft.renewal_date}
+              value={draft.employee_count}
               onChange={(e) =>
-                setDraft((current) => ({ ...current, renewal_date: e.target.value }))
+                setDraft((current) => ({ ...current, employee_count: e.target.value }))
               }
+              placeholder="Optional"
             />
           </Field>
           <Field label="Status *">

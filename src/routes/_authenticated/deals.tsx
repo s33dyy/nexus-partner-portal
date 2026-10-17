@@ -2785,7 +2785,6 @@ function DealsPage() {
         initialAccountOwner={profile?.full_name ?? draft.owner_name ?? ""}
         initialRegion={draft.country === "India" ? draft.region || "India West" : draft.region}
         initialSegment="Mid-market"
-        initialMrr="$0"
         initialStatus="active"
         initialNextStep="Intro call"
         initialLastTouch="New"
