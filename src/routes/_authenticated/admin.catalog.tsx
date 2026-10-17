@@ -238,6 +238,7 @@ function AdminCatalogPage() {
   const [draft, setDraft] = useState<CatalogForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const addingRef = useRef(false);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<
@@ -466,6 +467,7 @@ function AdminCatalogPage() {
   };
 
   const addItem = async () => {
+    if (addingRef.current) return;
     if (!draft.product_name.trim()) {
       toast.error("Product name is required");
       return;
@@ -474,6 +476,7 @@ function AdminCatalogPage() {
       toast.error("Stock must be a whole number");
       return;
     }
+    addingRef.current = true;
     setAdding(true);
     try {
       const values = buildCatalogCreateValues({ ...draft, stock: Number(draft.stock) || 0 });
@@ -484,6 +487,7 @@ function AdminCatalogPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add item");
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
@@ -856,7 +860,7 @@ function AdminCatalogPage() {
                   onChange={(e) => setDraft((value) => ({ ...value, benefits: e.target.value }))}
                 />
               </Field>
-              <Button onClick={() => void addItem()} disabled={adding}>
+              <Button type="button" onClick={() => void addItem()} disabled={adding}>
                 {adding ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
