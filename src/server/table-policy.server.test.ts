@@ -312,6 +312,42 @@ test("queryTableWithAuthContext rejects a select() column that isn't in the tabl
   ).rejects.toThrow("Unsupported select column: not_a_real_column");
 });
 
+test("queryTableWithAuthContext allows the company_id profile field used by Users & roles", async () => {
+  const { queryTableWithAuthContext } = await import("@/server/livey-service.server");
+  const { pool } = await import("@/server/postgres.server");
+  const originalQuery = pool.query.bind(pool);
+  const observed: string[] = [];
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    observed.push(String(sql));
+    if (String(sql).includes('FROM "profiles"')) {
+      return {
+        rows: [{ id: "user-a", email: "maya.admin@livey.tech", company_id: "company-a" }],
+        rowCount: 1,
+      };
+    }
+    return originalQuery(sql, params);
+  }) as typeof pool.query;
+
+  try {
+    const result = await queryTableWithAuthContext(
+      {
+        table: "profiles",
+        operation: "select",
+        select: "id, email, company_id",
+        filters: [],
+      },
+      SUPER_ADMIN_AUTH,
+    );
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      { id: "user-a", email: "maya.admin@livey.tech", company_id: "company-a" },
+    ]);
+    expect(observed.some((sql) => sql.includes('SELECT "id", "email", "company_id"'))).toBe(true);
+  } finally {
+    pool.query = originalQuery as typeof pool.query;
+  }
+});
+
 const SUPER_ADMIN_AUTH = {
   userId: "super-admin-user",
   roles: ["super_admin"],

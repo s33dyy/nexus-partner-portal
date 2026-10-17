@@ -120,6 +120,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     "full_name",
     "phone",
     "company_name",
+    "company_id",
     "avatar_url",
     "partner_id",
     "partner_status",
