@@ -732,26 +732,19 @@ function AdminCatalogPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Part Code">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogSku}
-                    label="Part Code"
+                  <Input
                     value={draft.sku}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                    placeholder="Select or create Part Code"
-                    options={editOptions.skus}
+                    onChange={(e) => setDraft((current) => ({ ...current, sku: e.target.value }))}
+                    placeholder="Enter Part Code"
                   />
                 </Field>
                 <Field label="Product name">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogProduct}
-                    label="Product name"
+                  <Input
                     value={draft.product_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, product_name: value }))
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, product_name: e.target.value }))
                     }
-                    placeholder={`Select or create ${moduleKind}`}
-                    source="catalog"
-                    catalogKind={moduleKind}
+                    placeholder="Enter product name"
                   />
                 </Field>
                 <Field label="Category">
@@ -895,26 +888,19 @@ function AdminCatalogPage() {
             <>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Part Code">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogSku}
-                    label="Part Code"
+                  <Input
                     value={draft.sku}
-                    onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                    placeholder="Select or create Part Code"
-                    options={editOptions.skus}
+                    onChange={(e) => setDraft((current) => ({ ...current, sku: e.target.value }))}
+                    placeholder="Enter Part Code"
                   />
                 </Field>
                 <Field label="Product name">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogProduct}
-                    label="Product name"
+                  <Input
                     value={draft.product_name}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, product_name: value }))
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, product_name: e.target.value }))
                     }
-                    placeholder={`Select or create ${moduleKind}`}
-                    source="catalog"
-                    catalogKind={moduleKind}
+                    placeholder="Enter product name"
                   />
                 </Field>
                 <Field label="Category">
