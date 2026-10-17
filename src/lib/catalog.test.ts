@@ -145,6 +145,7 @@ test("buildCatalogCreateValues turns dropdown creates into real catalog rows", (
     category: "Hardware",
     partner_tier: "Gold",
     list_price: "$2,400",
+    currency_code: "USD",
     margin: "32%",
     stock: 8,
     availability: "In stock",

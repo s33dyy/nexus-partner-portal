@@ -439,6 +439,7 @@ export async function createCatalogItemFromDropdown(input: {
   category?: string;
   partner_tier?: string;
   list_price?: string;
+  currency_code?: string;
   margin?: string;
   stock?: number;
   availability?: string;
@@ -474,6 +475,7 @@ export async function updateCatalogItemFromDropdown(input: {
   category?: string;
   partner_tier?: string;
   list_price?: string;
+  currency_code?: string;
   margin?: string;
   stock?: number;
   availability?: string;
@@ -497,6 +499,7 @@ export async function updateCatalogItemFromDropdown(input: {
     "category",
     "partner_tier",
     "list_price",
+    "currency_code",
     "margin",
     "stock",
     "availability",

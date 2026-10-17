@@ -29,6 +29,7 @@ const createDropdownCatalogItemFn = createServerFn({ method: "POST" })
       category?: string;
       partner_tier?: string;
       list_price?: string;
+      currency_code?: string;
       margin?: string;
       stock?: number;
       availability?: string;
@@ -50,6 +51,7 @@ const updateDropdownCatalogItemFn = createServerFn({ method: "POST" })
       category?: string;
       partner_tier?: string;
       list_price?: string;
+      currency_code?: string;
       margin?: string;
       stock?: number;
       availability?: string;
@@ -108,6 +110,7 @@ export async function createDropdownCatalogItem(input: {
   category?: string;
   partner_tier?: string;
   list_price?: string;
+  currency_code?: string;
   margin?: string;
   stock?: number;
   availability?: string;
@@ -124,6 +127,7 @@ export async function updateDropdownCatalogItem(input: {
   category?: string;
   partner_tier?: string;
   list_price?: string;
+  currency_code?: string;
   margin?: string;
   stock?: number;
   availability?: string;

@@ -13,6 +13,7 @@ export type CatalogItemRecord = {
   category: string;
   partner_tier: string;
   list_price: string;
+  currency_code: string;
   margin: string;
   stock: number;
   availability: string;
@@ -49,6 +50,7 @@ export type CatalogCreateValues = {
   category: string;
   partner_tier: string;
   list_price: string;
+  currency_code: string;
   margin: string;
   stock: number;
   availability: string;
@@ -106,7 +108,7 @@ export function getCatalogImportTemplateSample(options: CatalogImportOptions) {
       product_name: options.kind === "combo" ? "LIVEY Studio Bundle" : "LIVEY Smart Cam",
       category: "Hardware",
       partner_tier: "Registered",
-      list_price: "$1,200",
+      list_price: "1200",
       margin: "25%",
       stock: 10,
       availability: "In stock",
@@ -157,7 +159,7 @@ export function validateCatalogImportRows(
     const productName = normalizeString(normalizedRow.product_name);
     const category = normalizeString(normalizedRow.category) || "General";
     const partnerTier = normalizeString(normalizedRow.partner_tier) || "Registered";
-    const listPrice = normalizeString(normalizedRow.list_price) || "$0";
+    const listPrice = normalizeString(normalizedRow.list_price) || "0";
     const margin = normalizeString(normalizedRow.margin) || "0%";
     const stock = normalizeInteger(normalizedRow.stock);
     const availability = normalizeString(normalizedRow.availability) || "In stock";
@@ -213,6 +215,7 @@ export function buildCatalogCreateValues(input: {
   category?: string;
   partner_tier?: string;
   list_price?: string;
+  currency_code?: string;
   margin?: string;
   stock?: number;
   availability?: string;
@@ -226,7 +229,8 @@ export function buildCatalogCreateValues(input: {
     product_name: productName,
     category: input.category?.trim() || "General",
     partner_tier: input.partner_tier?.trim() || "Registered",
-    list_price: input.list_price?.trim() || "$0",
+    list_price: input.list_price?.trim() || "0",
+    currency_code: input.currency_code?.trim().toUpperCase() || "USD",
     margin: input.margin?.trim() || "0%",
     stock: Number.isFinite(Number(input.stock)) ? Number(input.stock) : 0,
     availability: input.availability?.trim() || "In stock",
@@ -262,6 +266,7 @@ export function pickCatalogInsertColumns(
     "category",
     "partner_tier",
     "list_price",
+    "currency_code",
     "margin",
     "stock",
     "availability",

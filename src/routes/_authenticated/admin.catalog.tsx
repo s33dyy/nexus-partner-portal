@@ -22,6 +22,13 @@ import { LookupCombobox } from "@/components/lookup-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createDropdownCatalogItem,
@@ -65,6 +72,7 @@ type CatalogForm = {
   category: string;
   partner_tier: string;
   list_price: string;
+  currency_code: string;
   margin: string;
   stock: number | string;
   availability: string;
@@ -78,7 +86,8 @@ const EMPTY_FORM: CatalogForm = {
   product_name: "",
   category: "Hardware",
   partner_tier: "Registered",
-  list_price: "$0",
+  list_price: "0",
+  currency_code: "USD",
   margin: "0%",
   stock: 0,
   availability: "In stock",
@@ -202,6 +211,7 @@ const CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
   { key: "category", header: "Category" },
   { key: "partner_tier", header: "Partner Tier" },
   { key: "list_price", header: "List Price" },
+  { key: "currency_code", header: "Currency" },
   { key: "margin", header: "Margin" },
   { key: "stock", header: "Stock" },
   { key: "availability", header: "Availability" },
@@ -314,6 +324,7 @@ function AdminCatalogPage() {
       category: selectedItem.category,
       partner_tier: selectedItem.partner_tier,
       list_price: selectedItem.list_price,
+      currency_code: selectedItem.currency_code ?? "USD",
       margin: selectedItem.margin,
       stock: selectedItem.stock,
       availability: selectedItem.availability,
@@ -515,6 +526,7 @@ function AdminCatalogPage() {
                   category: item.category,
                   partner_tier: item.partner_tier,
                   list_price: item.list_price,
+                  currency_code: item.currency_code ?? "USD",
                   margin: item.margin,
                   stock: item.stock,
                   availability: item.availability,
@@ -763,16 +775,35 @@ function AdminCatalogPage() {
                   />
                 </Field>
                 <Field label="Price">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogPrice}
-                    label="Price"
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
                     value={draft.list_price}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, list_price: value }))
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, list_price: e.target.value }))
                     }
-                    placeholder="Select or create price"
-                    options={editOptions.prices}
+                    placeholder="0.00"
                   />
+                </Field>
+                <Field label="Currency">
+                  <Select
+                    value={draft.currency_code}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, currency_code: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select currency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["USD", "INR", "EUR", "GBP"].map((currency) => (
+                        <SelectItem key={currency} value={currency}>
+                          {currency}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Stock">
                   <Input
@@ -907,16 +938,35 @@ function AdminCatalogPage() {
                   />
                 </Field>
                 <Field label="List price">
-                  <LookupCombobox
-                    fieldName={LOOKUP_FIELDS.catalogPrice}
-                    label="List price"
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
                     value={draft.list_price}
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, list_price: value }))
+                    onChange={(e) =>
+                      setDraft((current) => ({ ...current, list_price: e.target.value }))
                     }
-                    placeholder="Select or create price"
-                    options={editOptions.prices}
+                    placeholder="0.00"
                   />
+                </Field>
+                <Field label="Currency">
+                  <Select
+                    value={draft.currency_code}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, currency_code: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select currency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["USD", "INR", "EUR", "GBP"].map((currency) => (
+                        <SelectItem key={currency} value={currency}>
+                          {currency}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Margin">
                   <LookupCombobox
