@@ -89,6 +89,7 @@ import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { isRenewalType, RENEWAL_TYPES } from "@/domain/contracts/reference-data";
 import { countActiveFilters } from "@/lib/advanced-filters";
 import { filterCustomersByView, type CustomerAdvancedFilters } from "@/lib/customer-filters";
+import { normalizeOptionalEmployeeCount } from "@/lib/customer-form";
 
 type CustomerForm = {
   company_name: string;
@@ -113,7 +114,7 @@ const EMPTY_FORM: CustomerForm = {
   region: "India West",
   segment: "Mid-market",
   health_score: "70",
-  mrr: "$5K",
+  mrr: "",
   renewal_date: "",
   status: "active",
   next_step: "Schedule QBR",
@@ -402,6 +403,7 @@ function CustomersPage() {
       const payload = {
         id: newId(),
         ...draft,
+        mrr: normalizeOptionalEmployeeCount(draft.mrr),
         company_id: draft.company_id || null,
         health_score: Number(draft.health_score) || 0,
         user_id: profile?.id,
