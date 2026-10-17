@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomerRecord } from "@/lib/portal-records";
 import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
+import { normalizeOptionalRenewalType } from "@/lib/customer-form";
 import { toast } from "sonner";
 
 type CustomerQuickCreateDialogProps = {
@@ -47,12 +48,6 @@ type Draft = {
   last_touch: string;
 };
 
-function defaultRenewalDate() {
-  const nextYear = new Date();
-  nextYear.setDate(nextYear.getDate() + 365);
-  return nextYear.toISOString().slice(0, 10);
-}
-
 export function CustomerQuickCreateDialog({
   open,
   onOpenChange,
@@ -61,7 +56,7 @@ export function CustomerQuickCreateDialog({
   initialRegion = "India West",
   initialSegment = "Mid-market",
   initialMrr = "$0",
-  initialRenewalDate = defaultRenewalDate(),
+  initialRenewalDate = "",
   initialStatus = "active",
   initialNextStep = "Intro call",
   initialLastTouch = "New",
@@ -123,10 +118,6 @@ export function CustomerQuickCreateDialog({
       toast.error("Account owner is required");
       return;
     }
-    if (!draft.renewal_date) {
-      toast.error("Renewal date is required");
-      return;
-    }
     if (
       draft.health_score !== "" &&
       (!/^[0-9]+$/.test(draft.health_score) || Number(draft.health_score) > 100)
@@ -144,7 +135,7 @@ export function CustomerQuickCreateDialog({
         segment: draft.segment,
         health_score: Number(draft.health_score) || 0,
         mrr: draft.mrr,
-        renewal_date: draft.renewal_date,
+        renewal_date: normalizeOptionalRenewalType(draft.renewal_date),
         status: draft.status,
         next_step: draft.next_step,
         last_touch: draft.last_touch,

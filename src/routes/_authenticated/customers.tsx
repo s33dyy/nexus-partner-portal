@@ -89,7 +89,7 @@ import { sanitizeWholeNumber } from "@/lib/input-sanitizers";
 import { isRenewalType, RENEWAL_TYPES } from "@/domain/contracts/reference-data";
 import { countActiveFilters } from "@/lib/advanced-filters";
 import { filterCustomersByView, type CustomerAdvancedFilters } from "@/lib/customer-filters";
-import { normalizeOptionalEmployeeCount } from "@/lib/customer-form";
+import { normalizeOptionalEmployeeCount, normalizeOptionalRenewalType } from "@/lib/customer-form";
 
 type CustomerForm = {
   company_name: string;
@@ -383,11 +383,11 @@ function CustomersPage() {
   }, [regionScopedCustomers]);
 
   const createCustomer = async () => {
-    if (!draft.company_name.trim() || !draft.account_owner.trim() || !draft.renewal_date) {
-      toast.error("Company, owner, and renewal type are required");
+    if (!draft.company_name.trim() || !draft.account_owner.trim()) {
+      toast.error("Company and owner are required");
       return;
     }
-    if (!isRenewalType(draft.renewal_date)) {
+    if (draft.renewal_date && !isRenewalType(draft.renewal_date)) {
       toast.error("Renewal type must be LIVEYfy or RC");
       return;
     }
@@ -404,6 +404,7 @@ function CustomersPage() {
         id: newId(),
         ...draft,
         mrr: normalizeOptionalEmployeeCount(draft.mrr),
+        renewal_date: normalizeOptionalRenewalType(draft.renewal_date),
         company_id: draft.company_id || null,
         health_score: Number(draft.health_score) || 0,
         user_id: profile?.id,
