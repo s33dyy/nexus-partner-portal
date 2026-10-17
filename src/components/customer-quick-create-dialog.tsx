@@ -202,7 +202,7 @@ export function CustomerQuickCreateDialog({
               placeholder="$0"
             />
           </Field>
-          <Field label="Renewal date">
+          <Field label="Renewal date (optional)">
             <Input
               type="date"
               value={draft.renewal_date}
