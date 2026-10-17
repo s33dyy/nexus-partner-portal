@@ -86,7 +86,7 @@ export function filterCatalogItemsByKind<T extends { catalog_kind?: string | nul
 
 export function getCatalogImportTemplateColumns(_options: CatalogImportOptions) {
   return [
-    { key: "sku", header: "SKU" },
+    { key: "sku", header: "Part Code" },
     { key: "product_name", header: "Product Name" },
     { key: "category", header: "Category" },
     { key: "partner_tier", header: "Partner Tier" },
@@ -129,9 +129,13 @@ function normalizeHeaderKey(value: string) {
 }
 
 function normalizeCatalogImportRow(row: Record<string, unknown>) {
-  return Object.fromEntries(
+  const normalized = Object.fromEntries(
     Object.entries(row).map(([key, value]) => [normalizeHeaderKey(key), value]),
   );
+  if (normalized.sku === undefined && normalized.part_code !== undefined) {
+    normalized.sku = normalized.part_code;
+  }
+  return normalized;
 }
 
 function normalizeInteger(value: unknown) {

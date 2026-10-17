@@ -197,7 +197,7 @@ function uniqueStrings(values: Array<string | number | null | undefined>) {
 }
 
 const CATALOG_EXPORT_COLUMNS: CsvColumn[] = [
-  { key: "sku", header: "SKU" },
+  { key: "sku", header: "Part Code" },
   { key: "product_name", header: "Product" },
   { key: "category", header: "Category" },
   { key: "partner_tier", header: "Partner Tier" },
@@ -715,13 +715,13 @@ function AdminCatalogPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label="SKU">
+                <Field label="Part Code">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.catalogSku}
-                    label="SKU"
+                    label="Part Code"
                     value={draft.sku}
                     onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                    placeholder="Select or create SKU"
+                    placeholder="Select or create Part Code"
                     options={editOptions.skus}
                   />
                 </Field>
@@ -859,13 +859,13 @@ function AdminCatalogPage() {
           {selectedItem ? (
             <>
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label="SKU">
+                <Field label="Part Code">
                   <LookupCombobox
                     fieldName={LOOKUP_FIELDS.catalogSku}
-                    label="SKU"
+                    label="Part Code"
                     value={draft.sku}
                     onValueChange={(value) => setDraft((current) => ({ ...current, sku: value }))}
-                    placeholder="Select or create SKU"
+                    placeholder="Select or create Part Code"
                     options={editOptions.skus}
                   />
                 </Field>

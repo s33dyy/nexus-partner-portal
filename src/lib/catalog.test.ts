@@ -102,6 +102,23 @@ test("catalog import rows accept human-readable CSV headers from the template", 
   ]);
 });
 
+test("catalog imports accept the user-facing Part Code header", () => {
+  const result = validateCatalogImportRows(
+    [
+      {
+        "Part Code": "TEST-PART-001",
+        "Product Name": "TEST Product 001",
+        Stock: "5",
+      },
+    ],
+    { kind: "product" },
+  );
+
+  expect(result.errors).toEqual([]);
+  expect(result.rows[0]?.sku).toBe("TEST-PART-001");
+  expect(getCatalogImportTemplateColumns({ kind: "product" })[0]?.header).toBe("Part Code");
+});
+
 test("catalog kind labels stay singular and plural for the new module split", () => {
   expect(getCatalogKindLabel("product")).toBe("Product");
   expect(getCatalogKindLabel("combo")).toBe("Combo");

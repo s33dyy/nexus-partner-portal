@@ -496,7 +496,7 @@ export const EXPORT_DATASETS: ExportDatasetDescriptor[] = [
     scopeMode: "global",
     columns: [
       { key: "id", header: "ID" },
-      { key: "sku", header: "SKU" },
+      { key: "sku", header: "Part Code" },
       { key: "product_name", header: "Product" },
       { key: "catalog_kind", header: "Module" },
       { key: "category", header: "Category" },
